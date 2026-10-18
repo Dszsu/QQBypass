@@ -147,23 +147,29 @@ public class SecurityLibrariesEnhanceHook {
                     }
                 });
 
-                // 2. checkAppInstalled -> unconditionally false (prevents all package profiling)
+                // 2. checkAppInstalled -> false only for suspicious packages (allows normal apps like WeChat/QQBrowser)
                 HookUtils.hookAllMethods(clazz, "checkAppInstalled", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(false);
+                        if (DynamicRootDetectionHook.isCallerQAuxv()) return;
+                        if (param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
+                            String pkg = (String) param.args[0];
+                            if (DynamicRootDetectionHook.isSuspiciousPackage(pkg)) {
+                                param.setResult(false);
+                            }
+                        }
                     }
                 });
 
-                // 3. getAccessibilityServiceList & getAccessibilityEnabledServiceList -> empty
-                XC_MethodHook emptyStringHook = new XC_MethodHook() {
+                // 3. getAccessibilityServiceList & getAccessibilityEnabledServiceList -> "[]" (never empty string "")
+                XC_MethodHook emptyListStringHook = new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("");
+                        param.setResult("[]");
                     }
                 };
-                HookUtils.hookAllMethods(clazz, "getAccessibilityServiceList", emptyStringHook);
-                HookUtils.hookAllMethods(clazz, "getAccessibilityEnabledServiceList", emptyStringHook);
+                HookUtils.hookAllMethods(clazz, "getAccessibilityServiceList", emptyListStringHook);
+                HookUtils.hookAllMethods(clazz, "getAccessibilityEnabledServiceList", emptyListStringHook);
 
                 // 4. getAccessibilityEnabledStatus -> 0 (disabled)
                 HookUtils.hookAllMethods(clazz, "getAccessibilityEnabledStatus", new XC_MethodHook() {
@@ -173,26 +179,23 @@ public class SecurityLibrariesEnhanceHook {
                     }
                 });
 
-                // 5. getPluginInfo -> clean string without accessibility services
-                HookUtils.hookAllMethods(clazz, "getPluginInfo", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("-1|-1|-1|-1|0|-1");
-                    }
-                });
+                // 5. getPluginInfo & getNetworkInterfaceNames & getLibraryList:
+                // DO NOT hook getPluginInfo with fake "-1|-1|-1|-1|0|-1"!
+                // On real devices, Dtc.getPluginInfo() naturally computes:
+                // getMtpMode() + "|" + hasSimCard() + "|" + formatEmpty(getAccessibilityServiceList(true)) + "|" + formatEmpty(getAccessibilityEnabledServiceList(true)) + "|" + getAccessibilityEnabledStatus() + "|-1"
+                // which yields "none|1|[]|[]|0|-1", perfectly consistent with SIM presence and system properties.
+                // DO NOT hook getNetworkInterfaceNames with static "wlan0,rmnet_data0" (NetworkInterface.getNetworkInterfaces is already cleanly filtered).
+                // DO NOT hook getLibraryList with fake "12345678" (authentic Dtc.getLibraryList computes genuine system shared libraries hash).
 
                 // 6. getGoogleCertsVerify -> empty
-                HookUtils.hookAllMethods(clazz, "getGoogleCertsVerify", emptyStringHook);
-
-                // 7. getNetworkInterfaceNames -> clean network interfaces
-                HookUtils.hookAllMethods(clazz, "getNetworkInterfaceNames", new XC_MethodHook() {
+                HookUtils.hookAllMethods(clazz, "getGoogleCertsVerify", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("wlan0,rmnet_data0");
+                        param.setResult("");
                     }
                 });
 
-                // 8. getPropSafe & systemGetSafe -> sanitize sensitive keys
+                // 7. getPropSafe & systemGetSafe -> sanitize sensitive keys
                 HookUtils.hookAllMethods(clazz, "getPropSafe", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -218,21 +221,15 @@ public class SecurityLibrariesEnhanceHook {
                     }
                 });
 
-                // 9. getMtpMode -> none & getLibraryList -> clean hash
+                // 8. getMtpMode -> none
                 HookUtils.hookAllMethods(clazz, "getMtpMode", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         param.setResult("none");
                     }
                 });
-                HookUtils.hookAllMethods(clazz, "getLibraryList", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("12345678");
-                    }
-                });
 
-                // 10. checkRiskPermission -> 0
+                // 9. checkRiskPermission -> 0
                 HookUtils.hookAllMethods(clazz, "checkRiskPermission", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -684,6 +681,16 @@ public class SecurityLibrariesEnhanceHook {
         hookSafe(cl, tCls, new ClassHookCallback() {
             @Override
             public void onClassFound(Class<?> clazz) {
+                // Neutralize token expired sso failure determination in t.b(int)
+                HookUtils.hookAllMethods(clazz, "b", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (HookConfig.isKickInterceptEnabled()) {
+                            param.setResult(false);
+                        }
+                    }
+                });
+
                 HookUtils.hookAllMethods(clazz, "a", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -697,9 +704,17 @@ public class SecurityLibrariesEnhanceHook {
                         }
                         if (fromServiceMsg != null) {
                             String cmd = (String) XposedHelpers.callMethod(fromServiceMsg, "getServiceCmd");
-                            if ("StatSvc.ReqMSFOffline".equals(cmd) ||
-                                "StatSvc.ReqForceOffline".equals(cmd) ||
-                                "MessageSvc.PushForceOffline".equals(cmd)) {
+                            int failCode = 0;
+                            try {
+                                failCode = ((Number) XposedHelpers.callMethod(fromServiceMsg, "getBusinessFailCode")).intValue();
+                            } catch (Throwable ignored) {}
+
+                            boolean isKickCmd = "StatSvc.ReqMSFOffline".equals(cmd) ||
+                                                "StatSvc.ReqForceOffline".equals(cmd) ||
+                                                "MessageSvc.PushForceOffline".equals(cmd);
+                            boolean isKickFail = (failCode == -10103 || failCode == -10104 || failCode == -10003 || failCode == 2001);
+
+                            if (isKickCmd || isKickFail) {
                                 StringBuilder details = new StringBuilder();
                                 try {
                                     Object attrs = XposedHelpers.getObjectField(fromServiceMsg, "attributes");
@@ -711,7 +726,7 @@ public class SecurityLibrariesEnhanceHook {
                                 } catch (Throwable ignored) {}
 
                                 if (HookConfig.isKickInterceptEnabled()) {
-                                    XposedEntry.log("[MSFShield] Dropped MSF offline push packet: cmd=" + cmd + details.toString());
+                                    XposedEntry.log("[MSFShield] Dropped MSF offline/kick packet: cmd=" + cmd + ", failCode=" + failCode + details.toString());
                                     if (param.method instanceof Method) {
                                         Class<?> ret = ((Method) param.method).getReturnType();
                                         if (ret == boolean.class) {
@@ -727,13 +742,90 @@ public class SecurityLibrariesEnhanceHook {
                                         param.setResult(true);
                                     }
                                 } else {
-                                    XposedEntry.log("[MSFDiagnostic] Observed MSF offline push packet: cmd=" + cmd + details.toString());
+                                    XposedEntry.log("[MSFDiagnostic] Observed MSF offline packet: cmd=" + cmd + ", failCode=" + failCode + details.toString());
                                 }
                             }
                         }
                     }
                 });
                 XposedEntry.log("[MSFShield] Successfully hooked com.tencent.mobileqq.msf.core.t (switchable)");
+            }
+        });
+
+        // Protect MSF AccountCenter from setting account not logged in or clearing account tickets
+        final String authBCls = "com.tencent.mobileqq.msf.core.auth.b";
+        hookSafe(cl, authBCls, new ClassHookCallback() {
+            @Override
+            public void onClassFound(Class<?> clazz) {
+                // Hook p(String uin) -> setAccountNoLogin
+                HookUtils.hookAllMethods(clazz, "p", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (HookConfig.isKickInterceptEnabled()) {
+                            String uin = param.args != null && param.args.length > 0 ? String.valueOf(param.args[0]) : "";
+                            XposedEntry.log("[MSFShield] Blocked AccountCenter.p(setAccountNoLogin) for uin=" + uin);
+                            param.setResult(null);
+                        }
+                    }
+                });
+
+                // Hook e(String uin, String src) -> setMainAccount
+                HookUtils.hookAllMethods(clazz, "e", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (!HookConfig.isKickInterceptEnabled()) return;
+                        if (param.args != null && param.args.length >= 2) {
+                            String targetUin = String.valueOf(param.args[0]);
+                            String src = String.valueOf(param.args[1]);
+                            if (("0".equals(targetUin) || "10000".equals(targetUin)) &&
+                                (src.contains("setNoLogin") || src.contains("onKicked") || src.contains("kick"))) {
+                                XposedEntry.log("[MSFShield] Blocked AccountCenter.e(setMainAccount->0) src=" + src);
+                                param.setResult(null);
+                            }
+                        }
+                    }
+                });
+                XposedEntry.log("[MSFShield] Successfully protected com.tencent.mobileqq.msf.core.auth.b (AccountCenter)");
+            }
+        });
+
+        // Protect MSF WTLogin OnGetStWithoutPasswd2 ticket refresh
+        final String authQCls = "com.tencent.mobileqq.msf.core.auth.q";
+        hookSafe(cl, authQCls, new ClassHookCallback() {
+            @Override
+            public void onClassFound(Class<?> clazz) {
+                HookUtils.hookAllMethods(clazz, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (!HookConfig.isKickInterceptEnabled()) return;
+                        // OnGetStWithoutPasswd2: param.args[8] is int i2 (ret code)
+                        if (param.args != null && param.args.length >= 9 && param.args[8] instanceof Integer) {
+                            int ret = (Integer) param.args[8];
+                            if (ret != 0 && ret != -1000) {
+                                XposedEntry.log("[WTLoginShield] Neutralized OnGetStWithoutPasswd2 failure ret=" + ret + " -> -1000 (timeout retry)");
+                                param.args[8] = -1000;
+                            }
+                        }
+                    }
+                });
+                XposedEntry.log("[MSFShield] Successfully hooked com.tencent.mobileqq.msf.core.auth.q (OnGetStWithoutPasswd2)");
+            }
+        });
+
+        // Neutralize oicq.wlogin_sdk.tools.util.shouldKick
+        final String utilCls = "oicq.wlogin_sdk.tools.util";
+        hookSafe(cl, utilCls, new ClassHookCallback() {
+            @Override
+            public void onClassFound(Class<?> clazz) {
+                HookUtils.hookAllMethods(clazz, "shouldKick", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (HookConfig.isKickInterceptEnabled()) {
+                            param.setResult(false);
+                        }
+                    }
+                });
+                XposedEntry.log("[MSFShield] Successfully hooked oicq.wlogin_sdk.tools.util.shouldKick -> false");
             }
         });
     }

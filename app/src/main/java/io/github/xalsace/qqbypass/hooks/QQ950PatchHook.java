@@ -705,12 +705,6 @@ public class QQ950PatchHook {
                 p.setResult(false);
             }
         });
-        hookSafe(dtcCls, "getNetworkInterfaceNames", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult("wlan0,rmnet_data0");
-            }
-        });
         hookSafe(dtcCls, "getAccessibilityEnabledStatus", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
@@ -720,13 +714,13 @@ public class QQ950PatchHook {
         hookSafe(dtcCls, "getAccessibilityEnabledServiceList", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult("");
+                p.setResult("[]");
             }
         });
         hookSafe(dtcCls, "getAccessibilityServiceList", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult("");
+                p.setResult("[]");
             }
         });
 
@@ -2504,41 +2498,10 @@ public class QQ950PatchHook {
         });
 
         // 2. Physical Sensor Detection Source: qqprotect.qsec.b, c, d
-        final String qsecBCls = "com.tencent.qqprotect.qsec.b";
-        hookSafe(qsecBCls, "b", lpparam, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                Object res = p.getResult();
-                if (res == null || "-1".equals(res) || "".equals(res) || "null".equals(res)) {
-                    p.setResult("{x=0.231, y=9.765, z=0.412}");
-                    XposedEntry.log("[DetectionSource] Cleaned qsec.b accelerometer -> realistic reading");
-                }
-            }
-        });
-
-        final String qsecCCls = "com.tencent.qqprotect.qsec.c";
-        hookSafe(qsecCCls, "b", lpparam, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                Object res = p.getResult();
-                if (res == null || "-1".equals(res) || "".equals(res) || "null".equals(res)) {
-                    p.setResult("{x=0.001, y=0.002, z=0.001}");
-                    XposedEntry.log("[DetectionSource] Cleaned qsec.c gyroscope -> realistic reading");
-                }
-            }
-        });
-
-        final String qsecDCls = "com.tencent.qqprotect.qsec.d";
-        hookSafe(qsecDCls, "b", lpparam, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                Object res = p.getResult();
-                if (res instanceof Number && ((Number) res).floatValue() <= 0.0f) {
-                    p.setResult(150.0f);
-                    XposedEntry.log("[DetectionSource] Cleaned qsec.d light sensor -> 150.0 lux");
-                }
-            }
-        });
+        // We do NOT fabricate static sensor values like "{x=0.231, y=9.765, z=0.412}" or 150.0f.
+        // Static sensor readings over time with zero jitter are an immediate red flag for Tencent risk engines.
+        // On physical devices, genuine sensor listeners update dynamically; uninitialized state naturally returns "-1"
+        // or "-1.0" matching Tencent's official baseline logic.
 
         // 3. Screen / Display & Remote Control Detection Source: Display & Ganliang
         HookUtils.hookAllMethods("android.view.Display", "getOwnerPackageName", new XC_MethodHook() {
@@ -2563,7 +2526,7 @@ public class QQ950PatchHook {
         HookUtils.hookAllMethods("android.view.Display", "getRefreshRate", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.getResult() instanceof Number && ((Number) p.getResult()).floatValue() <= 30.0f) {
+                if (p.getResult() instanceof Number && ((Number) p.getResult()).floatValue() <= 0.0f) {
                     p.setResult(60.0f);
                 }
             }
