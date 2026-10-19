@@ -120,6 +120,9 @@ public class QQ950PatchHook {
 
         // Tier 10: Message Sync & Loading State Stabilization (prevents prolonged "Receiving..." stall)
         hookMessageSyncAndLoadingState(lpparam);
+
+        // Tier 11: Real Device Emulator Detection Adaptation (Safe boolean guards without device identity spoofing)
+        hookEmulatorDetectionForRealDevice(lpparam);
     }
 
     // ==================== Tier 1: void-return, crash-safe ====================
@@ -1219,19 +1222,40 @@ public class QQ950PatchHook {
             if (ntKickProcessorCls != null && sHookedKickClasses.add(ntKickProcessorCls)) {
                 Method[] methods = ntKickProcessorCls.getDeclaredMethods();
                 for (Method m : methods) {
-                    if (Modifier.isStatic(m.getModifiers()) || m.getName().equals("a")) {
+                    if (Modifier.isStatic(m.getModifiers()) || m.getName().equals("a") || m.getName().equals("b")) {
                         XposedBridge.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                String kickInfoSummary = null;
+                                if (param.args != null) {
+                                    for (Object arg : param.args) {
+                                        if (arg != null && arg.getClass().getName().contains("KickedInfo")) {
+                                            try {
+                                                kickInfoSummary = "kickedType=" + XposedHelpers.getObjectField(arg, "kickedType") +
+                                                    ", securityKickedType=" + XposedHelpers.getObjectField(arg, "securityKickedType") +
+                                                    ", sameDevice=" + XposedHelpers.getObjectField(arg, "sameDevice") +
+                                                    ", appId/instanceId=" + XposedHelpers.getObjectField(arg, "appId") + "/" + XposedHelpers.getObjectField(arg, "instanceId") +
+                                                    ", tipsTitle=" + XposedHelpers.getObjectField(arg, "tipsTitle") +
+                                                    ", tipsDesc=" + XposedHelpers.getObjectField(arg, "tipsDesc");
+                                            } catch (Throwable ignored) {}
+                                            break;
+                                        }
+                                    }
+                                }
                                 io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
-                                    "NTKickProcessor." + param.method.getName(), null, param.args != null ? java.util.Arrays.toString(param.args) : "null");
+                                    "NTKickProcessor." + param.method.getName(), null,
+                                    kickInfoSummary != null ? kickInfoSummary : (param.args != null ? java.util.Arrays.toString(param.args) : "null"));
                                 if (HookConfig.isKickInterceptEnabled()) {
                                     XposedEntry.log("[KickShield] Intercepted NTKickProcessor." + param.method.getName());
                                     param.setResult(null);
                                     return;
                                 }
                                 StringBuilder sb = new StringBuilder();
-                                sb.append("[KickDiagnostic] NTKickProcessor.").append(param.method.getName()).append(" invoked with args: ");
+                                sb.append("[KickDiagnostic] NTKickProcessor.").append(param.method.getName()).append(" invoked");
+                                if (kickInfoSummary != null) {
+                                    sb.append(" (").append(kickInfoSummary).append(")");
+                                }
+                                sb.append(" with args: ");
                                 if (param.args != null) {
                                     for (Object arg : param.args) {
                                         if (arg == null) {
@@ -2086,6 +2110,122 @@ public class QQ950PatchHook {
                 }
             });
             XposedEntry.log("[FacePatch] Hooked CommonUtils.sendErrorAndExitAuth");
+        }
+
+        // 10. Youtu LiveStyle Reflection & Sensor Fallback (fixes "长时间接收中" and sensor missing lux=-10000)
+        final String sensorWorkerCls = "com.tencent.youtu.ytagreflectlivecheck.worker.SensorManagerWorker";
+        Class<?> swClass = XposedHelpers.findClassIfExists(sensorWorkerCls, cl);
+        if (swClass != null && !sHookedFaceClasses.contains(swClass)) {
+            sHookedFaceClasses.add(swClass);
+            HookUtils.hookAllMethods(swClass, "getLux", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    Object res = param.getResult();
+                    if (res instanceof Float) {
+                        float lux = (Float) res;
+                        // On real devices, preserve genuine sensor reading if valid (0 <= lux <= 20000).
+                        // If invalid (< 0 or > 20000), provide realistic indoor lux fallback to prevent -10000 sentinel rejection.
+                        if (lux < 0.0f || lux > 20000.0f) {
+                            param.setResult(320.0f);
+                            XposedEntry.log("[FacePatch] SensorManagerWorker.getLux fallback: " + lux + " -> 320.0f");
+                        }
+                    }
+                }
+            });
+            HookUtils.hookAllMethods(swClass, "start", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    Object res = param.getResult();
+                    if (res instanceof Integer && ((Integer) res) != 0) {
+                        param.setResult(0);
+                        XposedEntry.log("[FacePatch] SensorManagerWorker.start normalized " + res + " -> 0 (success)");
+                    }
+                }
+            });
+            final Class<?> listenerClass = XposedHelpers.findClassIfExists("com.tencent.youtu.ytagreflectlivecheck.worker.SensorManagerWorker$LightSensorListener", cl);
+            if (listenerClass != null) {
+                HookUtils.hookAllConstructors(listenerClass, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        try {
+                            Field f = listenerClass.getDeclaredField("lux");
+                            f.setAccessible(true);
+                            float curLux = f.getFloat(param.thisObject);
+                            if (curLux < 0.0f || curLux > 20000.0f) {
+                                f.setFloat(param.thisObject, 320.0f);
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                });
+            }
+            XposedEntry.log("[FacePatch] Hooked Youtu SensorManagerWorker & LightSensorListener");
+        }
+
+        String[] selectDataClasses = {
+            "com.tencent.youtu.ytagreflectlivecheck.requester.LiveStyleRequester$SeleceData",
+            "com.tencent.youtu.sdkkitframework.liveness.YtLivenessNetProtoHelper$LiveStyleRequester$SeleceData"
+        };
+        for (final String sdcName : selectDataClasses) {
+            Class<?> sdc = XposedHelpers.findClassIfExists(sdcName, cl);
+            if (sdc != null && !sHookedFaceClasses.contains(sdc)) {
+                sHookedFaceClasses.add(sdc);
+                HookUtils.hookAllConstructors(sdc, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length > 0 && param.args[0] instanceof Float) {
+                            float lux = (Float) param.args[0];
+                            if (lux < 0.0f || lux > 20000.0f) {
+                                param.args[0] = 320.0f;
+                                XposedEntry.log("[FacePatch] " + sdcName + " ctor lux sanitized: " + lux + " -> 320.0f");
+                            }
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        try {
+                            Object self = param.thisObject;
+                            Object ad = XposedHelpers.getObjectField(self, "android_data");
+                            if (ad != null) {
+                                Object luxObj = XposedHelpers.getObjectField(ad, "lux");
+                                if (luxObj instanceof Number) {
+                                    float lv = ((Number) luxObj).floatValue();
+                                    if (lv < 0.0f || lv > 20000.0f) {
+                                        XposedHelpers.setObjectField(ad, "lux", 320.0f);
+                                    }
+                                }
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                });
+            }
+        }
+
+        String[] androidDataClasses = {
+            "com.tencent.youtu.ytagreflectlivecheck.requester.LiveStyleRequester$LiveStyleAndroidData",
+            "com.tencent.youtu.sdkkitframework.liveness.YtLivenessNetProtoHelper$LiveStyleRequester$LiveStyleAndroidData"
+        };
+        for (String adcName : androidDataClasses) {
+            Class<?> adc = XposedHelpers.findClassIfExists(adcName, cl);
+            if (adc != null && !sHookedFaceClasses.contains(adc)) {
+                sHookedFaceClasses.add(adc);
+                for (Method m : adc.getDeclaredMethods()) {
+                    if (m.getReturnType() == float.class && m.getParameterTypes().length == 0) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                                Object r = param.getResult();
+                                if (r instanceof Float) {
+                                    float v = (Float) r;
+                                    if (v < 0.0f || v > 20000.0f) {
+                                        param.setResult(320.0f);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -3076,6 +3216,106 @@ public class QQ950PatchHook {
                 if (res == null || res.length == 0) {
                     p.setResult(new byte[]{0});
                 }
+            }
+        });
+
+        // Hardware Keystore / Keymaster Attestation BootStatus Normalization
+        final String parserCls = "com.tencent.mobileqq.qsec.qsecurity.utils.SimpleAttestationParser";
+        hookSafe(parserCls, "getBootStatus", lpparam, new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                Object bs = p.getResult();
+                if (bs == null) return;
+                try {
+                    XposedHelpers.setIntField(bs, "verifiedBootState", 0);
+                } catch (Throwable ignored) {}
+                try {
+                    XposedHelpers.setIntField(bs, "isDeviceLocked", 1);
+                } catch (Throwable ignored) {}
+                try {
+                    XposedHelpers.setIntField(bs, "attestationSecurityLevel", 1);
+                } catch (Throwable ignored) {}
+                try {
+                    XposedHelpers.setIntField(bs, "keymasterSecurityLevel", 1);
+                } catch (Throwable ignored) {}
+                XposedEntry.log("[QSecPatch] Normalized SimpleAttestationParser.BootStatus: verifiedBootState=0, isDeviceLocked=1");
+            }
+        });
+
+        // Socket detection neutralization
+        hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.SocketStatus", "checkSocket", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                p.setResult(0);
+            }
+        });
+
+        // Certification status check
+        hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.CertificationStatus", "BL", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                p.setResult(0);
+            }
+        });
+
+        // Main process check
+        hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.ProcessCheck", "isMainProcess", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                p.setResult(true);
+            }
+        });
+    }
+
+    /**
+     * Tier 11: Real Device Emulator Detection Adaptation.
+     * Neutralizes emulator boolean detection flags (CPUUtil, RFWDeviceUtil) without
+     * spoofing the device model, brand, manufacturer, hardware or ABI.
+     * Keeps authentic physical hardware identity intact.
+     */
+    private static void hookEmulatorDetectionForRealDevice(XC_LoadPackage.LoadPackageParam lpparam) {
+        String[] cpuUtilClasses = {
+            "com.tencent.mobileqq.minigame.utils.CPUUtil",
+            "com.tencent.qqmini.sdk.launcher.utils.CPUUtil"
+        };
+        for (final String cn : cpuUtilClasses) {
+            hookSafe(cn, "isX86Emulator", lpparam, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    p.setResult(false);
+                }
+            });
+            ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
+            if (cl != null) {
+                try {
+                    final Class<?> c = XposedHelpers.findClassIfExists(cn, cl);
+                    if (c != null) {
+                        try {
+                            Field f = c.getDeclaredField("sIsX86Emulator");
+                            f.setAccessible(true);
+                            f.setBoolean(null, false);
+                            XposedEntry.log("[EmulatorPatch] " + cn + ".sIsX86Emulator forced false");
+                        } catch (Throwable ignored) {}
+                        HookUtils.hookAllConstructors(c, new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                                try {
+                                    Field f = c.getDeclaredField("sIsX86Emulator");
+                                    f.setAccessible(true);
+                                    f.setBoolean(null, false);
+                                } catch (Throwable ignored) {}
+                            }
+                        });
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        hookSafe("com.tencent.biz.richframework.util.RFWDeviceUtil", "isX86Emulator", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                p.setResult(false);
+                XposedEntry.log("[EmulatorPatch] RFWDeviceUtil.isX86Emulator forced false");
             }
         });
     }

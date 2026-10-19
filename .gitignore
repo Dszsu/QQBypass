@@ -61,4 +61,6 @@ build-termux.sh
 # Temporary analysis files
 *.dex
 jadx_*/
+analysis/libs/
+analysis/samples/
 
