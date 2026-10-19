@@ -45,13 +45,27 @@ public class DynamicRootDetectionHook {
         "/data/adb/ksu",
         "/data/adb/ap",
         "/data/adb/modules",
-        "/data/adb/shamiko"
+        "/data/adb/shamiko",
+        "/system/bin/cufsdosck",
+        "/system/xbin/cufsdosck",
+        "/system/bin/cufsmgr",
+        "/system/xbin/cufsmgr",
+        "/system/bin/cufaevdd",
+        "/system/xbin/cufaevdd",
+        "/system/bin/conbb",
+        "/system/xbin/conbb",
+        "/system/xbin/daemonsu",
+        "/system/bin/permmgrd",
+        "/system/bin/360sguard"
     };
 
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         if (!HookConfig.ENABLE_ROOT_BYPASS) return;
 
         XposedEntry.log("Initializing DexKit-based Root Detection Bypass");
+
+        // Targeted checklist hooks (04_检测点清单.md): Wlogin, LightDevice, ChargeV2, UserInfo, DeviceInfo, CrashReport
+        RootDetectionHook.hook(lpparam);
 
         // Universal hook: File methods - catches all path checks
         hookFileChecks();
@@ -2016,7 +2030,11 @@ public class DynamicRootDetectionHook {
             || lower.contains("liball-jni")
             || lower.contains("duckusb") || lower.contains("termux")
             || lower.contains(".android_system_config.prop") || lower.contains("microvirtd")
-            || lower.contains("ku.sud") || lower.contains("shuamesu");
+            || lower.contains("ku.sud") || lower.contains("shuamesu")
+            || lower.contains("cufsdosck") || lower.contains("cufsmgr")
+            || lower.contains("cufaevdd") || lower.contains("conbb")
+            || lower.contains("daemonsu") || lower.contains("permmgrd")
+            || lower.contains("360sguard");
     }
 
     public static boolean isSuspiciousPackage(String pkg) {

@@ -11,8 +11,8 @@ public class HookConfig {
     public static ClassLoader classLoader;
 
     // Module version info & cache schema
-    public static final int MODULE_VERSION_CODE = 66;
-    public static final String MODULE_VERSION_NAME = "1.0.66";
+    public static final int MODULE_VERSION_CODE = 75;
+    public static final String MODULE_VERSION_NAME = "1.0.75";
     public static final int CACHE_SCHEMA_VERSION = 3;
 
     // Feature toggles
@@ -28,14 +28,16 @@ public class HookConfig {
     public static boolean ENABLE_QQ950_RISK_BLOCK = true;   // Tier 2: object-return risk blocks (NPE-caveat; disable if NPE appears)
 
     // Kick Interception feature toggle (打包时确定，无需动态开销)
+    // 【严禁开启防kick】：强制下线属于服务端权威会话状态。若客户端私自拦截或吞噬kick信令，将导致“僵尸会话”
+    // （客户端显示在线但网络包全部被服务端以-10003/2001丢弃，发不出也收不到消息，持续暴露异常特征导致封号）。
     public static final boolean ENABLE_KICK_INTERCEPT = false;
 
     /**
      * 判断当前是否开启拦截下线功能。
-     * 打包时确定，零动态 I/O 开销与反射开销。
+     * 严禁开启防kick，永久保持纯被动审计模式。
      */
     public static boolean isKickInterceptEnabled() {
-        return ENABLE_KICK_INTERCEPT;
+        return false;
     }
 
     // Verbose logging (output to LSPosed log via XposedBridge.log)

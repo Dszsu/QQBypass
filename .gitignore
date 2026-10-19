@@ -48,6 +48,7 @@ fastlane/readme.md
 # Local private notes
 变更.md
 *.md.bak
+analysis/
 
 # Local process maps dumps and private analysis
 maps/

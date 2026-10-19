@@ -150,6 +150,21 @@ public class HookUtils {
         }
     }
 
+    /**
+     * Safely find class with fallback to HookConfig classloader
+     */
+    public static Class<?> findClass(String className, ClassLoader cl) {
+        try {
+            return XposedHelpers.findClassIfExists(className, cl != null ? cl : HookConfig.getClassLoader());
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    public static Class<?> findClass(String className) {
+        return findClass(className, null);
+    }
+
     public static void log(String message) {
         if (HookConfig.VERBOSE_LOGGING) {
             io.github.xalsace.qqbypass.XposedEntry.log(message);

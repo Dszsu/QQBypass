@@ -42,4 +42,11 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
 
 } // namespace hook_libc
 
+extern "C" {
+int fake_bytehook_get_records(void* stub, void** records, size_t* len);
+void fake_bytehook_dump_records(int fd);
+char* fake_shadowhook_get_records(uint32_t item_flags);
+void fake_shadowhook_dump_records(int fd, uint32_t item_flags);
+}
+
 #endif // NATIVE_BYPASS_HOOK_LIBC_H

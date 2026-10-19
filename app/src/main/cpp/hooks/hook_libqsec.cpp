@@ -4,6 +4,7 @@
 #include "../utils/log.h"
 #include "../utils/safe_bytehook.h"
 #include "bytehook.h"
+#include "hook_libc.h"
 
 /**
  * Hook dlopen - 防止 QSec 检测 ByteHook 等 hook 框架
@@ -65,6 +66,10 @@ static void* hooked_dlsym(void* handle, const char* symbol) {
             LOGI("QSec dlsym spoofed %s -> JNI_FALSE", symbol);
             return (void*)fake_is_debuggable;
         }
+        if (strcmp(symbol, "bytehook_get_records") == 0) return (void*)fake_bytehook_get_records;
+        if (strcmp(symbol, "bytehook_dump_records") == 0) return (void*)fake_bytehook_dump_records;
+        if (strcmp(symbol, "shadowhook_get_records") == 0) return (void*)fake_shadowhook_get_records;
+        if (strcmp(symbol, "shadowhook_dump_records") == 0) return (void*)fake_shadowhook_dump_records;
         // 拦截对 hook 相关符号的查询（指定精确框架名，避免误杀正常函数）
         if (strcasestr(symbol, "bytehook") ||
             strcasestr(symbol, "xposed") ||
@@ -189,6 +194,8 @@ void install_qsec_hooks() {
         "libckeygenerator.so", "libmsfbootV2.so", "libMSFKernel.so",
         "libsec.so", "libtears.so", "libYTCommonLiveness.so",
         "libYTLiveness.so", "libhardcoder_new.so", "libgcloud.so",
+        "librmonitor_base.so", "librmonitor_memory.so", "libBugly_Native.so",
+        "libbugly_dumper.so", "libbugly_shadowhook.so", "libmatrix-memoryhook.so",
         "libtfd.so", nullptr
     };
     for (int i = 0; targets[i]; i++) {

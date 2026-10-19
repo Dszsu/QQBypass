@@ -66,6 +66,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                 DynamicDeviceInfoHook.hook(lpparam);
                 DynamicDebugDetectionHook.hook(lpparam);
                 DynamicRuntimeMonitorHook.hook(lpparam);
+                io.github.xalsace.qqbypass.defense.SideChannelDefense.hook(lpparam);
                 log("=== Subprocess Lightweight Protection Initialized: " + lpparam.processName + " ===");
             } catch (Throwable t) {
                 logError("Error initializing subprocess hooks: " + t.getMessage(), t);
@@ -145,6 +146,9 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
 
             // Layer 10: Dynamic secondary dex & Tinker hot patch lifecycle monitor
             hookClassLoaderAndLifecycle(lpparam);
+
+            // Layer 11: Dynamic side-channel defense & physics simulation (Sensors, Battery, Timing benchmark, Traffic)
+            io.github.xalsace.qqbypass.defense.SideChannelDefense.hook(lpparam);
 
             // === Report Status ===
             log("=== Java Hooks Initialized ===");

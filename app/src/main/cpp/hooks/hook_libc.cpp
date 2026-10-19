@@ -17,8 +17,8 @@
 #include <signal.h>
 #include <sys/utsname.h>
 #include <sys/vfs.h>
-#include <sys/statvfs.h>
 #include <sys/prctl.h>
+#include <time.h>
 #include "hook_libqimei.h"
 
 #ifndef ST_RDONLY
@@ -26,6 +26,11 @@
 #endif
 
 namespace hook_libc {
+
+typedef int (*sigaction_func_t)(int, const struct sigaction*, struct sigaction*);
+typedef int (*timer_create_func_t)(clockid_t, struct sigevent*, timer_t*);
+typedef int (*timer_settime_func_t)(timer_t, int, const struct itimerspec*, struct itimerspec*);
+typedef int (*timer_delete_func_t)(timer_t);
 
 // 真实函数指针（支持 LSPosed inline hook backup 与 dlsym 回退）
 static FILE* (*real_fopen_ptr)(const char*, const char*) = nullptr;
@@ -73,6 +78,10 @@ typedef int (*prctl_func_t)(int, unsigned long, unsigned long, unsigned long, un
 static prctl_func_t real_prctl_ptr = nullptr;
 typedef long (*ptrace_func_t)(int, pid_t, void*, void*);
 static ptrace_func_t real_ptrace_ptr = nullptr;
+static sigaction_func_t real_sigaction_ptr = nullptr;
+static timer_create_func_t real_timer_create_ptr = nullptr;
+static timer_settime_func_t real_timer_settime_ptr = nullptr;
+static timer_delete_func_t real_timer_delete_ptr = nullptr;
 
 static void ensure_real_funcs() {
     if (!real_fopen_ptr) real_fopen_ptr = (FILE* (*)(const char*, const char*))dlsym(RTLD_DEFAULT, "fopen");
@@ -116,6 +125,10 @@ static void ensure_real_funcs() {
     if (!real_raise_ptr) real_raise_ptr = (int (*)(int))dlsym(RTLD_DEFAULT, "raise");
     if (!real_prctl_ptr) real_prctl_ptr = (prctl_func_t)dlsym(RTLD_DEFAULT, "prctl");
     if (!real_ptrace_ptr) real_ptrace_ptr = (ptrace_func_t)dlsym(RTLD_DEFAULT, "ptrace");
+    if (!real_sigaction_ptr) real_sigaction_ptr = (sigaction_func_t)dlsym(RTLD_DEFAULT, "sigaction");
+    if (!real_timer_create_ptr) real_timer_create_ptr = (timer_create_func_t)dlsym(RTLD_DEFAULT, "timer_create");
+    if (!real_timer_settime_ptr) real_timer_settime_ptr = (timer_settime_func_t)dlsym(RTLD_DEFAULT, "timer_settime");
+    if (!real_timer_delete_ptr) real_timer_delete_ptr = (timer_delete_func_t)dlsym(RTLD_DEFAULT, "timer_delete");
 }
 
 static bool is_caller_security_dso(void* return_address) {
@@ -279,6 +292,7 @@ bool is_sensitive_path(const char* path) {
         "/data/data/io.github.qauxv", "/data/user/0/io.github.qauxv",
         "mountify", "tricky_store", "metamodule", "ksud", "zygisksu",
         "cydia", "substrate", "sukisu", "ksunext", "de.robv.android.xposed.installer",
+        "cufsdosck", "cufsmgr", "cufaevdd", "conbb", "daemonsu", "permmgrd", "360sguard",
         nullptr
     };
     for (int i = 0; hidden[i]; i++) {
@@ -510,6 +524,9 @@ FILE* build_filtered_maps() {
         "lzlnb", "libcnm", "liball-jni", "cnm0",
         "sesearchcache", "kc.dat", ".se",
         "cydia", "sukisu", "ksunext", "libpine", "libsandhook", "libepic", "libyahfa",
+        "shadowhook", "libshadowhook", "libbugly_shadowhook",
+        "rmonitor", "librmonitor", "librmonitor_base", "librmonitor_memory",
+        "dobby", "libdobby", "frida-gadget", "frida-agent",
         nullptr
     };
 
@@ -519,8 +536,17 @@ FILE* build_filtered_maps() {
             if (strcasestr(line, blacklist[i])) { filter = true; break; }
         }
         // 过滤非系统 Dalvik 的匿名可读写执行蹦床 (rwxp)
-        if (!filter && strstr(line, "rwxp") && strstr(line, "[anon:") && !strstr(line, "dalvik")) {
+        if (!filter && strstr(line, "rwxp") && !strstr(line, "dalvik")) {
             filter = true;
+        }
+        // 过滤非 QQ/WebView/Chrome 自身的第三方 /data/app/ 与 /data/data/ 注入路径 (05_掉线修复规格.md)
+        if (!filter && (strstr(line, "/data/app/") || strstr(line, "/data/data/") || strstr(line, "/data/user/"))) {
+            if (!strstr(line, "com.tencent.mobileqq") &&
+                !strcasestr(line, "webview") &&
+                !strcasestr(line, "chrome") &&
+                !strcasestr(line, "trichrome")) {
+                filter = true;
+            }
         }
         if (!filter) fputs(line, fake);
     }
@@ -564,6 +590,10 @@ FILE* build_filtered_smaps() {
         "moe.ono", "ono_mmkv", "ono_hcb_",
         "lzlnb", "libcnm", "liball-jni", "cnm0",
         "sesearchcache", "kc.dat", ".se",
+        "cydia", "sukisu", "ksunext", "libpine", "libsandhook", "libepic", "libyahfa",
+        "shadowhook", "libshadowhook", "libbugly_shadowhook",
+        "rmonitor", "librmonitor", "librmonitor_base", "librmonitor_memory",
+        "dobby", "libdobby", "frida-gadget", "frida-agent",
         nullptr
     };
 
@@ -578,8 +608,16 @@ FILE* build_filtered_smaps() {
                     break;
                 }
             }
-            if (!filtering_current_block && strstr(line, "rwxp") && strstr(line, "[anon:") && !strstr(line, "dalvik")) {
+            if (!filtering_current_block && strstr(line, "rwxp") && !strstr(line, "dalvik")) {
                 filtering_current_block = true;
+            }
+            if (!filtering_current_block && (strstr(line, "/data/app/") || strstr(line, "/data/data/") || strstr(line, "/data/user/"))) {
+                if (!strstr(line, "com.tencent.mobileqq") &&
+                    !strcasestr(line, "webview") &&
+                    !strcasestr(line, "chrome") &&
+                    !strcasestr(line, "trichrome")) {
+                    filtering_current_block = true;
+                }
             }
         }
 
@@ -829,6 +867,172 @@ FILE* build_filtered_cgroup() {
     return fake;
 }
 
+// ==================== 物理设备侧信道与系统指标动态仿真 ====================
+
+static inline void simulate_vfs_lookup_delay() {
+    // 注入纳秒级微延迟（~2.5微秒），逼真模拟闪存 I/O 与 VFS 目录查找耗时，瓦解侧信道高精定时反 Hook 探测
+    struct timespec req = { 0, 2500 };
+    nanosleep(&req, nullptr);
+}
+
+static bool is_battery_path(const char* path) {
+    if (!path) return false;
+    return strstr(path, "/power_supply/battery") != nullptr;
+}
+
+static FILE* build_virtual_battery(const char* path) {
+    FILE* fake = create_memory_file("battery");
+    if (!fake) return nullptr;
+
+    time_t t = time(nullptr);
+    int cap = 78 - ((int)(t / 1200) % 30);
+    if (cap < 20) cap = 20;
+
+    int temp = 308 + ((int)(t / 30) % 5) - 2;
+    int volt = 3850000 + cap * 3500 + ((int)(t % 17) * 1000);
+    int curr = -385000 - ((int)(t % 23) * 2000);
+
+    if (strstr(path, "/temp")) {
+        fprintf(fake, "%d\n", temp);
+    } else if (strstr(path, "/capacity")) {
+        fprintf(fake, "%d\n", cap);
+    } else if (strstr(path, "/voltage_now")) {
+        fprintf(fake, "%d\n", volt);
+    } else if (strstr(path, "/current_now")) {
+        fprintf(fake, "%d\n", curr);
+    } else if (strstr(path, "/status")) {
+        fputs("Discharging\n", fake);
+    } else if (strstr(path, "/health")) {
+        fputs("Good\n", fake);
+    } else if (strstr(path, "/technology")) {
+        fputs("Li-poly\n", fake);
+    } else {
+        fprintf(fake,
+            "POWER_SUPPLY_NAME=battery\n"
+            "POWER_SUPPLY_STATUS=Discharging\n"
+            "POWER_SUPPLY_HEALTH=Good\n"
+            "POWER_SUPPLY_PRESENT=1\n"
+            "POWER_SUPPLY_TECHNOLOGY=Li-poly\n"
+            "POWER_SUPPLY_CYCLE_COUNT=142\n"
+            "POWER_SUPPLY_VOLTAGE_NOW=%d\n"
+            "POWER_SUPPLY_CURRENT_NOW=%d\n"
+            "POWER_SUPPLY_CAPACITY=%d\n"
+            "POWER_SUPPLY_TEMP=%d\n",
+            volt, curr, cap, temp);
+    }
+    rewind(fake);
+    return fake;
+}
+
+static bool is_thermal_path(const char* path) {
+    if (!path) return false;
+    return strstr(path, "/sys/class/thermal/thermal_zone") != nullptr;
+}
+
+static FILE* build_virtual_thermal(const char* path) {
+    FILE* fake = create_memory_file("thermal");
+    if (!fake) return nullptr;
+
+    time_t t = time(nullptr);
+    int zone_id = 0;
+    const char* z = strstr(path, "thermal_zone");
+    if (z) zone_id = atoi(z + 12);
+
+    int base_temp = 35000 + (zone_id % 6) * 1200;
+    int jitter = ((int)(t / 20) % 7) * 180 + ((int)(t % 11) * 35);
+    int temp = base_temp + jitter;
+
+    if (strstr(path, "/temp")) {
+        fprintf(fake, "%d\n", temp);
+    } else if (strstr(path, "/type")) {
+        const char* types[] = { "cpu-0", "cpu-1", "cpu-2", "cpu-3", "gpu", "battery", "modem", "pmic" };
+        fputs(types[zone_id % 8], fake);
+        fputc('\n', fake);
+    } else {
+        fprintf(fake, "%d\n", temp);
+    }
+    rewind(fake);
+    return fake;
+}
+
+static bool is_proc_uptime(const char* path) {
+    return path && strcmp(path, "/proc/uptime") == 0;
+}
+
+static FILE* build_virtual_uptime() {
+    FILE* fake = create_memory_file("uptime");
+    if (!fake) return nullptr;
+
+    struct timespec ts;
+    clock_gettime(CLOCK_BOOTTIME, &ts);
+    double up = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+    double idle = up * 0.72;
+    fprintf(fake, "%.2f %.2f\n", up, idle);
+    rewind(fake);
+    return fake;
+}
+
+static bool is_proc_loadavg(const char* path) {
+    return path && strcmp(path, "/proc/loadavg") == 0;
+}
+
+static FILE* build_virtual_loadavg() {
+    FILE* fake = create_memory_file("loadavg");
+    if (!fake) return nullptr;
+
+    time_t t = time(nullptr);
+    double l1 = 1.15 + (double)((t / 15) % 8) * 0.08;
+    double l2 = 1.30 + (double)((t / 60) % 6) * 0.05;
+    double l3 = 1.25 + (double)((t / 180) % 5) * 0.04;
+    fprintf(fake, "%.2f %.2f %.2f 2/1480 %d\n", l1, l2, l3, getpid());
+    rewind(fake);
+    return fake;
+}
+
+static bool is_cpufreq_path(const char* path) {
+    if (!path) return false;
+    return strstr(path, "/sys/devices/system/cpu") != nullptr && strstr(path, "cur_freq") != nullptr;
+}
+
+static FILE* build_virtual_cpufreq() {
+    FILE* fake = create_memory_file("cpufreq");
+    if (!fake) return nullptr;
+    time_t t = time(nullptr);
+    int freqs[] = { 1324800, 1612800, 1804800, 2016000, 2400000 };
+    int f = freqs[(t / 10) % 5];
+    fprintf(fake, "%d\n", f);
+    rewind(fake);
+    return fake;
+}
+
+static bool handle_virtual_stat(const char* pathname, struct stat* statbuf) {
+    if (!pathname) return false;
+    if (is_battery_path(pathname) ||
+        is_thermal_path(pathname) ||
+        is_proc_uptime(pathname) ||
+        is_proc_loadavg(pathname) ||
+        is_cpufreq_path(pathname)) {
+        if (statbuf) {
+            memset(statbuf, 0, sizeof(*statbuf));
+            statbuf->st_mode = S_IFREG | 0444;
+            statbuf->st_size = 64;
+            statbuf->st_nlink = 1;
+            statbuf->st_uid = 0;
+            statbuf->st_gid = 0;
+            statbuf->st_mtime = time(nullptr);
+        }
+        return true;
+    }
+    return false;
+}
+
+static inline int open_virtual_file(FILE* fake) {
+    if (!fake) return -1;
+    int fd = dup(fileno(fake));
+    fclose(fake);
+    return fd;
+}
+
 // ==================== 统一 Hook 实现 ====================
 
 FILE* fake_fopen(const char* pathname, const char* mode) {
@@ -836,12 +1040,44 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
     ensure_real_funcs();
 
     if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+        simulate_vfs_lookup_delay();
         LOGD("Hidden path fopen: %s", pathname);
         errno = ENOENT;
         return nullptr;
     }
 
     if (pathname) {
+        if (is_battery_path(pathname)) {
+            FILE* real = real_fopen_ptr ? real_fopen_ptr(pathname, mode) : nullptr;
+            if (real) return real;
+            FILE* fake = build_virtual_battery(pathname);
+            if (fake) return fake;
+        }
+        if (is_thermal_path(pathname)) {
+            FILE* real = real_fopen_ptr ? real_fopen_ptr(pathname, mode) : nullptr;
+            if (real) return real;
+            FILE* fake = build_virtual_thermal(pathname);
+            if (fake) return fake;
+        }
+        if (is_proc_uptime(pathname)) {
+            FILE* real = real_fopen_ptr ? real_fopen_ptr(pathname, mode) : nullptr;
+            if (real) return real;
+            FILE* fake = build_virtual_uptime();
+            if (fake) return fake;
+        }
+        if (is_proc_loadavg(pathname)) {
+            FILE* real = real_fopen_ptr ? real_fopen_ptr(pathname, mode) : nullptr;
+            if (real) return real;
+            FILE* fake = build_virtual_loadavg();
+            if (fake) return fake;
+        }
+        if (is_cpufreq_path(pathname)) {
+            FILE* real = real_fopen_ptr ? real_fopen_ptr(pathname, mode) : nullptr;
+            if (real) return real;
+            FILE* fake = build_virtual_cpufreq();
+            if (fake) return fake;
+        }
+
         if (strncmp(pathname, "/proc/", 6) == 0) {
             const char* pid_start = pathname + 6;
             const char* slash = strchr(pid_start, '/');
@@ -959,12 +1195,44 @@ int fake_open(const char* pathname, int flags, ...) {
     }
 
     if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+        simulate_vfs_lookup_delay();
         LOGD("Hidden path open: %s", pathname);
         errno = ENOENT;
         return -1;
     }
 
     if (pathname) {
+        if (is_battery_path(pathname)) {
+            int real_fd = real_open_ptr ? real_open_ptr(pathname, flags, mode) : (int)syscall(__NR_openat, AT_FDCWD, pathname, flags, mode);
+            if (real_fd >= 0) return real_fd;
+            int fd = open_virtual_file(build_virtual_battery(pathname));
+            if (fd >= 0) return fd;
+        }
+        if (is_thermal_path(pathname)) {
+            int real_fd = real_open_ptr ? real_open_ptr(pathname, flags, mode) : (int)syscall(__NR_openat, AT_FDCWD, pathname, flags, mode);
+            if (real_fd >= 0) return real_fd;
+            int fd = open_virtual_file(build_virtual_thermal(pathname));
+            if (fd >= 0) return fd;
+        }
+        if (is_proc_uptime(pathname)) {
+            int real_fd = real_open_ptr ? real_open_ptr(pathname, flags, mode) : (int)syscall(__NR_openat, AT_FDCWD, pathname, flags, mode);
+            if (real_fd >= 0) return real_fd;
+            int fd = open_virtual_file(build_virtual_uptime());
+            if (fd >= 0) return fd;
+        }
+        if (is_proc_loadavg(pathname)) {
+            int real_fd = real_open_ptr ? real_open_ptr(pathname, flags, mode) : (int)syscall(__NR_openat, AT_FDCWD, pathname, flags, mode);
+            if (real_fd >= 0) return real_fd;
+            int fd = open_virtual_file(build_virtual_loadavg());
+            if (fd >= 0) return fd;
+        }
+        if (is_cpufreq_path(pathname)) {
+            int real_fd = real_open_ptr ? real_open_ptr(pathname, flags, mode) : (int)syscall(__NR_openat, AT_FDCWD, pathname, flags, mode);
+            if (real_fd >= 0) return real_fd;
+            int fd = open_virtual_file(build_virtual_cpufreq());
+            if (fd >= 0) return fd;
+        }
+
         if (strncmp(pathname, "/proc/", 6) == 0) {
             const char* pid_start = pathname + 6;
             const char* slash = strchr(pid_start, '/');
@@ -1088,12 +1356,44 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
     }
 
     if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+        simulate_vfs_lookup_delay();
         LOGD("Hidden path openat: %s", pathname);
         errno = ENOENT;
         return -1;
     }
 
     if (pathname) {
+        if (is_battery_path(pathname)) {
+            int real_fd = real_openat_ptr ? real_openat_ptr(dirfd, pathname, flags, mode) : (int)syscall(__NR_openat, dirfd, pathname, flags, mode);
+            if (real_fd >= 0) return real_fd;
+            int fd = open_virtual_file(build_virtual_battery(pathname));
+            if (fd >= 0) return fd;
+        }
+        if (is_thermal_path(pathname)) {
+            int real_fd = real_openat_ptr ? real_openat_ptr(dirfd, pathname, flags, mode) : (int)syscall(__NR_openat, dirfd, pathname, flags, mode);
+            if (real_fd >= 0) return real_fd;
+            int fd = open_virtual_file(build_virtual_thermal(pathname));
+            if (fd >= 0) return fd;
+        }
+        if (is_proc_uptime(pathname)) {
+            int real_fd = real_openat_ptr ? real_openat_ptr(dirfd, pathname, flags, mode) : (int)syscall(__NR_openat, dirfd, pathname, flags, mode);
+            if (real_fd >= 0) return real_fd;
+            int fd = open_virtual_file(build_virtual_uptime());
+            if (fd >= 0) return fd;
+        }
+        if (is_proc_loadavg(pathname)) {
+            int real_fd = real_openat_ptr ? real_openat_ptr(dirfd, pathname, flags, mode) : (int)syscall(__NR_openat, dirfd, pathname, flags, mode);
+            if (real_fd >= 0) return real_fd;
+            int fd = open_virtual_file(build_virtual_loadavg());
+            if (fd >= 0) return fd;
+        }
+        if (is_cpufreq_path(pathname)) {
+            int real_fd = real_openat_ptr ? real_openat_ptr(dirfd, pathname, flags, mode) : (int)syscall(__NR_openat, dirfd, pathname, flags, mode);
+            if (real_fd >= 0) return real_fd;
+            int fd = open_virtual_file(build_virtual_cpufreq());
+            if (fd >= 0) return fd;
+        }
+
         if (strncmp(pathname, "/proc/", 6) == 0) {
             const char* pid_start = pathname + 6;
             const char* slash = strchr(pid_start, '/');
@@ -1517,17 +1817,35 @@ static int dl_iterate_callback_wrapper(struct dl_phdr_info* info, size_t size, v
     auto* cookie = static_cast<dl_iterate_cookie*>(data);
     if (info && info->dlpi_name) {
         if (!is_caller_qa(cookie->caller_addr)) {
+            // 1. Third-party package boundary check in /data/app/ or /data/data/ (05_掉线修复规格.md)
+            if (strstr(info->dlpi_name, "/data/app/") || strstr(info->dlpi_name, "/data/data/") || strstr(info->dlpi_name, "/data/user/")) {
+                if (!strstr(info->dlpi_name, "com.tencent.mobileqq") &&
+                    !strcasestr(info->dlpi_name, "webview") &&
+                    !strcasestr(info->dlpi_name, "chrome") &&
+                    !strcasestr(info->dlpi_name, "trichrome")) {
+                    LOGD("Hidden third-party app in dl_iterate_phdr: %s", info->dlpi_name);
+                    struct dl_phdr_info copy = *info;
+                    copy.dlpi_name = "";
+                    return cookie->callback(&copy, size, cookie->data);
+                }
+            }
+
             const char* hidden[] = {
                 "libnative-bypass", "libbytehook", "xalsace",
                 "lsposed", "dexkit", "libdexkit",
                 "lspatch", "liblspatch", "libriru", "libzygisk",
                 "libapatch", "liball-jni", "moe.ono", "libcnm",
-                "substrate", "cydia", "xposed", nullptr
+                "substrate", "cydia", "xposed",
+                "shadowhook", "libshadowhook", "libbugly_shadowhook",
+                "rmonitor", "librmonitor", "librmonitor_base", "librmonitor_memory",
+                "dobby", "libdobby", nullptr
             };
             for (int i = 0; hidden[i]; i++) {
                 if (strcasestr(info->dlpi_name, hidden[i])) {
                     LOGD("Hidden library in dl_iterate_phdr: %s", info->dlpi_name);
-                    return 0; // 跳过此条目
+                    struct dl_phdr_info copy = *info;
+                    copy.dlpi_name = "";
+                    return cookie->callback(&copy, size, cookie->data);
                 }
             }
         }
@@ -1539,7 +1857,9 @@ static int dl_iterate_callback_wrapper(struct dl_phdr_info* info, size_t size, v
             if (strcasestr(info->dlpi_name, qa_mt_hidden[i])) {
                 if (!is_caller_qa(cookie->caller_addr)) {
                     LOGD("Hidden QA/MT library in dl_iterate_phdr: %s", info->dlpi_name);
-                    return 0;
+                    struct dl_phdr_info copy = *info;
+                    copy.dlpi_name = "";
+                    return cookie->callback(&copy, size, cookie->data);
                 }
             }
         }
@@ -1553,7 +1873,9 @@ static int dl_iterate_callback_wrapper(struct dl_phdr_info* info, size_t size, v
             for (int i = 0; sec_hidden[i]; i++) {
                 if (strcasestr(info->dlpi_name, sec_hidden[i])) {
                     LOGD("Hidden security library in dl_iterate_phdr: %s", info->dlpi_name);
-                    return 0;
+                    struct dl_phdr_info copy = *info;
+                    copy.dlpi_name = "";
+                    return cookie->callback(&copy, size, cookie->data);
                 }
             }
         }
@@ -1572,9 +1894,13 @@ static int fake_dl_iterate_phdr(int (*callback)(struct dl_phdr_info*, size_t, vo
 int fake_access(const char* pathname, int mode) {
     SAFE_BYTEHOOK_SCOPE();
     if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+        simulate_vfs_lookup_delay();
         LOGD("Hidden path access: %s", pathname);
         errno = ENOENT;
         return -1;
+    }
+    if (is_battery_path(pathname) || is_thermal_path(pathname) || is_proc_uptime(pathname) || is_proc_loadavg(pathname) || is_cpufreq_path(pathname)) {
+        return 0;
     }
     if (real_access_ptr) return real_access_ptr(pathname, mode);
     if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_access, pathname, mode);
@@ -1584,9 +1910,13 @@ int fake_access(const char* pathname, int mode) {
 static int fake_faccessat(int dirfd, const char* pathname, int mode, int flags) {
     SAFE_BYTEHOOK_SCOPE();
     if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+        simulate_vfs_lookup_delay();
         LOGD("Hidden path faccessat: %s", pathname);
         errno = ENOENT;
         return -1;
+    }
+    if (is_battery_path(pathname) || is_thermal_path(pathname) || is_proc_uptime(pathname) || is_proc_loadavg(pathname) || is_cpufreq_path(pathname)) {
+        return 0;
     }
     if (real_faccessat_ptr) return real_faccessat_ptr(dirfd, pathname, mode, flags);
     if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_faccessat, dirfd, pathname, mode, flags);
@@ -1596,9 +1926,17 @@ static int fake_faccessat(int dirfd, const char* pathname, int mode, int flags) 
 int fake_stat(const char* pathname, struct stat* statbuf) {
     SAFE_BYTEHOOK_SCOPE();
     if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+        simulate_vfs_lookup_delay();
         LOGD("Hidden path stat: %s", pathname);
         errno = ENOENT;
         return -1;
+    }
+    if (is_battery_path(pathname) || is_thermal_path(pathname) || is_proc_uptime(pathname) || is_proc_loadavg(pathname) || is_cpufreq_path(pathname)) {
+        int real_ret = real_stat_ptr ? real_stat_ptr(pathname, statbuf) : (int)syscall(__NR_newfstatat, AT_FDCWD, pathname, statbuf, 0);
+        if (real_ret == 0) return 0;
+    }
+    if (handle_virtual_stat(pathname, statbuf)) {
+        return 0;
     }
     if (real_stat_ptr) return real_stat_ptr(pathname, statbuf);
     if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_stat, pathname, statbuf);
@@ -1608,9 +1946,17 @@ int fake_stat(const char* pathname, struct stat* statbuf) {
 int fake_lstat(const char* pathname, struct stat* statbuf) {
     SAFE_BYTEHOOK_SCOPE();
     if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+        simulate_vfs_lookup_delay();
         LOGD("Hidden path lstat: %s", pathname);
         errno = ENOENT;
         return -1;
+    }
+    if (is_battery_path(pathname) || is_thermal_path(pathname) || is_proc_uptime(pathname) || is_proc_loadavg(pathname) || is_cpufreq_path(pathname)) {
+        int real_ret = real_lstat_ptr ? real_lstat_ptr(pathname, statbuf) : (int)syscall(__NR_newfstatat, AT_FDCWD, pathname, statbuf, AT_SYMLINK_NOFOLLOW);
+        if (real_ret == 0) return 0;
+    }
+    if (handle_virtual_stat(pathname, statbuf)) {
+        return 0;
     }
     if (real_lstat_ptr) return real_lstat_ptr(pathname, statbuf);
     if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_lstat, pathname, statbuf);
@@ -1620,9 +1966,17 @@ int fake_lstat(const char* pathname, struct stat* statbuf) {
 int fake_fstatat(int dirfd, const char* pathname, struct stat* statbuf, int flags) {
     SAFE_BYTEHOOK_SCOPE();
     if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+        simulate_vfs_lookup_delay();
         LOGD("Hidden path fstatat: %s", pathname);
         errno = ENOENT;
         return -1;
+    }
+    if (is_battery_path(pathname) || is_thermal_path(pathname) || is_proc_uptime(pathname) || is_proc_loadavg(pathname) || is_cpufreq_path(pathname)) {
+        int real_ret = real_fstatat_ptr ? real_fstatat_ptr(dirfd, pathname, statbuf, flags) : (int)syscall(__NR_newfstatat, dirfd, pathname, statbuf, flags);
+        if (real_ret == 0) return 0;
+    }
+    if (handle_virtual_stat(pathname, statbuf)) {
+        return 0;
     }
     if (real_fstatat_ptr) return real_fstatat_ptr(dirfd, pathname, statbuf, flags);
     if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_fstatat, dirfd, pathname, statbuf, flags);
@@ -2059,6 +2413,92 @@ static int fake_raise(int sig) {
     return fake_tgkill(getpid(), gettid(), sig);
 }
 
+static int fake_sigaction(int signum, const struct sigaction* act, struct sigaction* oldact) {
+    SAFE_BYTEHOOK_SCOPE();
+    ensure_real_funcs();
+    void* caller = __builtin_return_address(0);
+    if (is_caller_security_dso(caller)) {
+        if (signum == SIGTRAP) {
+            LOGI("fake_sigaction: Blocked SIGTRAP handler registration from security DSO");
+            if (oldact) {
+                memset(oldact, 0, sizeof(*oldact));
+                oldact->sa_handler = SIG_DFL;
+            }
+            return 0;
+        }
+    }
+    if (real_sigaction_ptr) return real_sigaction_ptr(signum, act, oldact);
+    if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_sigaction, signum, act, oldact);
+    return sigaction(signum, act, oldact);
+}
+
+#define DUMMY_QSEC_TIMER_ID ((timer_t)(uintptr_t)0x1337)
+
+static int fake_timer_create(clockid_t clockid, struct sigevent* sevp, timer_t* timerid) {
+    SAFE_BYTEHOOK_SCOPE();
+    ensure_real_funcs();
+    void* caller = __builtin_return_address(0);
+    if (is_caller_security_dso(caller)) {
+        Dl_info info;
+        if (dladdr(caller, &info) && info.dli_fname && (strstr(info.dli_fname, "libQSec") || strstr(info.dli_fname, "libfekit"))) {
+            LOGI("fake_timer_create: Neutralized timer_create from %s", info.dli_fname);
+            if (timerid) *timerid = DUMMY_QSEC_TIMER_ID;
+            return 0;
+        }
+    }
+    if (real_timer_create_ptr) return real_timer_create_ptr(clockid, sevp, timerid);
+    if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_timer_create, clockid, sevp, timerid);
+    return timer_create(clockid, sevp, timerid);
+}
+
+static int fake_timer_settime(timer_t timerid, int flags, const struct itimerspec* new_value, struct itimerspec* old_value) {
+    SAFE_BYTEHOOK_SCOPE();
+    ensure_real_funcs();
+    if (timerid == DUMMY_QSEC_TIMER_ID) {
+        LOGI("fake_timer_settime: Neutralized timer_settime for dummy security timer");
+        if (old_value) memset(old_value, 0, sizeof(*old_value));
+        return 0;
+    }
+    if (real_timer_settime_ptr) return real_timer_settime_ptr(timerid, flags, new_value, old_value);
+    if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_timer_settime, timerid, flags, new_value, old_value);
+    return timer_settime(timerid, flags, new_value, old_value);
+}
+
+static int fake_timer_delete(timer_t timerid) {
+    SAFE_BYTEHOOK_SCOPE();
+    ensure_real_funcs();
+    if (timerid == DUMMY_QSEC_TIMER_ID) {
+        LOGI("fake_timer_delete: Neutralized timer_delete for dummy security timer");
+        return 0;
+    }
+    if (real_timer_delete_ptr) return real_timer_delete_ptr(timerid);
+    if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_timer_delete, timerid);
+    return timer_delete(timerid);
+}
+
+extern "C" {
+int fake_bytehook_get_records(void* stub, void** records, size_t* len) {
+    (void)stub;
+    if (len) *len = 0;
+    if (records) *records = nullptr;
+    return 0;
+}
+
+void fake_bytehook_dump_records(int fd) {
+    (void)fd;
+}
+
+char* fake_shadowhook_get_records(uint32_t item_flags) {
+    (void)item_flags;
+    return nullptr;
+}
+
+void fake_shadowhook_dump_records(int fd, uint32_t item_flags) {
+    (void)fd;
+    (void)item_flags;
+}
+}
+
 long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5, void* a6) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
@@ -2068,9 +2508,45 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
         const char* path = (const char*)a2;
         if (path) {
             if (is_security_hidden_path(path, __builtin_return_address(0))) {
+                simulate_vfs_lookup_delay();
                 LOGD("fake_syscall: openat blocked sensitive: %s", path);
                 errno = ENOENT;
                 return -1;
+            }
+            if (is_battery_path(path)) {
+                int real_fd = real_openat_ptr ? real_openat_ptr((int)(intptr_t)a1, path, (int)(intptr_t)a3, (mode_t)(uintptr_t)a4)
+                                              : (real_syscall_ptr ? (int)real_syscall_ptr(number, a1, a2, a3, a4, a5, a6) : (int)syscall(number, a1, a2, a3, a4, a5, a6));
+                if (real_fd >= 0) return real_fd;
+                int fd = open_virtual_file(build_virtual_battery(path));
+                if (fd >= 0) return fd;
+            }
+            if (is_thermal_path(path)) {
+                int real_fd = real_openat_ptr ? real_openat_ptr((int)(intptr_t)a1, path, (int)(intptr_t)a3, (mode_t)(uintptr_t)a4)
+                                              : (real_syscall_ptr ? (int)real_syscall_ptr(number, a1, a2, a3, a4, a5, a6) : (int)syscall(number, a1, a2, a3, a4, a5, a6));
+                if (real_fd >= 0) return real_fd;
+                int fd = open_virtual_file(build_virtual_thermal(path));
+                if (fd >= 0) return fd;
+            }
+            if (is_proc_uptime(path)) {
+                int real_fd = real_openat_ptr ? real_openat_ptr((int)(intptr_t)a1, path, (int)(intptr_t)a3, (mode_t)(uintptr_t)a4)
+                                              : (real_syscall_ptr ? (int)real_syscall_ptr(number, a1, a2, a3, a4, a5, a6) : (int)syscall(number, a1, a2, a3, a4, a5, a6));
+                if (real_fd >= 0) return real_fd;
+                int fd = open_virtual_file(build_virtual_uptime());
+                if (fd >= 0) return fd;
+            }
+            if (is_proc_loadavg(path)) {
+                int real_fd = real_openat_ptr ? real_openat_ptr((int)(intptr_t)a1, path, (int)(intptr_t)a3, (mode_t)(uintptr_t)a4)
+                                              : (real_syscall_ptr ? (int)real_syscall_ptr(number, a1, a2, a3, a4, a5, a6) : (int)syscall(number, a1, a2, a3, a4, a5, a6));
+                if (real_fd >= 0) return real_fd;
+                int fd = open_virtual_file(build_virtual_loadavg());
+                if (fd >= 0) return fd;
+            }
+            if (is_cpufreq_path(path)) {
+                int real_fd = real_openat_ptr ? real_openat_ptr((int)(intptr_t)a1, path, (int)(intptr_t)a3, (mode_t)(uintptr_t)a4)
+                                              : (real_syscall_ptr ? (int)real_syscall_ptr(number, a1, a2, a3, a4, a5, a6) : (int)syscall(number, a1, a2, a3, a4, a5, a6));
+                if (real_fd >= 0) return real_fd;
+                int fd = open_virtual_file(build_virtual_cpufreq());
+                if (fd >= 0) return fd;
             }
             if (strncmp(path, "/proc/", 6) == 0) {
                 const char* pid_start = path + 6;
@@ -2181,25 +2657,43 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
     // 79: __NR_newfstatat
     else if (number == 79) {
         const char* path = (const char*)a2;
-        if (path && is_security_hidden_path(path, __builtin_return_address(0))) {
-            LOGD("fake_syscall: newfstatat blocked sensitive: %s", path);
-            errno = ENOENT;
-            return -1;
+        if (path) {
+            if (is_security_hidden_path(path, __builtin_return_address(0))) {
+                simulate_vfs_lookup_delay();
+                LOGD("fake_syscall: newfstatat blocked sensitive: %s", path);
+                errno = ENOENT;
+                return -1;
+            }
+            if (is_battery_path(path) || is_thermal_path(path) || is_proc_uptime(path) || is_proc_loadavg(path) || is_cpufreq_path(path)) {
+                long real_ret = real_fstatat_ptr ? real_fstatat_ptr((int)(intptr_t)a1, path, (struct stat*)a3, (int)(intptr_t)a4)
+                                                 : (real_syscall_ptr ? real_syscall_ptr(number, a1, a2, a3, a4, a5, a6) : syscall(number, a1, a2, a3, a4, a5, a6));
+                if (real_ret == 0) return 0;
+            }
+            if (handle_virtual_stat(path, (struct stat*)a3)) {
+                return 0;
+            }
         }
     }
     // 48 / 439: __NR_faccessat, __NR_faccessat2
     else if (number == 48 || number == 439) {
         const char* path = (const char*)a2;
-        if (path && is_security_hidden_path(path, __builtin_return_address(0))) {
-            LOGD("fake_syscall: faccessat blocked sensitive: %s", path);
-            errno = ENOENT;
-            return -1;
+        if (path) {
+            if (is_security_hidden_path(path, __builtin_return_address(0))) {
+                simulate_vfs_lookup_delay();
+                LOGD("fake_syscall: faccessat blocked sensitive: %s", path);
+                errno = ENOENT;
+                return -1;
+            }
+            if (is_battery_path(path) || is_thermal_path(path) || is_proc_uptime(path) || is_proc_loadavg(path) || is_cpufreq_path(path)) {
+                return 0;
+            }
         }
     }
     // 78: __NR_readlinkat
     else if (number == 78) {
         const char* path = (const char*)a2;
         if (path && is_security_hidden_path(path, __builtin_return_address(0))) {
+            simulate_vfs_lookup_delay();
             LOGD("fake_syscall: readlinkat blocked sensitive: %s", path);
             errno = ENOENT;
             return -1;
@@ -2533,8 +3027,12 @@ void install_hooks() {
     HOOK_PARTIAL_LIBC("uname", fake_uname);
     HOOK_PARTIAL_LIBC("dlopen", fake_dlopen);
     HOOK_PARTIAL_LIBC("android_dlopen_ext", fake_android_dlopen_ext);
+    HOOK_PARTIAL_LIBC("sigaction", fake_sigaction);
+    HOOK_PARTIAL_LIBC("timer_create", fake_timer_create);
+    HOOK_PARTIAL_LIBC("timer_settime", fake_timer_settime);
+    HOOK_PARTIAL_LIBC("timer_delete", fake_timer_delete);
 
-    LOGI("libc hooks installed (filesystem, maps, mounts, syscalls, and properties)");
+    LOGI("libc hooks installed (filesystem, maps, mounts, syscalls, timers, and properties)");
 }
 
 } // namespace hook_libc

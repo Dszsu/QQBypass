@@ -90,6 +90,12 @@ static void* install_hooks_thread(void* arg) {
     // 5. libMSF hooks (signature verification bypass)
     hook_libmsf::install_hooks();
 
+    // 6. Hook bytehook & shadowhook query APIs (prevent Tencent monitor from enumerating hooks)
+    bytehook_hook_all(nullptr, "bytehook_get_records", (void*)fake_bytehook_get_records, nullptr, nullptr);
+    bytehook_hook_all(nullptr, "bytehook_dump_records", (void*)fake_bytehook_dump_records, nullptr, nullptr);
+    bytehook_hook_all(nullptr, "shadowhook_get_records", (void*)fake_shadowhook_get_records, nullptr, nullptr);
+    bytehook_hook_all(nullptr, "shadowhook_dump_records", (void*)fake_shadowhook_dump_records, nullptr, nullptr);
+
     g_bytehook_hooks_installed = true;
     LOGI("=== All ByteHook Native Hooks Installed Successfully ===");
 

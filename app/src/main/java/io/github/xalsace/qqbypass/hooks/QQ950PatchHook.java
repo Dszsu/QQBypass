@@ -10,10 +10,17 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.util.ArrayList;
 import java.util.List;
 
 import io.github.xalsace.qqbypass.XposedEntry;
 import io.github.xalsace.qqbypass.config.HookConfig;
+import io.github.xalsace.qqbypass.defense.SideChannelDefense;
 import io.github.xalsace.qqbypass.utils.HookUtils;
 
 /**
@@ -28,6 +35,7 @@ import io.github.xalsace.qqbypass.utils.HookUtils;
  */
 public class QQ950PatchHook {
 
+    private static final long sProcessStartTime = android.os.SystemClock.elapsedRealtime();
     private static volatile String sLastKnownDeviceToken = null;
     private static volatile String sLastKnownOpenIdTicket = null;
 
@@ -1250,8 +1258,10 @@ public class QQ950PatchHook {
                                     param.setResult(null);
                                     return;
                                 }
+                                long elapsedSec = (android.os.SystemClock.elapsedRealtime() - sProcessStartTime) / 1000;
                                 StringBuilder sb = new StringBuilder();
-                                sb.append("[KickDiagnostic] NTKickProcessor.").append(param.method.getName()).append(" invoked");
+                                sb.append("[KickDiagnostic] NTKickProcessor.").append(param.method.getName())
+                                  .append(" invoked (uptime: ").append(elapsedSec).append("s)");
                                 if (kickInfoSummary != null) {
                                     sb.append(" (").append(kickInfoSummary).append(")");
                                 }
@@ -1475,6 +1485,116 @@ public class QQ950PatchHook {
                 HookUtils.hookAllMethods(msfSdkUtilsCls, "updateSimpleAccount", accountWipeHook);
                 HookUtils.hookAllMethods(msfSdkUtilsCls, "updateSimpleAccountNotCreate", accountWipeHook);
                 XposedEntry.log("[KickShield] Hooked MsfSdkUtils.updateSimpleAccount & updateSimpleAccountNotCreate for token protection (switchable)");
+            }
+
+            // 6. Security Strike Kick Diagnostics (intchk Security Strike & MQP punishment logout)
+            // Passive diagnostic logging only; strictly avoid kick interception to prevent Zombie Sessions
+            Class<?> intChkStrikeCls = XposedHelpers.findClassIfExists("com.tencent.msfmqpsdkbridge.MSFIntChkStrike", cl);
+            if (intChkStrikeCls != null && sHookedKickClasses.add(intChkStrikeCls)) {
+                HookUtils.hookAllMethods(intChkStrikeCls, "exec", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        String config = param.args != null && param.args.length > 0 && param.args[0] != null ? param.args[0].toString() : "";
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                            "SecurityStrikeKick.MSFIntChkStrike", null, "StrikeConfig=" + config);
+                        if (HookConfig.isKickInterceptEnabled()) {
+                            XposedEntry.log("[KickShield] Intercepted SecurityStrikeKick via MSFIntChkStrike.exec");
+                            param.setResult(null);
+                        } else {
+                            XposedEntry.log("[KickDiagnostic] MSFIntChkStrike.exec invoked! StrikeConfig=" + config);
+                        }
+                    }
+                });
+                XposedEntry.log("[KickShield] Hooked MSFIntChkStrike.exec (switchable, passive by default)");
+            }
+
+            Class<?> mqpSecSrvBCls = XposedHelpers.findClassIfExists("com.tencent.mqpsdk.secsrv.b", cl);
+            if (mqpSecSrvBCls != null && sHookedKickClasses.add(mqpSecSrvBCls)) {
+                HookUtils.hookAllMethods(mqpSecSrvBCls, "e", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                            "SecurityStrikeKick.b.e", null, "intchk strike response received");
+                        if (HookConfig.isKickInterceptEnabled()) {
+                            XposedEntry.log("[KickShield] Intercepted SecurityStrikeKick dispatch in com.tencent.mqpsdk.secsrv.b.e");
+                            param.setResult(null);
+                        } else {
+                            XposedEntry.log("[KickDiagnostic] com.tencent.mqpsdk.secsrv.b.e intchk strike response received");
+                        }
+                    }
+                });
+                XposedEntry.log("[KickShield] Hooked com.tencent.mqpsdk.secsrv.b.e (switchable, passive by default)");
+            }
+
+            // 7. MSF crossplatform.c$a: Diagnostic logging for _msf_kickedAndCleanTokenResp
+            Class<?> crossplatformCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.service.crossplatform.c$a", cl);
+            if (crossplatformCls != null && sHookedKickClasses.add(crossplatformCls)) {
+                HookUtils.hookAllMethods(crossplatformCls, "run", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        try {
+                            Field f = null;
+                            try {
+                                f = param.thisObject.getClass().getDeclaredField("a");
+                            } catch (Throwable t2) {
+                                Field[] fields = param.thisObject.getClass().getDeclaredFields();
+                                for (Field fd : fields) {
+                                    if (fd.getType().getName().contains("ToServiceMsg")) {
+                                        f = fd;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (f != null) {
+                                f.setAccessible(true);
+                                Object toServiceMsg = f.get(param.thisObject);
+                                if (toServiceMsg != null) {
+                                    Object cmd = XposedHelpers.callMethod(toServiceMsg, "getMsfCommand");
+                                    if (cmd != null && cmd.toString().contains("_msf_kickedAndCleanTokenResp")) {
+                                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                                            "crossplatform.c$a.run", null, "_msf_kickedAndCleanTokenResp observed");
+                                        if (HookConfig.isKickInterceptEnabled()) {
+                                            XposedEntry.log("[KickShield] Intercepted crossplatform.c$a _msf_kickedAndCleanTokenResp");
+                                            param.setResult(null);
+                                        } else {
+                                            XposedEntry.log("[KickDiagnostic] crossplatform.c$a _msf_kickedAndCleanTokenResp observed (pure passive diagnostic)");
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Throwable t) {
+                            XposedEntry.log("[KickDiagnostic] Error in crossplatform.c$a hook: " + t.getMessage());
+                        }
+                    }
+                });
+                XposedEntry.log("[KickShield] Hooked com.tencent.mobileqq.msf.core.service.crossplatform.c$a.run (switchable, passive by default)");
+            }
+
+            // 8. MSF core.t: Diagnostic logging for BaseConstants.CMD_OFFLINEPUSH (StatSvc.ReqMSFOffline)
+            Class<?> msfTCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.t", cl);
+            if (msfTCls != null && sHookedKickClasses.add(msfTCls)) {
+                HookUtils.hookAllMethods(msfTCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                        if (p.args != null && p.args.length >= 1 && p.args[0] != null) {
+                            Object fromMsg = p.args[0];
+                            try {
+                                String cmd = (String) XposedHelpers.callMethod(fromMsg, "getServiceCmd");
+                                if ("StatSvc.ReqMSFOffline".equals(cmd) || "StatSvc.ReqForceOffline".equals(cmd) || "MessageSvc.PushForceOffline".equals(cmd)) {
+                                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                                        "MSF.core.t.a", fromMsg, "offline push cmd=" + cmd);
+                                    if (HookConfig.isKickInterceptEnabled()) {
+                                        XposedEntry.log("[KickShield] Intercepted MSF core.t.a offline push: " + cmd);
+                                        p.setResult(true);
+                                    } else {
+                                        XposedEntry.log("[KickDiagnostic] MSF core.t.a offline push observed: " + cmd + " (pure passive diagnostic)");
+                                    }
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                });
+                XposedEntry.log("[KickShield] Hooked com.tencent.mobileqq.msf.core.t.a (switchable, passive by default)");
             }
         } catch (Throwable t) {
             XposedEntry.log("[KickShield] Failed to hook kick shield/diagnostics: " + t.getMessage());
@@ -2126,8 +2246,9 @@ public class QQ950PatchHook {
                         // On real devices, preserve genuine sensor reading if valid (0 <= lux <= 20000).
                         // If invalid (< 0 or > 20000), provide realistic indoor lux fallback to prevent -10000 sentinel rejection.
                         if (lux < 0.0f || lux > 20000.0f) {
-                            param.setResult(320.0f);
-                            XposedEntry.log("[FacePatch] SensorManagerWorker.getLux fallback: " + lux + " -> 320.0f");
+                            float dynLux = SideChannelDefense.getDynamicLux();
+                            param.setResult(dynLux);
+                            XposedEntry.log("[FacePatch] SensorManagerWorker.getLux fallback: " + lux + " -> " + dynLux);
                         }
                     }
                 }
@@ -2152,7 +2273,7 @@ public class QQ950PatchHook {
                             f.setAccessible(true);
                             float curLux = f.getFloat(param.thisObject);
                             if (curLux < 0.0f || curLux > 20000.0f) {
-                                f.setFloat(param.thisObject, 320.0f);
+                                f.setFloat(param.thisObject, SideChannelDefense.getDynamicLux());
                             }
                         } catch (Throwable ignored) {}
                     }
@@ -2175,8 +2296,9 @@ public class QQ950PatchHook {
                         if (param.args != null && param.args.length > 0 && param.args[0] instanceof Float) {
                             float lux = (Float) param.args[0];
                             if (lux < 0.0f || lux > 20000.0f) {
-                                param.args[0] = 320.0f;
-                                XposedEntry.log("[FacePatch] " + sdcName + " ctor lux sanitized: " + lux + " -> 320.0f");
+                                float dynLux = SideChannelDefense.getDynamicLux();
+                                param.args[0] = dynLux;
+                                XposedEntry.log("[FacePatch] " + sdcName + " ctor lux sanitized: " + lux + " -> " + dynLux);
                             }
                         }
                     }
@@ -2191,7 +2313,7 @@ public class QQ950PatchHook {
                                 if (luxObj instanceof Number) {
                                     float lv = ((Number) luxObj).floatValue();
                                     if (lv < 0.0f || lv > 20000.0f) {
-                                        XposedHelpers.setObjectField(ad, "lux", 320.0f);
+                                        XposedHelpers.setObjectField(ad, "lux", SideChannelDefense.getDynamicLux());
                                     }
                                 }
                             }
@@ -2218,7 +2340,7 @@ public class QQ950PatchHook {
                                 if (r instanceof Float) {
                                     float v = (Float) r;
                                     if (v < 0.0f || v > 20000.0f) {
-                                        param.setResult(320.0f);
+                                        param.setResult(SideChannelDefense.getDynamicLux());
                                     }
                                 }
                             }
@@ -2226,6 +2348,31 @@ public class QQ950PatchHook {
                     }
                 }
             }
+        }
+
+        // 11. Youtu JNI LiveCheck Engine (libYTLiveness.so / libYTCommonLiveness.so)
+        final String ytJniCls = "com.tencent.youtu.ytagreflectlivecheck.jni.YTAGReflectLiveCheckJNIInterface";
+        Class<?> ytJniClass = XposedHelpers.findClassIfExists(ytJniCls, cl);
+        if (ytJniClass != null && !sHookedFaceClasses.contains(ytJniClass)) {
+            sHookedFaceClasses.add(ytJniClass);
+            HookUtils.hookAllMethods(ytJniClass, "FRInit", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    Object res = param.getResult();
+                    if (res instanceof Number && ((Number) res).intValue() != 0) {
+                        param.setResult(0);
+                        if (param.args != null && param.args.length >= 4 && param.args[3] instanceof long[]) {
+                            long[] jArr = (long[]) param.args[3];
+                            if (jArr.length >= 2) {
+                                if (jArr[0] <= 0) jArr[0] = 2000L;
+                                if (jArr[1] <= 0) jArr[1] = 2000L;
+                            }
+                        }
+                        XposedEntry.log("[FacePatch] Normalized YTAGReflectLiveCheckJNIInterface.FRInit -> 0 (clean liveness auth)");
+                    }
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked YTAGReflectLiveCheckJNIInterface.FRInit for Youtu livecheck safety");
         }
     }
 
@@ -2638,10 +2785,36 @@ public class QQ950PatchHook {
         });
 
         // 2. Physical Sensor Detection Source: qqprotect.qsec.b, c, d
-        // We do NOT fabricate static sensor values like "{x=0.231, y=9.765, z=0.412}" or 150.0f.
-        // Static sensor readings over time with zero jitter are an immediate red flag for Tencent risk engines.
-        // On physical devices, genuine sensor listeners update dynamically; uninitialized state naturally returns "-1"
-        // or "-1.0" matching Tencent's official baseline logic.
+        // Synthesize dynamic, jittered sensor values instead of static strings or uninitialized -1
+        hookSafe("com.tencent.qqprotect.qsec.b", "b", lpparam, new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                Object res = p.getResult();
+                if (res == null || "-1".equals(res) || "".equals(res)) {
+                    p.setResult(SideChannelDefense.getDynamicAccelerometerString());
+                }
+            }
+        });
+
+        hookSafe("com.tencent.qqprotect.qsec.c", "b", lpparam, new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                Object res = p.getResult();
+                if (res == null || "-1".equals(res) || "".equals(res)) {
+                    p.setResult(SideChannelDefense.getDynamicGyroscopeString());
+                }
+            }
+        });
+
+        hookSafe("com.tencent.qqprotect.qsec.d", "b", lpparam, new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                Object res = p.getResult();
+                if (res == null || "-1".equals(res) || "".equals(res) || "-1.0".equals(res)) {
+                    p.setResult(String.format(java.util.Locale.US, "%.1f", SideChannelDefense.getDynamicLux()));
+                }
+            }
+        });
 
         // 3. Screen / Display & Remote Control Detection Source: Display & Ganliang
         HookUtils.hookAllMethods("android.view.Display", "getOwnerPackageName", new XC_MethodHook() {
@@ -2938,15 +3111,51 @@ public class QQ950PatchHook {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                 p.setResult(null);
-                XposedEntry.log("[MQPPatch] Neutralized MQPSecUtil.antitrace");
+                XposedEntry.log("[MQPPatch] Neutralized MQPSecUtil.antitrace (void return)");
             }
         });
 
         hookSafe(mqpSecUtilCls, "do_report", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                // MQPSecUtil.do_report(String str) exclusively dispatches ReportController.m AntiTrace telemetry.
+                // It must be neutralized to prevent server-side immediate offline kick!
                 p.setResult(null);
-                XposedEntry.log("[MQPPatch] Suppressed MQPSecUtil.do_report");
+                XposedEntry.log("[MQPPatch] Suppressed MQPSecUtil.do_report (prevented AntiTrace telemetry strike)");
+            }
+        });
+
+        hookSafe(mqpSecUtilCls, "memreport", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.args != null && p.args.length >= 3 && p.args[0] instanceof String && p.args[1] instanceof Integer && p.args[2] instanceof Integer) {
+                    String moduleName = (String) p.args[0];
+                    int start = (Integer) p.args[1];
+                    int end = (Integer) p.args[2];
+                    if (end > start && end - start <= 1048576) {
+                        byte[] cleanBytes = readCleanModuleBytes(moduleName, start, end, lpparam);
+                        if (cleanBytes != null) {
+                            p.setResult(cleanBytes);
+                            XposedEntry.log("[MQPPatch] Sanitized MQPSecUtil.memreport for " + moduleName + " [" + start + ":" + end + "] from disk ELF");
+                        }
+                    }
+                }
+            }
+        });
+
+        // Neutralize AntiTrace and Safe_AntiTrace at ReportController.m level (dual protection)
+        hookSafe("com.tencent.mobileqq.statistics.ReportController", "m", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.args != null) {
+                    for (Object arg : p.args) {
+                        if (arg != null && (arg.equals("AntiTrace") || arg.equals("Safe_AntiTrace"))) {
+                            p.setResult(null);
+                            XposedEntry.log("[ReportController] Blocked AntiTrace report dispatch: " + arg);
+                            return;
+                        }
+                    }
+                }
             }
         });
 
@@ -2954,10 +3163,66 @@ public class QQ950PatchHook {
         hookSafe(intChkStrikeCls, "exec", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(null);
-                XposedEntry.log("[MQPPatch] Suppressed MSFIntChkStrike.exec (prevented strike popup/logout)");
+                String config = p.args != null && p.args.length > 0 && p.args[0] != null ? p.args[0].toString() : "";
+                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                    "SecurityStrikeKick.MSFIntChkStrike", null, "StrikeConfig=" + config);
+                if (HookConfig.isKickInterceptEnabled()) {
+                    p.setResult(null);
+                    XposedEntry.log("[MQPPatch] Suppressed MSFIntChkStrike.exec (prevented strike popup/logout)");
+                } else {
+                    XposedEntry.log("[KickDiagnostic] MSFIntChkStrike.exec called (passive diagnostic): " + config);
+                }
             }
         });
+
+        // Suppress com.tencent.mqpsdk.secsrv.b.e (intchk strike dispatch receiver)
+        hookSafe("com.tencent.mqpsdk.secsrv.b", "e", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                    "SecurityStrikeKick.b.e", null, "intchk strike response received");
+                if (HookConfig.isKickInterceptEnabled()) {
+                    p.setResult(null);
+                    XposedEntry.log("[MQPPatch] Suppressed com.tencent.mqpsdk.secsrv.b.e (intchk strike receiver)");
+                } else {
+                    XposedEntry.log("[KickDiagnostic] com.tencent.mqpsdk.secsrv.b.e received intchk strike response (passive diagnostic)");
+                }
+            }
+        });
+
+        // --- safecheckPB & SecVerifyApk CheckType Sanitization ---
+        final String safecheckRspCls = "com.tencent.ims.safecheckPB$RspMQScanReport";
+        hookSafe(safecheckRspCls, "<init>", lpparam, new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                sanitizeScanReport(p.thisObject);
+            }
+        });
+        hookSafe(safecheckRspCls, "toByteArray", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                sanitizeScanReport(p.thisObject);
+            }
+        });
+
+        final String[] secVerifyClasses = {
+            "com.tencent.ims.SecVerifyApk$ReportDetectResultPacket",
+            "com.tencent.qqprotect.sfcfg.pb.SecVerifyApk$ReportDetectResultPacket"
+        };
+        for (String svCls : secVerifyClasses) {
+            hookSafe(svCls, "<init>", lpparam, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    sanitizeSecVerifyPacket(p.thisObject);
+                }
+            });
+            hookSafe(svCls, "toByteArray", lpparam, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    sanitizeSecVerifyPacket(p.thisObject);
+                }
+            });
+        }
 
         // --- 2.1 SecUtil & SafeCheck Self-Verification Integrity Strike ---
         final String secUtilCls = "com.tencent.mobileqq.utils.SecUtil";
@@ -3034,6 +3299,395 @@ public class QQ950PatchHook {
                 }
             }
         });
+
+        // --- 4. MSFNetTransportProvider & Periodic Inspection Polling ---
+        final String netProviderCls = "com.tencent.msfmqpsdkbridge.MSFNetTransportProvider";
+        hookSafe(netProviderCls, "send", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.args != null && p.args.length > 0 && p.args[0] != null) {
+                    try {
+                        String cmd = (String) XposedHelpers.callMethod(p.args[0], "getServiceCmd");
+                        if ("SecIntChkSvc.MainCmd".equals(cmd) || "SecSafeChkSvc.MainCmd".equals(cmd) || "SecCheckSigSvc.UploadReq".equals(cmd)) {
+                            XposedEntry.log("[PeriodicInspection] MSFNetTransportProvider.send: " + cmd);
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            }
+        });
+
+        // SafeCenterPushHandler (dj.a) submsgtype0x4a inspection
+        hookSafe("com.tencent.mobileqq.app.dj", "a", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                XposedEntry.log("[PeriodicInspection] SafeCenterPushHandler dj.a triggered (submsgtype0x4a)");
+            }
+        });
+
+        // com.tencent.mqpsdk.secsrv.b.g check config fetcher
+        hookSafe("com.tencent.mqpsdk.secsrv.b", "g", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                String ver = p.args != null && p.args.length > 0 && p.args[0] != null ? p.args[0].toString() : "";
+                XposedEntry.log("[PeriodicInspection] com.tencent.mqpsdk.secsrv.b.g initiated config check: " + ver);
+            }
+        });
+    }
+
+    private static void sanitizeScanReport(Object rspObj) {
+        if (rspObj == null) return;
+        try {
+            Field countField = XposedHelpers.findFieldIfExists(rspObj.getClass(), "uint32_check_count");
+            if (countField != null) {
+                Object pbCount = countField.get(rspObj);
+                if (pbCount != null) {
+                    XposedHelpers.callMethod(pbCount, "set", 0);
+                }
+            }
+            Field rptItemField = XposedHelpers.findFieldIfExists(rspObj.getClass(), "rpt_check_item");
+            if (rptItemField != null) {
+                Object pbList = rptItemField.get(rspObj);
+                if (pbList != null) {
+                    XposedHelpers.callMethod(pbList, "clear");
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void sanitizeSecVerifyPacket(Object packetObj) {
+        if (packetObj == null) return;
+        try {
+            Field resField = XposedHelpers.findFieldIfExists(packetObj.getClass(), "uint32_result");
+            if (resField != null) {
+                Object pbRes = resField.get(packetObj);
+                if (pbRes != null) {
+                    XposedHelpers.callMethod(pbRes, "set", 0);
+                }
+            }
+            Field sigField = XposedHelpers.findFieldIfExists(packetObj.getClass(), "str_signature");
+            if (sigField != null) {
+                Object pbSig = sigField.get(packetObj);
+                if (pbSig != null) {
+                    XposedHelpers.callMethod(pbSig, "set", "A6B745BF24A2C277527716F6F36EB68D");
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static class PtLoadSegment {
+        final long vaddr;
+        final long offset;
+        final long filesz;
+        final long memsz;
+        final int flags;
+
+        PtLoadSegment(long vaddr, long offset, long filesz, long memsz, int flags) {
+            this.vaddr = vaddr;
+            this.offset = offset;
+            this.filesz = filesz;
+            this.memsz = memsz;
+            this.flags = flags;
+        }
+
+        boolean isExecutable() {
+            return (flags & 1) != 0; // PF_X
+        }
+
+        boolean isWritable() {
+            return (flags & 2) != 0; // PF_W
+        }
+    }
+
+    private static short readLittleEndianShort(RandomAccessFile raf) throws IOException {
+        int b1 = raf.readUnsignedByte();
+        int b2 = raf.readUnsignedByte();
+        return (short) ((b2 << 8) | b1);
+    }
+
+    private static int readLittleEndianInt(RandomAccessFile raf) throws IOException {
+        int b1 = raf.readUnsignedByte();
+        int b2 = raf.readUnsignedByte();
+        int b3 = raf.readUnsignedByte();
+        int b4 = raf.readUnsignedByte();
+        return (b4 << 24) | (b3 << 16) | (b2 << 8) | b1;
+    }
+
+    private static long readLittleEndianLong(RandomAccessFile raf) throws IOException {
+        long res = 0;
+        for (int i = 0; i < 8; i++) {
+            res |= ((long) raf.readUnsignedByte()) << (8 * i);
+        }
+        return res;
+    }
+
+    private static List<PtLoadSegment> parseElfSegments(RandomAccessFile raf) {
+        try {
+            if (raf.length() < 52) return null;
+            byte[] ident = new byte[16];
+            raf.seek(0);
+            raf.readFully(ident);
+            if (ident[0] != 0x7F || ident[1] != 'E' || ident[2] != 'L' || ident[3] != 'F') {
+                return null;
+            }
+            boolean is64 = (ident[4] == 2);
+            long phoff;
+            int phentsize;
+            int phnum;
+
+            if (is64) {
+                if (raf.length() < 64) return null;
+                raf.seek(32);
+                phoff = readLittleEndianLong(raf);
+                raf.seek(54);
+                phentsize = readLittleEndianShort(raf) & 0xFFFF;
+                phnum = readLittleEndianShort(raf) & 0xFFFF;
+            } else {
+                raf.seek(28);
+                phoff = readLittleEndianInt(raf) & 0xFFFFFFFFL;
+                raf.seek(42);
+                phentsize = readLittleEndianShort(raf) & 0xFFFF;
+                phnum = readLittleEndianShort(raf) & 0xFFFF;
+            }
+
+            if (phnum <= 0 || phentsize <= 0 || phoff <= 0) return null;
+            List<PtLoadSegment> list = new ArrayList<>();
+            for (int i = 0; i < phnum; i++) {
+                raf.seek(phoff + (long) i * phentsize);
+                if (is64) {
+                    int p_type = readLittleEndianInt(raf);
+                    int p_flags = readLittleEndianInt(raf);
+                    long p_offset = readLittleEndianLong(raf);
+                    long p_vaddr = readLittleEndianLong(raf);
+                    long p_paddr = readLittleEndianLong(raf);
+                    long p_filesz = readLittleEndianLong(raf);
+                    long p_memsz = readLittleEndianLong(raf);
+                    if (p_type == 1) { // PT_LOAD
+                        list.add(new PtLoadSegment(p_vaddr, p_offset, p_filesz, p_memsz, p_flags));
+                    }
+                } else {
+                    int p_type = readLittleEndianInt(raf);
+                    long p_offset = readLittleEndianInt(raf) & 0xFFFFFFFFL;
+                    long p_vaddr = readLittleEndianInt(raf) & 0xFFFFFFFFL;
+                    long p_paddr = readLittleEndianInt(raf) & 0xFFFFFFFFL;
+                    long p_filesz = readLittleEndianInt(raf) & 0xFFFFFFFFL;
+                    long p_memsz = readLittleEndianInt(raf) & 0xFFFFFFFFL;
+                    int p_flags = readLittleEndianInt(raf);
+                    if (p_type == 1) { // PT_LOAD
+                        list.add(new PtLoadSegment(p_vaddr, p_offset, p_filesz, p_memsz, p_flags));
+                    }
+                }
+            }
+            return list;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static byte[] readFromElfFile(RandomAccessFile raf, int start, int end) {
+        int len = end - start;
+        byte[] result = new byte[len];
+        List<PtLoadSegment> segments = parseElfSegments(raf);
+        if (segments == null || segments.isEmpty()) {
+            // Fallback to naive file seek if ELF parsing fails
+            try {
+                if (raf.length() >= end) {
+                    raf.seek(start);
+                    int read = raf.read(result, 0, len);
+                    if (read == len) return result;
+                }
+            } catch (Throwable ignored) {}
+            return null;
+        }
+
+        try {
+            long curVaddr = start;
+            int outPos = 0;
+            while (curVaddr < end) {
+                PtLoadSegment targetSeg = null;
+                for (PtLoadSegment seg : segments) {
+                    if (seg.vaddr <= curVaddr && curVaddr < seg.vaddr + seg.memsz) {
+                        targetSeg = seg;
+                        break;
+                    }
+                }
+                if (targetSeg == null) {
+                    break;
+                }
+                long segRemain = (targetSeg.vaddr + targetSeg.memsz) - curVaddr;
+                int chunkLen = (int) Math.min(end - curVaddr, segRemain);
+                if (curVaddr < targetSeg.vaddr + targetSeg.filesz) {
+                    long fileAvail = (targetSeg.vaddr + targetSeg.filesz) - curVaddr;
+                    int fileReadLen = (int) Math.min(chunkLen, fileAvail);
+                    long fileOff = targetSeg.offset + (curVaddr - targetSeg.vaddr);
+                    raf.seek(fileOff);
+                    int r = raf.read(result, outPos, fileReadLen);
+                    if (r < fileReadLen) {
+                        // Incomplete read
+                    }
+                }
+                curVaddr += chunkLen;
+                outPos += chunkLen;
+            }
+            return result;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static class ModuleMappingInfo {
+        final String diskPath;
+        final long baseVAddr;
+        final long codeVAddr;
+
+        ModuleMappingInfo(String diskPath, long baseVAddr, long codeVAddr) {
+            this.diskPath = diskPath;
+            this.baseVAddr = baseVAddr;
+            this.codeVAddr = codeVAddr;
+        }
+    }
+
+    private static ModuleMappingInfo findModuleInProcMaps(String simpleName) {
+        try (BufferedReader reader = new BufferedReader(new FileReader("/proc/self/maps"))) {
+            String line;
+            String foundPath = null;
+            long lowestBase = -1;
+            long execBase = -1;
+            while ((line = reader.readLine()) != null) {
+                if (line.endsWith("/" + simpleName) || line.contains("/" + simpleName + " ") || line.contains("/" + simpleName)) {
+                    String[] tokens = line.split("\\s+");
+                    if (tokens.length >= 6) {
+                        String addrRange = tokens[0];
+                        String perms = tokens[1];
+                        String path = tokens[tokens.length - 1];
+                        int dash = addrRange.indexOf('-');
+                        if (dash > 0) {
+                            try {
+                                long startAddr = Long.parseLong(addrRange.substring(0, dash), 16);
+                                if (lowestBase == -1 || startAddr < lowestBase) {
+                                    lowestBase = startAddr;
+                                    foundPath = path;
+                                }
+                                if (perms.contains("x") && execBase == -1) {
+                                    execBase = startAddr;
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                }
+            }
+            if (foundPath != null && lowestBase != -1) {
+                return new ModuleMappingInfo(foundPath, lowestBase, execBase != -1 ? execBase : lowestBase);
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static byte[] readCleanModuleBytes(String moduleName, int start, int end, XC_LoadPackage.LoadPackageParam lpparam) {
+        if (moduleName == null || start < 0 || end <= start) return null;
+        int len = end - start;
+        if (len > 1048576) return null; // Safety cap 1MB
+
+        String simpleName = moduleName;
+        if (simpleName.contains("/")) {
+            simpleName = simpleName.substring(simpleName.lastIndexOf('/') + 1);
+        }
+        if (!simpleName.startsWith("lib")) {
+            simpleName = "lib" + simpleName;
+        }
+        if (!simpleName.endsWith(".so")) {
+            simpleName = simpleName + ".so";
+        }
+
+        // 1. Try runtime memory mapping resolution via /proc/self/maps
+        ModuleMappingInfo mapping = findModuleInProcMaps(simpleName);
+        if (mapping != null && mapping.diskPath != null) {
+            File mappedFile = new File(mapping.diskPath);
+            if (mappedFile.exists() && mappedFile.isFile() && mappedFile.canRead()) {
+                try (RandomAccessFile raf = new RandomAccessFile(mappedFile, "r")) {
+                    byte[] clean = readFromElfFile(raf, start, end);
+                    if (clean != null) {
+                        // Trampoline-Selective verification: check if memory has Dobby hook opcodes and log desensitization
+                        try (RandomAccessFile memRaf = new RandomAccessFile("/proc/self/mem", "r")) {
+                            long targetAddr = mapping.baseVAddr + start;
+                            memRaf.seek(targetAddr);
+                            byte[] memBuf = new byte[Math.min(len, 16)];
+                            int readMem = memRaf.read(memBuf, 0, memBuf.length);
+                            if (readMem >= 8) {
+                                int op1 = (memBuf[0] & 0xFF) | ((memBuf[1] & 0xFF) << 8) | ((memBuf[2] & 0xFF) << 16) | ((memBuf[3] & 0xFF) << 24);
+                                int op2 = (memBuf[4] & 0xFF) | ((memBuf[5] & 0xFF) << 8) | ((memBuf[6] & 0xFF) << 16) | ((memBuf[7] & 0xFF) << 24);
+                                if ((op1 == 0x58000050 || op1 == 0x58000051) && (op2 == 0xd61f0200 || op2 == 0xd61f0220)) {
+                                    XposedEntry.log("[MQPPatch] Sanitized Dobby trampoline in memory for " + simpleName + " at 0x" + Long.toHexString(targetAddr));
+                                }
+                            }
+                        } catch (Throwable ignored) {}
+                        return clean;
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        // 2. Try direct candidate disk locations (including system and bionic apex paths)
+        String[] candidatePaths = {
+            moduleName,
+            mapping != null ? mapping.diskPath : null,
+            "/apex/com.android.runtime/lib64/bionic/" + simpleName,
+            "/system/lib64/" + simpleName,
+            "/apex/com.android.art/lib64/" + simpleName,
+            lpparam != null && lpparam.appInfo != null ? lpparam.appInfo.nativeLibraryDir + "/" + simpleName : null,
+            "/data/data/com.tencent.mobileqq/txlib/" + simpleName,
+            "/data/user/0/com.tencent.mobileqq/txlib/" + simpleName,
+            "/data/data/com.tencent.mobileqq/files/" + simpleName
+        };
+
+        for (String path : candidatePaths) {
+            if (path == null) continue;
+            File file = new File(path);
+            if (file.exists() && file.isFile() && file.canRead()) {
+                try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+                    byte[] clean = readFromElfFile(raf, start, end);
+                    if (clean != null) {
+                        return clean;
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        // 3. Try extracting from host base APK
+        if (lpparam != null && lpparam.appInfo != null && lpparam.appInfo.sourceDir != null) {
+            try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(lpparam.appInfo.sourceDir)) {
+                String[] archPrefixes = {"lib/arm64-v8a/", "lib/armeabi-v7a/"};
+                for (String prefix : archPrefixes) {
+                    java.util.zip.ZipEntry ze = zf.getEntry(prefix + simpleName);
+                    if (ze != null) {
+                        File cacheDir = new File("/data/user/0/" + lpparam.packageName + "/cache");
+                        if (!cacheDir.exists()) cacheDir.mkdirs();
+                        File cacheFile = new File(cacheDir, "clean_elf_" + simpleName);
+                        if (!cacheFile.exists() || cacheFile.length() != ze.getSize()) {
+                            try (java.io.InputStream is = zf.getInputStream(ze);
+                                 java.io.FileOutputStream fos = new java.io.FileOutputStream(cacheFile)) {
+                                byte[] buf = new byte[8192];
+                                int read;
+                                while ((read = is.read(buf)) > 0) {
+                                    fos.write(buf, 0, read);
+                                }
+                            }
+                        }
+                        if (cacheFile.exists() && cacheFile.canRead()) {
+                            try (RandomAccessFile raf = new RandomAccessFile(cacheFile, "r")) {
+                                byte[] clean = readFromElfFile(raf, start, end);
+                                if (clean != null) {
+                                    return clean;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        // 4. Fallback safe buffer to prevent leaking hooked memory opcodes to telemetry
+        XposedEntry.log("[MQPPatch] Fallback clean zeroed buffer for unmapped module: " + moduleName + " [" + start + ":" + end + "]");
+        return new byte[len];
     }
 
     /**
@@ -3242,19 +3896,27 @@ public class QQ950PatchHook {
             }
         });
 
-        // Socket detection neutralization
+        // Socket detection neutralization (1 = cannot connect, clean status)
         hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.SocketStatus", "checkSocket", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(0);
+                p.setResult(1);
             }
         });
 
-        // Certification status check
+        // Certification status check (returns null on clean/unsupported device)
         hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.CertificationStatus", "BL", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(0);
+                p.setResult(null);
+            }
+        });
+
+        // QSec detectMethod hook (anti-hook reflection check)
+        hookSafe("com.tencent.mobileqq.qsec.qsecurity.QSec", "detectMethod", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                p.setResult(false);
             }
         });
 
@@ -3265,6 +3927,7 @@ public class QQ950PatchHook {
                 p.setResult(true);
             }
         });
+
     }
 
     /**
