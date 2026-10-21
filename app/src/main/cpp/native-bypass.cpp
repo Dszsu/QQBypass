@@ -111,13 +111,8 @@ Java_io_github_xalsace_qqbypass_NativeBypass_initNativeHooksNative(JNIEnv* env, 
         return;
     }
 
-    // Install hooks in background thread to avoid blocking main thread
-    pthread_t thread;
-    if (pthread_create(&thread, nullptr, install_hooks_thread, nullptr) == 0) {
-        pthread_detach(thread);
-    } else {
-        LOGE("Failed to create hook installation thread");
-    }
+    // Install hooks synchronously to guarantee all hooks are active before target DSOs execute
+    install_hooks_thread(nullptr);
 }
 
 /**

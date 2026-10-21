@@ -69,15 +69,42 @@ public class NativeBypass {
                     for (java.io.File libDir : candidateDirs) {
                         java.io.File nativeBypassSo = new java.io.File(libDir, "libnative-bypass.so");
                         if (nativeBypassSo.exists()) {
-                            java.io.File cppShared = new java.io.File(libDir, "libc++_shared.so");
-                            if (cppShared.exists()) {
-                                try { System.load(cppShared.getAbsolutePath()); } catch (Throwable ignored) {}
+                            // 1. First load libshadowhook.so (critical dependency for libbytehook.so)
+                            java.io.File shadowhookSo = new java.io.File(libDir, "libshadowhook.so");
+                            if (shadowhookSo.exists()) {
+                                try {
+                                    System.load(shadowhookSo.getAbsolutePath());
+                                    XposedEntry.log("[NativeBypass] Successfully loaded " + shadowhookSo.getAbsolutePath());
+                                } catch (Throwable t) {
+                                    XposedEntry.logError("[NativeBypass] Failed to load libshadowhook.so: " + t.getMessage(), t);
+                                }
                             }
+
+                            // 2. Next load libbytehook.so (critical dependency for libnative-bypass.so)
                             java.io.File bytehookSo = new java.io.File(libDir, "libbytehook.so");
                             if (bytehookSo.exists()) {
-                                try { System.load(bytehookSo.getAbsolutePath()); } catch (Throwable ignored) {}
+                                try {
+                                    System.load(bytehookSo.getAbsolutePath());
+                                    XposedEntry.log("[NativeBypass] Successfully loaded " + bytehookSo.getAbsolutePath());
+                                } catch (Throwable t) {
+                                    XposedEntry.logError("[NativeBypass] Failed to load libbytehook.so: " + t.getMessage(), t);
+                                }
                             }
+
+                            // 3. Load libc++_shared.so if present (for backward compatibility)
+                            java.io.File cppShared = new java.io.File(libDir, "libc++_shared.so");
+                            if (cppShared.exists()) {
+                                try {
+                                    System.load(cppShared.getAbsolutePath());
+                                    XposedEntry.log("[NativeBypass] Successfully loaded " + cppShared.getAbsolutePath());
+                                } catch (Throwable t) {
+                                    XposedEntry.logError("[NativeBypass] Failed to load libc++_shared.so: " + t.getMessage(), t);
+                                }
+                            }
+
+                            // 4. Finally load libnative-bypass.so
                             System.load(nativeBypassSo.getAbsolutePath());
+                            XposedEntry.log("[NativeBypass] Successfully loaded " + nativeBypassSo.getAbsolutePath());
                             libraryLoaded = true;
                             return;
                         }
@@ -85,11 +112,14 @@ public class NativeBypass {
                 }
             }
         } catch (Throwable e) {
-            XposedEntry.log("Failed to load directly from module libDir: " + e.getMessage());
+            XposedEntry.logError("[NativeBypass] Failed to load directly from module libDir: " + e.getMessage(), e);
         }
 
         // 2. Fallback to System.loadLibrary
         try {
+            try {
+                System.loadLibrary("shadowhook");
+            } catch (Throwable ignored) {}
             try {
                 System.loadLibrary("bytehook");
             } catch (Throwable t) {
@@ -99,6 +129,7 @@ public class NativeBypass {
             }
             System.loadLibrary("native-bypass");
             libraryLoaded = true;
+            XposedEntry.log("[NativeBypass] Successfully loaded via fallback System.loadLibrary");
             return;
         } catch (Throwable e) {
             XposedEntry.logError("All native library loading strategies failed: " + e.getMessage(), e);

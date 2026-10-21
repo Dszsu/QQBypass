@@ -47,4 +47,5 @@ target_compile_options(native-bypass PRIVATE
 # Linker flags
 target_link_options(native-bypass PRIVATE
     -Wl,--gc-sections
+    -Wl,-rpath,\$ORIGIN
 )
