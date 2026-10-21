@@ -71,7 +71,7 @@ public class HostVersionManager {
                             } catch (Throwable ignored2) {}
                         }
                         if (pi != null) {
-                            versionCode = (int) (Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : pi.versionCode);
+                            versionCode = (int) (Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : getLegacyVersionCode(pi));
                             versionName = pi.versionName;
                             XposedBridge.log("[" + TAG + "] Detected via IPackageManager: " + versionName + " (" + versionCode + ")");
                         }
@@ -90,7 +90,7 @@ public class HostVersionManager {
                         PackageManager pm = ctx.getPackageManager();
                         PackageInfo pi = pm.getPackageInfo(lpparam.packageName, 0);
                         if (pi != null) {
-                            versionCode = (int) (Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : pi.versionCode);
+                            versionCode = (int) (Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : getLegacyVersionCode(pi));
                             versionName = pi.versionName;
                             XposedBridge.log("[" + TAG + "] Detected via Context PackageManager: " + versionName + " (" + versionCode + ")");
                         }
@@ -101,7 +101,7 @@ public class HostVersionManager {
             // Strategy 3: Fast AssetManager AndroidManifest.xml parser from host APK
             if ((versionCode == 0 || versionName == null) && apkPath != null && new File(apkPath).exists()) {
                 try {
-                    AssetManager am = AssetManager.class.newInstance();
+                    AssetManager am = AssetManager.class.getDeclaredConstructor().newInstance();
                     Method addAssetPath = AssetManager.class.getMethod("addAssetPath", String.class);
                     addAssetPath.invoke(am, apkPath);
                     XmlResourceParser parser = am.openXmlResourceParser("AndroidManifest.xml");
@@ -136,5 +136,10 @@ public class HostVersionManager {
                 + " for QQ " + sHostVersion.getVersionName() + " (VC: " + sHostVersion.getVersionCode()
                 + ", Official MD5: " + sCurrentProfile.getOfficialApkMd5Upper() + ")");
         }
+    }
+
+    @SuppressWarnings("deprecation")
+    private static int getLegacyVersionCode(PackageInfo pi) {
+        return pi.versionCode;
     }
 }

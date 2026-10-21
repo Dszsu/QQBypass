@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace 'io.github.xalsace.qqbypass'
-    compileSdk 34
+    compileSdk 37
 
     // 签名配置从 keystore.properties 读取（该文件已 gitignore，密钥不进版本库）。
     // 复制 keystore.properties.example 为 keystore.properties 并填入自己的密钥即可。
@@ -27,7 +27,7 @@ android {
     defaultConfig {
         applicationId "io.github.xalsace.qqbypass"
         minSdk 26
-        targetSdk 34
+        targetSdk 37
         versionCode 80
         versionName "1.0.80"
 
@@ -42,6 +42,8 @@ android {
             abiFilters "arm64-v8a", "armeabi-v7a"
         }
     }
+
+    ndkVersion "30.0.16248370"
 
     externalNativeBuild {
         cmake {
@@ -78,13 +80,14 @@ dependencies {
     compileOnly 'de.robv.android.xposed:api:82'
 
     // ByteHook - 字节跳动 PLT hook 框架（预编译 AAR，含 prefab 供 CMake 使用）
-    implementation 'com.bytedance:bytehook:1.0.2'
+    implementation 'com.bytedance:bytehook:1.1.2'
 
     // DexKit - 高性能 dex 字节码搜索库，用于动态定位混淆后的检测点
-    implementation 'org.luckypray:dexkit:2.0.0'
+    implementation 'org.luckypray:dexkit:2.3.0'
 
-    // Kotlin 标准库 - DexKit 的 POM 把它声明为 runtime 作用域，不进编译 classpath，
-    // 从 Java 调用 DexKit 时 javac 无法解析其方法签名里的 kotlin.Unit / Function1，
-    // 故显式以 implementation 引入（编译 + 运行都需要）
-    implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+    // Kotlin 标准库
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.4.21'
+
+    // FlatBuffers - DexKit 运行时依赖
+    implementation 'com.google.flatbuffers:flatbuffers-java:25.2.10'
 }

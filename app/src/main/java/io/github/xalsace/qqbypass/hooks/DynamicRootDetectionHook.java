@@ -1915,6 +1915,7 @@ public class DynamicRootDetectionHook {
                 }
                 if (intent.hasExtra(android.content.Intent.EXTRA_INTENT)) {
                     try {
+                        @SuppressWarnings("deprecation")
                         android.os.Parcelable p = intent.getParcelableExtra(android.content.Intent.EXTRA_INTENT);
                         if (p instanceof android.content.Intent) {
                             return isFileShareOrViewIntent(new Object[]{p});

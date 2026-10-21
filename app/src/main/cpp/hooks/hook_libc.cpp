@@ -1584,7 +1584,12 @@ static int fake_readdir_r(DIR* dirp, struct dirent* entry, struct dirent** resul
         int ret = 0;
         if (real_readdir_r_ptr) ret = real_readdir_r_ptr(dirp, entry, result);
         else if (g_bytehook_hooks_installed) ret = BYTEHOOK_CALL_PREV(fake_readdir_r, dirp, entry, result);
-        else ret = readdir_r(dirp, entry, result);
+        else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            ret = readdir_r(dirp, entry, result);
+#pragma clang diagnostic pop
+        }
 
         if (ret != 0 || !result || !*result) return ret;
 
@@ -1608,7 +1613,12 @@ static int fake_readdir64_r(DIR* dirp, struct dirent64* entry, struct dirent64**
         int ret = 0;
         if (real_readdir64_r_ptr) ret = real_readdir64_r_ptr(dirp, entry, result);
         else if (g_bytehook_hooks_installed) ret = BYTEHOOK_CALL_PREV(fake_readdir64_r, dirp, entry, result);
-        else ret = readdir64_r(dirp, entry, result);
+        else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            ret = readdir64_r(dirp, entry, result);
+#pragma clang diagnostic pop
+        }
 
         if (ret != 0 || !result || !*result) return ret;
 

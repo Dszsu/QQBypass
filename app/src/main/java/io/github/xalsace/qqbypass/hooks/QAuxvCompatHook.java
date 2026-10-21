@@ -217,7 +217,8 @@ public class QAuxvCompatHook {
                             pi.applicationInfo.publicSourceDir = localFile;
                             CharSequence label = pm.getApplicationLabel(pi.applicationInfo);
                             String appName = (label != null && label.length() > 0) ? label.toString() : pi.packageName;
-                            String newName = appName + "_" + (pi.versionName != null ? pi.versionName : "v" + pi.versionCode) + ".apk";
+                            long verCode = (android.os.Build.VERSION.SDK_INT >= 28) ? pi.getLongVersionCode() : getLegacyVersionCode(pi);
+                            String newName = appName + "_" + (pi.versionName != null ? pi.versionName : "v" + verCode) + ".apk";
                             fileNameField.set(itemObj, newName);
                             XposedEntry.log("[" + TAG + "] Formatted troop APK filename: " + fileName + " -> " + newName);
                             return;
@@ -267,5 +268,10 @@ public class QAuxvCompatHook {
         } catch (Throwable ignored) {}
 
         return null;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static int getLegacyVersionCode(PackageInfo pi) {
+        return pi.versionCode;
     }
 }

@@ -1914,7 +1914,7 @@ public class QQ950PatchHook {
                                 if (g == null) {
                                     Class<?> impCls = XposedHelpers.findClassIfExists("com.tencent.could.huiyansdk.turingmodule.TuringSdkImp", cl);
                                     if (impCls != null) {
-                                        XposedHelpers.setObjectField(fInstance, "g", impCls.newInstance());
+                                        XposedHelpers.setObjectField(fInstance, "g", impCls.getDeclaredConstructor().newInstance());
                                         XposedEntry.log("[FacePatch] Injected default TuringSdkImp into f.g");
                                     }
                                 }
@@ -2393,9 +2393,10 @@ public class QQ950PatchHook {
             // Normalize O3Report.b(String, List, String) - env_detect (attaId = "00e00075618")
             HookUtils.hookAllMethods(o3ReportClazz, "b", new XC_MethodHook() {
                 @Override
+                @SuppressWarnings("unchecked")
                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                     if (p.args != null && p.args.length >= 2 && p.args[1] instanceof java.util.List) {
-                        java.util.List list = (java.util.List) p.args[1];
+                        java.util.List<Object> list = (java.util.List<Object>) p.args[1];
                         for (int i = 0; i < list.size(); i++) {
                             list.set(i, "0");
                         }
@@ -2407,9 +2408,10 @@ public class QQ950PatchHook {
             // Normalize O3Report.c(String, List) - fakeLocationReport / nearLocationReport
             HookUtils.hookAllMethods(o3ReportClazz, "c", new XC_MethodHook() {
                 @Override
+                @SuppressWarnings("unchecked")
                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                     if (p.args != null && p.args.length >= 2 && p.args[1] instanceof java.util.List) {
-                        java.util.List list = (java.util.List) p.args[1];
+                        java.util.List<Object> list = (java.util.List<Object>) p.args[1];
                         if (!list.isEmpty()) {
                             list.set(0, "0");
                         }
@@ -2866,8 +2868,8 @@ public class QQ950PatchHook {
             protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 Object res = p.getResult();
                 if (res instanceof java.util.List) {
-                    java.util.List list = (java.util.List) res;
-                    java.util.List filtered = new java.util.ArrayList();
+                    java.util.List<?> list = (java.util.List<?>) res;
+                    java.util.List<Object> filtered = new java.util.ArrayList<>();
                     for (Object item : list) {
                         if (item instanceof android.accessibilityservice.AccessibilityServiceInfo) {
                             android.accessibilityservice.AccessibilityServiceInfo asi = (android.accessibilityservice.AccessibilityServiceInfo) item;
@@ -2894,8 +2896,8 @@ public class QQ950PatchHook {
             protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 Object res = p.getResult();
                 if (res instanceof java.util.List) {
-                    java.util.List list = (java.util.List) res;
-                    java.util.List filtered = new java.util.ArrayList();
+                    java.util.List<?> list = (java.util.List<?>) res;
+                    java.util.List<Object> filtered = new java.util.ArrayList<>();
                     for (Object item : list) {
                         if (item instanceof android.accessibilityservice.AccessibilityServiceInfo) {
                             android.accessibilityservice.AccessibilityServiceInfo asi = (android.accessibilityservice.AccessibilityServiceInfo) item;
@@ -3326,7 +3328,9 @@ public class QQ950PatchHook {
                         }
                         for (int i = 3; i < p.args.length; i++) {
                             if (p.args[i] instanceof java.util.Map) {
-                                ((java.util.Map) p.args[i]).put("param_FailCode", "0");
+                                @SuppressWarnings("unchecked")
+                                java.util.Map<Object, Object> m = (java.util.Map<Object, Object>) p.args[i];
+                                m.put("param_FailCode", "0");
                                 break;
                             }
                         }
@@ -4419,7 +4423,7 @@ public class QQ950PatchHook {
                             byte[] bArr = (byte[]) p.args[0];
                             Class<?> msgBodyCls = XposedHelpers.findClassIfExists("tencent.im.s2c.msgtype0x210.submsgtype0x4a.MsgBody", p.thisObject.getClass().getClassLoader());
                             if (msgBodyCls != null) {
-                                Object msgBody = msgBodyCls.newInstance();
+                                Object msgBody = msgBodyCls.getDeclaredConstructor().newInstance();
                                 XposedHelpers.callMethod(msgBody, "mergeFrom", (Object) bArr);
                                 boolean has = (Boolean) XposedHelpers.callMethod(msgBody, "has");
                                 Object uint32SecCmd = XposedHelpers.getObjectField(msgBody, "uint32_sec_cmd");

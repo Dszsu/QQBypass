@@ -20,7 +20,7 @@ public class DexMethodData implements Serializable {
 
     private final String className;
     private final String methodName;
-    private final List<String> paramTypeNames;
+    private final ArrayList<String> paramTypeNames;
     private final String returnTypeName;
     private final String descriptor;
 
@@ -29,7 +29,7 @@ public class DexMethodData implements Serializable {
     public DexMethodData(String className, String methodName, List<String> paramTypeNames, String returnTypeName, String descriptor) {
         this.className = className;
         this.methodName = methodName;
-        this.paramTypeNames = paramTypeNames != null ? new ArrayList<>(paramTypeNames) : Collections.emptyList();
+        this.paramTypeNames = paramTypeNames != null ? new ArrayList<>(paramTypeNames) : new ArrayList<String>();
         this.returnTypeName = returnTypeName != null ? returnTypeName : "";
         this.descriptor = descriptor != null ? descriptor : "";
     }
