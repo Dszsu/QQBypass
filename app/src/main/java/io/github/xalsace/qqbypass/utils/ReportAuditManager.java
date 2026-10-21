@@ -10,7 +10,6 @@ import io.github.xalsace.qqbypass.config.CompileHookConfig;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
-import java.io.PrintWriter;
 import java.lang.reflect.Field;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -20,31 +19,57 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * High-performance, non-blocking telemetry & kick event audit manager.
+ * High-performance, non-blocking telemetry & security environment audit manager.
  *
  * Responsibilities:
  * 1. Asynchronously captures and writes outgoing telemetry / report events to disk:
- *    - Primary storage: /data/user/0/com.tencent.mobileqq/files/report_audit.log (always writable)
- *    - Secondary storage: /storage/emulated/0/0_TM/report_audit.log (when available)
- * 2. Provides deep decoding of Kick / ForceOffline events:
+ *    - All traffic:
+ *        * /data/user/0/com.tencent.mobileqq/files/report_audit.log
+ *        * /storage/emulated/0/Android/data/com.tencent.mobileqq/files/report_audit.log
+ *        * /storage/emulated/0/0_TM/report_audit.log (when writable)
+ *    - Pure Security & Environment Telemetry (Filtered, Noise-Free):
+ *        * /data/user/0/com.tencent.mobileqq/files/security_environment_audit.log
+ *        * /storage/emulated/0/Android/data/com.tencent.mobileqq/files/security_environment_audit.log
+ *        * /storage/emulated/0/0_TM/security_environment_audit.log (when writable)
+ * 2. Deep decoding of Kick / ForceOffline events:
  *    - Decodes RequestMSFForceOffline / RequestPushForceOffline WUP & JCE structures
- *    - Analyzes bSigKick (security kick detection), strTitle, strInfo, strTips
- *    - Flushes synchronously to disk immediately upon kick reception
+ *    - Analyzes bSigKick, strTitle, strInfo, strTips, failCode, failMsg
+ *    - Flushes synchronously to disk immediately upon kick reception (READ-ONLY, no swallowing)
  * 3. Sanitizes Bugly & CrashReport exception reports to prevent Xposed frames from leaking
+ * 4. Audits ProtoBuf security scan packets (safecheckPB, SecVerifyApk, ClientInfoA/B, MobileQQDetect)
+ * 5. Audits native probes, package queries, file checks, and security strikes
  */
 public class ReportAuditManager {
 
     private static final String TAG = "QQReportAudit";
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB rolling limit
 
-    private static final File PRIMARY_FILE = new File("/data/user/0/com.tencent.mobileqq/files/report_audit.log");
-    private static final File SECONDARY_FILE = new File("/storage/emulated/0/0_TM/report_audit.log");
+    // All events log targets
+    private static final File PRIMARY_ALL_FILE = new File("/data/user/0/com.tencent.mobileqq/files/report_audit.log");
+    private static final File SECONDARY_ALL_FILE = new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files/report_audit.log");
+    private static final File TERTIARY_ALL_FILE = new File("/storage/emulated/0/0_TM/report_audit.log");
 
-    private static final BlockingQueue<String> sLogQueue = new LinkedBlockingQueue<>(4096);
+    // Pure Security & Environment Audit log targets (noise-free)
+    private static final File PRIMARY_SEC_FILE = new File("/data/user/0/com.tencent.mobileqq/files/security_environment_audit.log");
+    private static final File SECONDARY_SEC_FILE = new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files/security_environment_audit.log");
+    private static final File TERTIARY_SEC_FILE = new File("/storage/emulated/0/0_TM/security_environment_audit.log");
+
+    public static class AuditEntry {
+        public final String text;
+        public final boolean isSecurity;
+        public final boolean syncFlush;
+
+        public AuditEntry(String text, boolean isSecurity, boolean syncFlush) {
+            this.text = text;
+            this.isSecurity = isSecurity;
+            this.syncFlush = syncFlush;
+        }
+    }
+
+    private static final BlockingQueue<AuditEntry> sLogQueue = new LinkedBlockingQueue<>(4096);
     private static final AtomicBoolean sWorkerStarted = new AtomicBoolean(false);
     private static final SimpleDateFormat sDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
 
@@ -74,8 +99,8 @@ public class ReportAuditManager {
                 public void run() {
                     while (true) {
                         try {
-                            String logEntry = sLogQueue.take();
-                            writeToFileInternal(logEntry);
+                            AuditEntry entry = sLogQueue.take();
+                            writeEntryInternal(entry);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             break;
@@ -90,19 +115,30 @@ public class ReportAuditManager {
         }
     }
 
-    private static synchronized void writeToFileInternal(String entry) {
-        if (entry == null || entry.isEmpty()) return;
+    private static synchronized void writeEntryInternal(AuditEntry entry) {
+        if (entry == null || entry.text == null || entry.text.isEmpty()) return;
 
-        // 1. Write to Primary File
-        writeToSingleFile(PRIMARY_FILE, entry);
+        // 1. Write to All-Events files
+        writeToSingleFile(PRIMARY_ALL_FILE, entry.text);
+        writeToOptionalFile(SECONDARY_ALL_FILE, entry.text);
+        writeToOptionalFile(TERTIARY_ALL_FILE, entry.text);
 
-        // 2. Write to Secondary File if directory exists
+        // 2. If it's a security/environment event, route to dedicated noise-free security log
+        if (entry.isSecurity) {
+            writeToSingleFile(PRIMARY_SEC_FILE, entry.text);
+            writeToOptionalFile(SECONDARY_SEC_FILE, entry.text);
+            writeToOptionalFile(TERTIARY_SEC_FILE, entry.text);
+        }
+    }
+
+    private static void writeToOptionalFile(File targetFile, String entry) {
         try {
-            File parent = SECONDARY_FILE.getParentFile();
-            if (parent != null && parent.exists() && parent.canWrite()) {
-                writeToSingleFile(SECONDARY_FILE, entry);
+            File parent = targetFile.getParentFile();
+            if (parent != null && (parent.exists() || parent.mkdirs()) && parent.canWrite()) {
+                writeToSingleFile(targetFile, entry);
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+        }
     }
 
     private static void writeToSingleFile(File targetFile, String entry) {
@@ -112,7 +148,7 @@ public class ReportAuditManager {
                 parent.mkdirs();
             }
 
-            // Rolling file check
+            // Rolling file check (10MB)
             if (targetFile.exists() && targetFile.length() > MAX_FILE_SIZE) {
                 File backupFile = new File(targetFile.getAbsolutePath() + ".1");
                 if (backupFile.exists()) {
@@ -165,6 +201,96 @@ public class ReportAuditManager {
     }
 
     /**
+     * Intelligent Classifier: Distinguishes critical security & environment detection telemetry
+     * from high-frequency UI interaction noise (dt_clck, qq_imp, dt_pgin, etc.).
+     */
+    public static boolean isSecurityOrEnvironmentEvent(String channel, String eventOrCmd, Map<String, ?> params, String extraDetail) {
+        if (channel != null) {
+            String cLower = channel.toLowerCase(Locale.ROOT);
+            if (cLower.contains("kick") ||
+                cLower.contains("native") ||
+                cLower.contains("probe") ||
+                cLower.contains("security") ||
+                cLower.contains("strike") ||
+                cLower.contains("protobuf") ||
+                cLower.contains("exception") ||
+                cLower.contains("dtc") ||
+                cLower.contains("turing")) {
+                return true;
+            }
+        }
+
+        if (extraDetail != null) {
+            String edLower = extraDetail.toLowerCase(Locale.ROOT);
+            if (edLower.contains("sanitized") ||
+                edLower.contains("blocked") ||
+                edLower.contains("suppressed") ||
+                edLower.contains("kick") ||
+                edLower.contains("strike") ||
+                edLower.contains("failcode") ||
+                edLower.contains("intercepted")) {
+                return true;
+            }
+        }
+
+        if (eventOrCmd != null) {
+            String eLower = eventOrCmd.toLowerCase(Locale.ROOT);
+            if (eLower.contains("actlogin") ||
+                eLower.contains("token") ||
+                eLower.contains("ticket") ||
+                eLower.contains("wtlogin") ||
+                eLower.contains("offline") ||
+                eLower.contains("kick") ||
+                eLower.contains("sec_") ||
+                eLower.contains("security") ||
+                eLower.contains("detect") ||
+                eLower.contains("root") ||
+                eLower.contains("risk") ||
+                eLower.contains("xposed") ||
+                eLower.contains("magisk") ||
+                eLower.contains("turing") ||
+                eLower.contains("device") ||
+                eLower.contains("qimei") ||
+                eLower.contains("oaid") ||
+                eLower.contains("guid") ||
+                eLower.contains("antitrace") ||
+                eLower.contains("verify") ||
+                eLower.contains("check") ||
+                eLower.contains("safecheck") ||
+                eLower.contains("patch") ||
+                eLower.contains("intchk") ||
+                eLower.contains("oidbsvc.0xd79") ||
+                eLower.contains("0ac00056535")) {
+                return true;
+            }
+        }
+
+        if (params != null && !params.isEmpty()) {
+            for (Map.Entry<String, ?> entry : params.entrySet()) {
+                String k = entry.getKey();
+                if (k == null) continue;
+                String kLower = k.toLowerCase(Locale.ROOT);
+                if (kLower.contains("root") ||
+                    kLower.contains("risk") ||
+                    kLower.contains("jailbreak") ||
+                    kLower.contains("xposed") ||
+                    kLower.contains("magisk") ||
+                    kLower.contains("detect") ||
+                    kLower.contains("fake") ||
+                    kLower.contains("tamper") ||
+                    kLower.contains("strike") ||
+                    kLower.contains("check") ||
+                    kLower.contains("sec_") ||
+                    kLower.contains("sig")) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * General telemetry / network report audit logger.
      */
     public static void recordReport(String channel, String eventOrCmd, Map<String, ?> params, String extraDetail, int stackDepth) {
@@ -172,6 +298,7 @@ public class ReportAuditManager {
             return;
         }
         try {
+            boolean isSecurity = isSecurityOrEnvironmentEvent(channel, eventOrCmd, params, extraDetail);
             String time = getCurrentTimestamp();
             int pid = Process.myPid();
             int tid = Process.myTid();
@@ -196,22 +323,86 @@ public class ReportAuditManager {
             }
 
             String fullLog = sb.toString();
-            sLogQueue.offer(fullLog);
+            sLogQueue.offer(new AuditEntry(fullLog, isSecurity, false));
 
-            // Also send to Logcat and LSPosed
-            Log.i(TAG, fullLog);
-            XposedBridge.log("[ReportAudit] " + fullLog);
+            if (isSecurity) {
+                Log.w(TAG, "[ENV_AUDIT] " + fullLog);
+                XposedBridge.log("[EnvAudit] " + fullLog);
+            } else {
+                Log.i(TAG, fullLog);
+            }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordReport: " + t.getMessage());
         }
     }
 
     /**
-     * Specific audit for BeaconReport.
+     * Specific audit for BeaconReport with parameter sanitization details.
      */
+    public static void recordBeacon(String eventCode, boolean isSuccess, Map<String, String> params, String appKey, List<String> sanitizedDetails) {
+        StringBuilder detail = new StringBuilder();
+        detail.append("success=").append(isSuccess);
+        if (appKey != null) {
+            detail.append(", appKey=").append(appKey);
+        }
+        if (sanitizedDetails != null && !sanitizedDetails.isEmpty()) {
+            detail.append(" | [SECURITY_SANITIZED: ");
+            for (int i = 0; i < sanitizedDetails.size(); i++) {
+                if (i > 0) detail.append(", ");
+                detail.append(sanitizedDetails.get(i));
+            }
+            detail.append("]");
+        }
+        recordReport("BeaconReport", eventCode, params, detail.toString(), 4);
+    }
+
     public static void recordBeacon(String eventCode, boolean isSuccess, Map<String, String> params, String appKey) {
-        String detail = "success=" + isSuccess + (appKey != null ? ", appKey=" + appKey : "");
-        recordReport("BeaconReport", eventCode, params, detail, 4);
+        recordBeacon(eventCode, isSuccess, params, appKey, null);
+    }
+
+    /**
+     * Specific audit for Security / Environment Probes (File checks, package queries, commands).
+     */
+    public static void recordProbe(String probeType, String target, String action) {
+        String detail = "target=\"" + target + "\" | action=" + action;
+        recordReport("Probe", probeType, null, detail, 3);
+    }
+
+    /**
+     * Specific audit for ProtoBuf security scan packets (safecheckPB, SecVerifyApk, ClientInfoA/B, MobileQQDetect).
+     */
+    public static void recordProtoBufSecurity(String packetName, Object packetObj, String actionSummary) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
+        try {
+            String time = getCurrentTimestamp();
+            int pid = Process.myPid();
+            int tid = Process.myTid();
+
+            StringBuilder sb = new StringBuilder(512);
+            sb.append("[").append(time).append("]")
+              .append("[").append(sProcessName).append(" pid:").append(pid).append(" tid:").append(tid).append("]")
+              .append("[ProtoBufSecurity] ").append(packetName).append(" | ").append(actionSummary);
+
+            if (packetObj != null) {
+                sb.append("\n    Dump: ");
+                dumpObjectFields(packetObj, sb);
+            }
+            sb.append("\n    Caller: ").append(getCallerSummary(4));
+
+            String fullLog = sb.toString();
+            sLogQueue.offer(new AuditEntry(fullLog, true, false));
+            Log.w(TAG, "[ENV_AUDIT] " + fullLog);
+            XposedBridge.log("[EnvAudit] " + fullLog);
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in recordProtoBufSecurity: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Specific audit for Security Strike & AntiTrace triggers.
+     */
+    public static void recordSecurityStrike(String strikeType, String detail) {
+        recordReport("SecurityStrike", strikeType, null, detail, 4);
     }
 
     /**
@@ -233,17 +424,51 @@ public class ReportAuditManager {
     /**
      * Specific audit for ChannelManager / SSO.
      */
+    public static void recordChannelManager(String cmd, long callbackId, int dataLen, byte[] data) {
+        StringBuilder detail = new StringBuilder();
+        detail.append("callbackId=").append(callbackId).append(", dataLen=").append(dataLen);
+        if (data != null && data.length > 0) {
+            List<String> printable = extractPrintableStrings(data, 3);
+            if (!printable.isEmpty()) {
+                detail.append(", strings=[");
+                for (int i = 0; i < Math.min(printable.size(), 6); i++) {
+                    if (i > 0) detail.append(", ");
+                    detail.append("\"").append(printable.get(i)).append("\"");
+                }
+                detail.append("]");
+            }
+        }
+        recordReport("ChannelManager", cmd, null, detail.toString(), 4);
+    }
+
     public static void recordChannelManager(String cmd, long callbackId, int dataLen) {
-        String detail = "callbackId=" + callbackId + ", dataLen=" + dataLen;
-        recordReport("ChannelManager", cmd, null, detail, 4);
+        recordChannelManager(cmd, callbackId, dataLen, null);
     }
 
     /**
      * Specific audit for MsfCore SSO.
      */
+    public static void recordMsfSso(String cmd, String uin, int ssoSeq, boolean needResp, Map<?, ?> attributes, int bufLen) {
+        StringBuilder detail = new StringBuilder();
+        detail.append("uin=").append(uin).append(", seq=").append(ssoSeq).append(", needResp=").append(needResp).append(", len=").append(bufLen);
+        if (attributes != null && !attributes.isEmpty()) {
+            detail.append(", attrs={");
+            boolean first = true;
+            for (Map.Entry<?, ?> entry : attributes.entrySet()) {
+                String k = String.valueOf(entry.getKey());
+                if (k.contains("security") || k.contains("retry") || k.contains("cmd") || k.contains("seq") || k.contains("token")) {
+                    if (!first) detail.append(", ");
+                    first = false;
+                    detail.append(k).append("=").append(entry.getValue());
+                }
+            }
+            detail.append("}");
+        }
+        recordReport("MsfCore", cmd, null, detail.toString(), 3);
+    }
+
     public static void recordMsfSso(String cmd, String uin, int ssoSeq, boolean needResp) {
-        String detail = "uin=" + uin + ", seq=" + ssoSeq + ", needResp=" + needResp;
-        recordReport("MsfCore", cmd, null, detail, 3);
+        recordMsfSso(cmd, uin, ssoSeq, needResp, null, 0);
     }
 
     /**
@@ -334,7 +559,7 @@ public class ReportAuditManager {
 
         String fullLog = sb.toString();
         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-            sLogQueue.offer(fullLog);
+            sLogQueue.offer(new AuditEntry(fullLog, true, false));
         }
         Log.w(TAG, fullLog);
         XposedBridge.log("[ReportAudit] " + fullLog);
@@ -344,8 +569,9 @@ public class ReportAuditManager {
 
     /**
      * Deep Kick & ForceOffline Event Decoder.
+     * Strictly READ-ONLY observational diagnosis:
      * Extracts:
-     * - UIN, Cmd, FailCode, FailMsg
+     * - UIN, Cmd, FailCode, FailMsg, ResultCode
      * - Attributes Map
      * - Decodes RequestMSFForceOffline / RequestPushForceOffline fields (strTitle, strInfo, bSigKick)
      * - Printable text strings in raw WUP buffer
@@ -360,7 +586,7 @@ public class ReportAuditManager {
             String threadName = Thread.currentThread().getName();
 
             StringBuilder sb = new StringBuilder(1024);
-            sb.append("\n==================== [KICK EVENT DETECTED] ====================\n")
+            sb.append("\n==================== [KICK / OFFLINE EVENT DETECTED] ====================\n")
               .append("Time: ").append(time).append("\n")
               .append("Process: ").append(sProcessName).append(" (pid:").append(pid).append(", tid:").append(tid).append(", thread:").append(threadName).append(")\n")
               .append("Source: ").append(sourceMethod).append("\n");
@@ -432,13 +658,13 @@ public class ReportAuditManager {
                 }
             }
 
-            sb.append("==============================================================\n");
+            sb.append("=========================================================================\n");
 
             String fullLog = sb.toString();
 
-            // Synchronously flush to disk if report recording is enabled
+            // Synchronously flush to disk immediately
             if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-                writeToFileInternal(fullLog);
+                writeEntryInternal(new AuditEntry(fullLog, true, true));
             }
 
             // Also output to Logcat and LSPosed
@@ -480,14 +706,13 @@ public class ReportAuditManager {
         sb.append("}");
     }
 
-    private static List<String> extractPrintableStrings(byte[] data, int minLen) {
+    public static List<String> extractPrintableStrings(byte[] data, int minLen) {
         List<String> list = new ArrayList<>();
         if (data == null || data.length == 0) return list;
 
         int start = -1;
         for (int i = 0; i < data.length; i++) {
             byte b = data[i];
-            // Printable ASCII range (32..126) or UTF-8 multi-byte sequence (b < 0)
             boolean isPrintable = (b >= 32 && b <= 126) || (b < 0);
             if (isPrintable) {
                 if (start == -1) start = i;

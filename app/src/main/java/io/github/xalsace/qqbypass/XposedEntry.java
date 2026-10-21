@@ -146,6 +146,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         if (cl == null || sObservedLoaders.contains(cl)) return;
         sObservedLoaders.add(cl);
         try {
+            NetworkReportHook.hookLateStage(cl);
             QQ950PatchHook.hookLateStage(cl);
             DynamicRootDetectionHook.hookLateStage(cl);
             SecurityLibrariesEnhanceHook.hookLateStage(cl);

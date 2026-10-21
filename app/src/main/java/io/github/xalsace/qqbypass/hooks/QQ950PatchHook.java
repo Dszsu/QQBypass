@@ -2689,6 +2689,8 @@ public class QQ950PatchHook {
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                 // MQPSecUtil.do_report(String str) exclusively dispatches ReportController.m AntiTrace telemetry.
                 // It must be neutralized to prevent server-side immediate offline kick!
+                String str = p.args != null && p.args.length > 0 && p.args[0] != null ? p.args[0].toString() : "";
+                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSecurityStrike("MQPSecUtil.do_report", "Suppressed AntiTrace delivery: " + str);
                 p.setResult(null);
                 XposedEntry.log("[MQPPatch] Suppressed MQPSecUtil.do_report (prevented AntiTrace telemetry strike)");
             }
@@ -2704,6 +2706,7 @@ public class QQ950PatchHook {
                     if (end > start && end - start <= 1048576) {
                         byte[] cleanBytes = readCleanModuleBytes(moduleName, start, end, lpparam);
                         if (cleanBytes != null) {
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSecurityStrike("MQPSecUtil.memreport", "Sanitized memory read for " + moduleName + " [" + start + ":" + end + "]");
                             p.setResult(cleanBytes);
                             XposedEntry.log("[MQPPatch] Sanitized MQPSecUtil.memreport for " + moduleName + " [" + start + ":" + end + "] from disk ELF");
                         }
@@ -2719,6 +2722,7 @@ public class QQ950PatchHook {
                 if (p.args != null) {
                     for (Object arg : p.args) {
                         if (arg != null && (arg.equals("AntiTrace") || arg.equals("Safe_AntiTrace"))) {
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSecurityStrike("ReportController.m", "Blocked AntiTrace report dispatch: " + arg);
                             p.setResult(null);
                             XposedEntry.log("[ReportController] Blocked AntiTrace report dispatch: " + arg);
                             return;
@@ -4229,17 +4233,22 @@ public class QQ950PatchHook {
                 String clsName = p.thisObject.getClass().getName();
                 if ("com.tencent.ims.safecheckPB$RspMQScanReport".equals(clsName)) {
                     sanitizeScanReport(p.thisObject);
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProtoBufSecurity("safecheckPB$RspMQScanReport", p.thisObject, "Sanitized scan items cleared");
                 } else if ("com.tencent.ims.SecVerifyApk$ReportDetectResultPacket".equals(clsName)
                         || "com.tencent.qqprotect.sfcfg.pb.SecVerifyApk$ReportDetectResultPacket".equals(clsName)) {
                     sanitizeSecVerifyPacket(p.thisObject);
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProtoBufSecurity("SecVerifyApk$ReportDetectResultPacket", p.thisObject, "Normalized signature/md5/version");
                 } else if ("com.tencent.ims.ClientInfoA$ReportDetectResultPacket".equals(clsName)
                         || "com.tencent.ims.ClientInfoB$ReportDetectResultPacket".equals(clsName)
                         || "com.tencent.ims.MobileQQDetect$ReportDetectResultPacket".equals(clsName)) {
                     sanitizeClientInfoPacket(p.thisObject);
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProtoBufSecurity("ClientInfo$ReportDetectResultPacket", p.thisObject, "Normalized md5 & version");
                 } else if ("com.tencent.ims.signature$SignatureReport".equals(clsName)) {
                     sanitizeSignatureReport(p.thisObject);
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProtoBufSecurity("signature$SignatureReport", p.thisObject, "Spoofed official signature hash");
                 } else if ("com.tencent.ims.intchk$CheckResult".equals(clsName)) {
                     sanitizeIntChkCheckResult(p.thisObject);
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProtoBufSecurity("intchk$CheckResult", p.thisObject, "Normalized memchk result -> PASS");
                 }
             }
         });

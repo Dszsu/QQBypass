@@ -324,6 +324,7 @@ static inline bool is_security_hidden_path(const char* path, void* return_addres
     // If called by Tencent security DSO, block it completely!
     if (strcasestr(path, "lspatch")) {
         if (is_caller_security_dso(return_address)) {
+            audit_native_probe("libc", "lspatch_probe_blocked", path);
             return true;
         }
         if (is_caller_qa(return_address)) {
@@ -332,6 +333,7 @@ static inline bool is_security_hidden_path(const char* path, void* return_addres
         // Direct probe of lspatch root folder in cache/files (not ART loading files in origin/)
         if ((strstr(path, "/cache/lspatch") && !strstr(path, "/cache/lspatch/origin/")) ||
             (strstr(path, "/files/lspatch") && !strstr(path, "/files/lspatch/origin/"))) {
+            audit_native_probe("libc", "lspatch_probe_blocked", path);
             return true;
         }
         return false;
@@ -342,6 +344,7 @@ static inline bool is_security_hidden_path(const char* path, void* return_addres
         if (is_caller_qa(return_address)) {
             return false;
         }
+        audit_native_probe("libc", "sensitive_path_blocked", path);
         return true;
     }
 
@@ -350,6 +353,7 @@ static inline bool is_security_hidden_path(const char* path, void* return_addres
         if (is_caller_qa(return_address)) {
             return false;
         }
+        audit_native_probe("libc", "mt_path_blocked", path);
         return true;
     }
 
@@ -359,6 +363,7 @@ static inline bool is_security_hidden_path(const char* path, void* return_addres
     // Directory scans (readdir/getdents64) already hide these from general scans!
     if (is_qa_private_path(path)) {
         if (is_caller_security_dso(return_address)) {
+            audit_native_probe("libc", "qa_private_path_blocked", path);
             return true;
         }
         if (is_caller_qa(return_address)) {
@@ -1142,6 +1147,7 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
         }
         if (strstr(pathname, "smaps")) {
             if (should_filter_proc_maps(__builtin_return_address(0))) {
+                audit_native_probe("libc", "fopen_smaps", "redirected to clean smaps");
                 LOGI("Intercepted fopen smaps: %s", pathname);
                 FILE* fake = build_filtered_smaps();
                 if (fake) return fake;
@@ -1150,22 +1156,26 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
         else if (strcmp(pathname, "/proc/self/maps") == 0 ||
             (strstr(pathname, "/proc/") && strstr(pathname, "/maps"))) {
             if (should_filter_proc_maps(__builtin_return_address(0))) {
+                audit_native_probe("libc", "fopen_maps", "redirected to clean maps");
                 LOGI("Intercepted fopen maps: %s", pathname);
                 FILE* fake = build_filtered_maps();
                 if (fake) return fake;
             }
         }
         if (is_proc_mountinfo_path(pathname)) {
+            audit_native_probe("libc", "fopen_mountinfo", "redirected to clean mountinfo");
             LOGI("Intercepted fopen mountinfo: %s", pathname);
             FILE* fake = build_filtered_mountinfo();
             if (fake) return fake;
         }
         if (is_proc_mounts_path(pathname)) {
+            audit_native_probe("libc", "fopen_mounts", "redirected to clean mounts");
             LOGI("Intercepted fopen mounts: %s", pathname);
             FILE* fake = build_filtered_mounts();
             if (fake) return fake;
         }
         if (is_proc_net_unix_path(pathname)) {
+            audit_native_probe("libc", "fopen_net_unix", "redirected to clean net_unix");
             LOGI("Intercepted fopen net/unix: %s", pathname);
             FILE* fake = build_filtered_net_unix();
             if (fake) return fake;

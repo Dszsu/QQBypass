@@ -147,6 +147,9 @@ public class DynamicRootDetectionHook {
                     param.setResult(false);
                     XposedEntry.log("File check blocked: " + path);
                     UnifiedHookCoordinator.notifyNativeIfAvailable("file_blocked", path);
+                    if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProbe("FileCheck", path, "blocked");
+                    }
                 }
             }
         };
@@ -401,6 +404,7 @@ public class DynamicRootDetectionHook {
                             @SuppressWarnings("unchecked")
                             java.util.Map<String, String> params = (java.util.Map<String, String>)
                                 de.robv.android.xposed.XposedHelpers.callMethod(event, "getParams");
+                            java.util.List<String> sanitizedDetails = null;
                             if (params != null) {
                                 for (java.util.Map.Entry<String, String> entry : params.entrySet()) {
                                     String k = entry.getKey() != null ? entry.getKey().toLowerCase() : "";
@@ -408,8 +412,16 @@ public class DynamicRootDetectionHook {
                                     if (v != null) {
                                         String vLower = v.toLowerCase();
                                         if (k.contains("root") || k.contains("jailbreak") || k.contains("risk") || k.contains("fake")) {
+                                            if (!"0".equals(v) && !"false".equalsIgnoreCase(v)) {
+                                                if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
+                                                sanitizedDetails.add(entry.getKey() + ": " + v + " -> 0");
+                                            }
                                             entry.setValue("0");
                                         } else if (vLower.contains("xposed") || vLower.contains("magisk") || vLower.contains("lsposed") || vLower.contains("su")) {
+                                            if (!"none".equals(v)) {
+                                                if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
+                                                sanitizedDetails.add(entry.getKey() + ": " + v + " -> none");
+                                            }
                                             entry.setValue("none");
                                         }
                                     }
@@ -431,7 +443,7 @@ public class DynamicRootDetectionHook {
                             } catch (Throwable ignored) {}
 
                             if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordBeacon(eventCode, isSuccess, params, appKey);
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordBeacon(eventCode, isSuccess, params, appKey, sanitizedDetails);
                             }
                         } catch (Throwable ignored) {}
                     }
@@ -570,6 +582,9 @@ public class DynamicRootDetectionHook {
                             if (arg instanceof String) {
                                 String pkg = (String) arg;
                                 if (isSuspiciousPackage(pkg)) {
+                                    if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProbe("PackageQuery", pkg, "blocked");
+                                    }
                                     if (param.method instanceof java.lang.reflect.Method) {
                                         java.lang.reflect.Method m = (java.lang.reflect.Method) param.method;
                                         Class<?> retType = m.getReturnType();
@@ -1344,6 +1359,9 @@ public class DynamicRootDetectionHook {
                             if (lower.equals("su") || lower.endsWith("/su") || lower.contains("busybox")
                                     || lower.contains("magisk") || lower.contains("ksud")
                                     || lower.contains("which su") || lower.contains("type su")) {
+                                if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProbe("ProcessExec", arg, "blocked with IOException");
+                                }
                                 throw new java.io.IOException("Cannot run program \"" + arg + "\": error=2, No such file or directory");
                             }
                         }
@@ -1362,6 +1380,9 @@ public class DynamicRootDetectionHook {
                         if (cmd.equals("su") || cmd.startsWith("su ") || cmd.endsWith("/su")
                                 || cmd.contains("busybox") || cmd.contains("magisk") || cmd.contains("ksud")
                                 || cmd.contains("type su") || cmd.contains("which su")) {
+                            if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProbe("ProcessExec", String.valueOf(cmdObj), "blocked with IOException");
+                            }
                             throw new java.io.IOException("Cannot run program \"" + cmdObj + "\": error=2, No such file or directory");
                         }
                     } else if (cmdObj instanceof String[]) {
@@ -1372,6 +1393,9 @@ public class DynamicRootDetectionHook {
                             if (lower.equals("su") || lower.endsWith("/su") || lower.contains("busybox")
                                     || lower.contains("magisk") || lower.contains("ksud")
                                     || lower.contains("which su") || lower.contains("type su")) {
+                                if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProbe("ProcessExec", arg, "blocked with IOException");
+                                }
                                 throw new java.io.IOException("Cannot run program \"" + arg + "\": error=2, No such file or directory");
                             }
                         }

@@ -282,6 +282,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
         const char* path = (const char*)a1;
         if (path) {
             if (is_fekit_blocked_path(path)) {
+                audit_native_probe("FEKit", "openat_blocked", path);
                 LOGD("FEKit inline syscall openat blocked: %s (caller=%p)", path, caller_pc);
                 return -ENOENT;
             }
@@ -290,6 +291,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
                 if (fake) {
                     int fd = dup(fileno(fake));
                     fclose(fake);
+                    audit_native_probe("FEKit", "openat_smaps", "redirected to clean smaps");
                     LOGI("FEKit inline syscall openat smaps redirected: %s -> fd %d", path, fd);
                     return fd;
                 }
@@ -298,6 +300,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
                 if (fake) {
                     int fd = dup(fileno(fake));
                     fclose(fake);
+                    audit_native_probe("FEKit", "openat_maps", "redirected to clean maps");
                     LOGI("FEKit inline syscall openat maps redirected: %s -> fd %d", path, fd);
                     return fd;
                 }
@@ -306,6 +309,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
                 if (fake) {
                     int fd = dup(fileno(fake));
                     fclose(fake);
+                    audit_native_probe("FEKit", "openat_mountinfo", "redirected to clean mountinfo");
                     return fd;
                 }
             } else if (strstr(path, "mounts")) {
@@ -313,6 +317,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
                 if (fake) {
                     int fd = dup(fileno(fake));
                     fclose(fake);
+                    audit_native_probe("FEKit", "openat_mounts", "redirected to clean mounts");
                     return fd;
                 }
             } else if (strstr(path, "/status")) {
@@ -320,6 +325,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
                 if (fake) {
                     int fd = dup(fileno(fake));
                     fclose(fake);
+                    audit_native_probe("FEKit", "openat_status", "redirected to clean status");
                     return fd;
                 }
             } else if (strstr(path, "/wchan")) {
@@ -327,6 +333,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
                 if (fake) {
                     int fd = dup(fileno(fake));
                     fclose(fake);
+                    audit_native_probe("FEKit", "openat_wchan", "redirected to clean wchan");
                     return fd;
                 }
             }
@@ -336,6 +343,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
     else if (syscall_num == 79) {
         const char* path = (const char*)a1;
         if (path && is_fekit_blocked_path(path)) {
+            audit_native_probe("FEKit", "newfstatat_blocked", path);
             LOGD("FEKit inline syscall newfstatat blocked: %s (caller=%p)", path, caller_pc);
             return -ENOENT;
         }
@@ -344,6 +352,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
     else if (syscall_num == 78) {
         const char* path = (const char*)a1;
         if (path && is_fekit_blocked_path(path)) {
+            audit_native_probe("FEKit", "readlinkat_blocked", path);
             LOGD("FEKit inline syscall readlinkat blocked: %s (caller=%p)", path, caller_pc);
             return -ENOENT;
         }
@@ -352,6 +361,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
     else if (syscall_num == 48 || syscall_num == 439) {
         const char* path = (const char*)a1;
         if (path && is_fekit_blocked_path(path)) {
+            audit_native_probe("FEKit", "faccessat_blocked", path);
             LOGD("FEKit inline syscall faccessat blocked: %s (caller=%p)", path, caller_pc);
             return -ENOENT;
         }
@@ -360,6 +370,7 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
     else if (syscall_num == 43) {
         const char* path = (const char*)a0;
         if (path && is_fekit_blocked_path(path)) {
+            audit_native_probe("FEKit", "statfs_blocked", path);
             LOGD("FEKit inline syscall statfs blocked: %s (caller=%p)", path, caller_pc);
             return -ENOENT;
         }
