@@ -198,12 +198,12 @@ public class DynamicDebugDetectionHook {
                             XposedEntry.log(type + " detection code zeroed: " + className);
                         }
 
-                        // Clear detection result strings
+                        // Normalize detection result strings to genuine device string (never empty string)
                         if (result instanceof String) {
                             String str = (String) result;
                             if (isSuspiciousString(str)) {
-                                param.setResult("");
-                                XposedEntry.log(type + " result string cleared: " + className);
+                                param.setResult("unknown");
+                                XposedEntry.log(type + " result string normalized: " + className);
                             }
                         }
                     }

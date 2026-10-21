@@ -14,14 +14,24 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.RandomAccessFile;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 
 import io.github.xalsace.qqbypass.XposedEntry;
 import io.github.xalsace.qqbypass.config.HookConfig;
 import io.github.xalsace.qqbypass.defense.SideChannelDefense;
+import io.github.xalsace.qqbypass.detector.DexKitDetector;
+import io.github.xalsace.qqbypass.detector.DexMethodData;
 import io.github.xalsace.qqbypass.utils.HookUtils;
+import io.github.xalsace.qqbypass.version.HostVersion;
+import io.github.xalsace.qqbypass.version.HostVersionManager;
+import io.github.xalsace.qqbypass.version.IVersionProfile;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.Locale;
 
 /**
  * Detection & Risk Mitigation Patch (Enhanced for QQ 9.3.50 - 9.3.70)
@@ -90,7 +100,7 @@ public class QQ950PatchHook {
         XposedEntry.log("Initializing QQ 9.3.70 detection & kick patch");
 
         // Tier 1: void-return, crash-safe backstops
-        hookMsfTelemetry(lpparam);
+        // hookMsfTelemetry(lpparam); // Abolished: Allow genuine MSF core lifecycle telemetry and keepalives (tryReportMSFAlive, tryReportJobAlive, doReportOnInitComplete, reportMsfCoreInit) to report naturally
         hookMsfCheckWTSig(lpparam);
         hookTuringWrapper(lpparam);
         hookChannelReport(lpparam);
@@ -131,6 +141,26 @@ public class QQ950PatchHook {
 
         // Tier 11: Real Device Emulator Detection Adaptation (Safe boolean guards without device identity spoofing)
         hookEmulatorDetectionForRealDevice(lpparam);
+
+        ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
+
+        // Tier 12: QQ 9.3.75 SafeCenter & Push Repack Circuit Defenses
+        hookQQ9375SafeCenterAndRepack(lpparam, cl);
+
+        // Tier 13: APK File MD5 & Source Signature Defense
+        hookApkFileMd5AndSignatures(lpparam, cl);
+
+        // Tier 14: PB-Level Integrity Check Neutralization & Response Disarm
+        hookIntChkPBDefenses(lpparam, cl);
+
+        // Tier 15: Screen / Display / Remote Control Defense Expansion (Ganliang & AntEst)
+        hookGanliangAndAntEstDefenses(lpparam, cl);
+
+        // Tier 16: Turing PhoneService & Turing Bridge Completion
+        hookTuringPhoneAndBridge(lpparam, cl);
+
+        // Tier 17: SafeReport & XpsReport Suppression
+        hookSafeReportAndXps(lpparam, cl);
     }
 
     // ==================== Tier 1: void-return, crash-safe ====================
@@ -142,23 +172,13 @@ public class QQ950PatchHook {
 
 
     /**
-     * MSF telemetry: all void, pure reporting.
+     * MSF telemetry: Abolished in v1.0.79.
+     * Unconditional lifecycle methods (tryReportMSFAlive, tryReportJobAlive, doReportOnInitComplete,
+     * reportMsfCoreInit, tryReportLoadCfgTempFile, tryReportSoLoadUseTxlib) are essential keepalive
+     * heartbeats and boot signals. Suppressing them signals process freeze/death to Tencent ML monitors.
      */
     private static void hookMsfTelemetry(XC_LoadPackage.LoadPackageParam lpparam) {
-        final String cls = "com.tencent.mobileqq.msf.core.MsfCore";
-        String[] reportMethods = {
-            "doReportOnInitComplete", "reportMsfCoreInit",
-            "tryReportJobAlive", "tryReportLoadCfgTempFile",
-            "tryReportMSFAlive", "tryReportSoLoadUseTxlib"
-        };
-        for (String m : reportMethods) {
-            hookSafe(cls, m, lpparam, new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(null);
-                }
-            });
-        }
+        // No-op: let authentic MSF lifecycle reporting and keepalive heartbeats proceed naturally
     }
 
     /**
@@ -199,7 +219,10 @@ public class QQ950PatchHook {
     }
 
     /**
-     * ChannelManager checkMethod & ChannelReport telemetry.
+     * ChannelManager checkMethod anti-hook reflection defense.
+     * Note: Normal channel lifecycle telemetry (onChannelReadyReport, reportInitTime,
+     * reportStep, reportTZ, sdk_init 0b500076578) and official baseline signature reporting
+     * (0df00071646) are permitted to proceed naturally to maintain genuine device baselines.
      */
     private static void hookChannelReport(XC_LoadPackage.LoadPackageParam lpparam) {
         // Suppress ChannelManager.checkMethod anti-hook reflection
@@ -211,56 +234,6 @@ public class QQ950PatchHook {
                     XposedEntry.log("[ChannelPatch] Neutralized ChannelManager.checkMethod");
                 }
             });
-
-        // Suppress ChannelManagerImpl telemetry reports
-        hookSafe("com.tencent.mobileqq.channel.ChannelManagerImpl", "onChannelReadyReport", lpparam,
-            new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(null);
-                }
-            });
-
-        // Suppress ChannelReport methods
-        final String crCls = "com.tencent.mobileqq.channel.ChannelReport";
-        String[] reportMethods = {
-            "reportInitTime", "reportTZ", "reportLoadFixedSo",
-            "reportGoogleAttestation", "reportStep"
-        };
-        for (String rm : reportMethods) {
-            hookSafe(crCls, rm, lpparam, new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(null);
-                }
-            });
-        }
-
-        // Suppress eventReport (0df00071646 SsoEventReport)
-        hookSafe(crCls, "eventReport", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(null);
-                XposedEntry.log("[ChannelPatch] Neutralized ChannelReport.eventReport");
-            }
-        });
-
-        // Neutralize commonReport and batchCommonReport for sensitive telemetry attaIds
-        XC_MethodHook attaFilterHook = new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.args != null && p.args.length >= 1 && p.args[0] instanceof String) {
-                    String attaId = (String) p.args[0];
-                    if ("0df00071646".equals(attaId) || "00e00075618".equals(attaId) ||
-                        "02f00075617".equals(attaId) || "0b500076578".equals(attaId)) {
-                        p.setResult(null);
-                        XposedEntry.log("[ChannelPatch] Suppressed ChannelReport for attaId: " + attaId);
-                    }
-                }
-            }
-        };
-        hookSafe(crCls, "commonReport", lpparam, attaFilterHook);
-        hookSafe(crCls, "batchCommonReport", lpparam, attaFilterHook);
     }
 
     /**
@@ -740,7 +713,9 @@ public class QQ950PatchHook {
         XC_MethodHook falseHook = new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
+                if (p.method instanceof Method && ((Method) p.method).getReturnType() == boolean.class) {
+                    p.setResult(false);
+                }
             }
         };
         hookSafe(feUtilsA, "g", lpparam, falseHook);
@@ -897,7 +872,7 @@ public class QQ950PatchHook {
                     if (ret == boolean.class) return false;
                     if (ret == int.class) return 0;
                     if (ret == long.class) return 0L;
-                    if (ret == String.class) return "";
+                    if (ret == String.class) return getOrGenerateDeviceToken();
                     return null;
                 }
             });
@@ -1041,7 +1016,7 @@ public class QQ950PatchHook {
                     if (ret == boolean.class) return false;
                     if (ret == int.class) return 0;
                     if (ret == long.class) return 0L;
-                    if (ret == String.class) return "";
+                    if (ret == String.class) return getOrGenerateOpenIdTicket();
                     return null;
                 }
             });
@@ -1178,6 +1153,7 @@ public class QQ950PatchHook {
             hookO3SecurityAndTelemetryWithClassLoader(cl);
             hookFeUtilsAWithClassLoader(cl);
             hookMessageSyncAndLoadingStateWithClassLoader(cl);
+            hookQQ9375DefensesWithClassLoader(cl);
         } catch (Throwable t) {
             XposedEntry.log("[LateStage] hookLateStage error: " + t.getMessage());
         }
@@ -1189,6 +1165,8 @@ public class QQ950PatchHook {
             Class<?> feUtilsA = XposedHelpers.findClassIfExists("com.tencent.mobileqq.fe.utils.a", cl);
             if (feUtilsA != null && sHookedFeUtilsAClasses.add(feUtilsA)) {
                 Method[] methods = feUtilsA.getDeclaredMethods();
+                // Only hook boolean anomaly detection methods to return false (normal)
+                // DO NOT hook String methods to return "" because c(String) is the internal string decryptor!
                 for (Method m : methods) {
                     Class<?> ret = m.getReturnType();
                     if (ret == boolean.class) {
@@ -1196,20 +1174,6 @@ public class QQ950PatchHook {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                                 param.setResult(false);
-                            }
-                        });
-                    } else if (ret == String.class) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult("");
-                            }
-                        });
-                    } else if (ret == int.class) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult(0);
                             }
                         });
                     }
@@ -2408,14 +2372,21 @@ public class QQ950PatchHook {
         final String o3ReportCls = "com.tencent.qqprotect.report.O3Report";
         Class<?> o3ReportClazz = XposedHelpers.findClassIfExists(o3ReportCls, cl);
         if (o3ReportClazz != null && sHookedO3Classes.add(o3ReportClazz)) {
-            // Normalize O3Report.d(String, String, String) - sign_report (attaId = "0df00071646")
+            // Normalize O3Report.d(String, String, String) - sign_report (attaId = "0df00071646") & est report
             HookUtils.hookAllMethods(o3ReportClazz, "d", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                     if (p.args != null && p.args.length >= 1 && p.args[0] != null) {
-                        p.args[0] = "a6b745bf24a2c277527716f6f36eb68d";
+                        String arg0 = p.args[0].toString();
+                        if ("est".equals(arg0)) {
+                            // Do NOT wipe p.args[1] to empty! Let authentic clean estimation token pass through!
+                            XposedEntry.log("[O3Patch] Preserved authentic O3Report.d ('est') token payload");
+                        } else {
+                            final IVersionProfile profile = HostVersionManager.getCurrentProfile();
+                            p.args[0] = profile.getOfficialSignatureHashUpper();
+                            XposedEntry.log("[O3Patch] Normalized O3Report.d (sign_report official MD5: " + p.args[0] + ")");
+                        }
                     }
-                    XposedEntry.log("[O3Patch] Normalized O3Report.d (sign_report official MD5)");
                 }
             });
 
@@ -3079,15 +3050,7 @@ public class QQ950PatchHook {
             }
         });
 
-        final String msfCoreCls = "com.tencent.mobileqq.msf.core.MsfCore";
-        hookSafe(msfCoreCls, "tryReportSoLoadUseTxlib", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(null);
-                XposedEntry.log("[TxLibPatch] Suppressed MsfCore.tryReportSoLoadUseTxlib");
-            }
-        });
-
+        // Note: MsfCore.tryReportSoLoadUseTxlib is normal SO load telemetry; permitted to proceed naturally.
         final String soLoadCoreCls = "com.tencent.commonsdk.soload.SoLoadCore";
         hookSafe(soLoadCoreCls, "reportThrowable", lpparam, new XC_MethodHook() {
             @Override
@@ -3224,6 +3187,26 @@ public class QQ950PatchHook {
             });
         }
 
+        final String[] clientInfoClasses = {
+            "com.tencent.ims.ClientInfoA$ReportDetectResultPacket",
+            "com.tencent.ims.ClientInfoB$ReportDetectResultPacket",
+            "com.tencent.ims.MobileQQDetect$ReportDetectResultPacket"
+        };
+        for (String ciCls : clientInfoClasses) {
+            hookSafe(ciCls, "<init>", lpparam, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    sanitizeClientInfoPacket(p.thisObject);
+                }
+            });
+            hookSafe(ciCls, "toByteArray", lpparam, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    sanitizeClientInfoPacket(p.thisObject);
+                }
+            });
+        }
+
         // --- 2.1 SecUtil & SafeCheck Self-Verification Integrity Strike ---
         final String secUtilCls = "com.tencent.mobileqq.utils.SecUtil";
         hookSafe(secUtilCls, "check0DayRepack", lpparam, new XC_MethodHook() {
@@ -3249,8 +3232,43 @@ public class QQ950PatchHook {
         hookSafe(secUtilCls, "getSignatureHash", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult("A6B745BF24A2C277527716F6F36EB68D");
-                XposedEntry.log("[SelfVerifyPatch] SecUtil.getSignatureHash -> spoofed official MD5 A6B745BF24A2C277527716F6F36EB68D");
+                String sig = HostVersionManager.getCurrentProfile().getOfficialSignatureHashUpper();
+                p.setResult(sig);
+                XposedEntry.log("[SelfVerifyPatch] SecUtil.getSignatureHash -> spoofed official MD5 " + sig);
+            }
+        });
+
+        hookSafe(secUtilCls, "getPackageVersion", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                String ver = HostVersionManager.getHostVersion().getVersionName();
+                if (ver == null || ver.isEmpty()) {
+                    ver = HostVersionManager.getCurrentProfile().getVersionName();
+                }
+                p.setResult(ver);
+                XposedEntry.log("[SelfVerifyPatch] SecUtil.getPackageVersion -> " + ver);
+            }
+        });
+
+        hookSafe(secUtilCls, "getFileMd5", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.args != null && p.args.length > 0) {
+                    Object arg = p.args[0];
+                    boolean isApk = false;
+                    if (arg instanceof String) {
+                        String s = (String) arg;
+                        if (s.endsWith(".apk") || s.contains("mobileqq")) isApk = true;
+                    } else if (arg instanceof File) {
+                        String s = ((File) arg).getAbsolutePath();
+                        if (s.endsWith(".apk") || s.contains("mobileqq")) isApk = true;
+                    }
+                    if (isApk) {
+                        String officialMd5 = HostVersionManager.getCurrentProfile().getOfficialApkMd5Upper();
+                        p.setResult(officialMd5);
+                        XposedEntry.log("[SelfVerifyPatch] SecUtil.getFileMd5 -> spoofed official APK MD5: " + officialMd5);
+                    }
+                }
             }
         });
 
@@ -3258,9 +3276,29 @@ public class QQ950PatchHook {
         final String safeCheckCls = "com.tencent.qqprotect.sfcfg.api.impl.SafeCheckUtilApiImpl";
         hookSafe(safeCheckCls, "getFileMD5", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 p.setResult(0);
-                XposedEntry.log("[SelfVerifyPatch] SafeCheckUtilApiImpl.getFileMD5 -> forced 0 (clean APK MD5)");
+                if (p.args != null && p.args.length >= 3 && p.args[2] instanceof byte[]) {
+                    byte[] outBuf = (byte[]) p.args[2];
+                    if (outBuf.length >= 16) {
+                        boolean allZero = true;
+                        for (int i = 0; i < 16; i++) {
+                            if (outBuf[i] != 0) {
+                                allZero = false;
+                                break;
+                            }
+                        }
+                        if (allZero && p.args[0] instanceof String && p.args[1] instanceof String) {
+                            String apkPath = (String) p.args[0];
+                            String entryName = (String) p.args[1];
+                            byte[] digest = computeApkEntryMd5(apkPath, entryName, lpparam);
+                            if (digest != null && digest.length >= 16) {
+                                System.arraycopy(digest, 0, outBuf, 0, 16);
+                                XposedEntry.log("[SelfVerifyPatch] SafeCheckUtilApiImpl.getFileMD5 -> populated authentic entry MD5 for " + entryName);
+                            }
+                        }
+                    }
+                }
             }
         });
 
@@ -3269,8 +3307,9 @@ public class QQ950PatchHook {
         hookSafe(ybLauncherCls, "c", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult("A6B745BF24A2C277527716F6F36EB68D");
-                XposedEntry.log("[SelfVerifyPatch] YuanbaoOpenSdkLauncher.c -> spoofed official MD5");
+                String sig = HostVersionManager.getCurrentProfile().getOfficialSignatureHashUpper();
+                p.setResult(sig);
+                XposedEntry.log("[SelfVerifyPatch] YuanbaoOpenSdkLauncher.c -> spoofed official MD5 " + sig);
             }
         });
 
@@ -3292,9 +3331,9 @@ public class QQ950PatchHook {
                             }
                         }
                         XposedEntry.log("[PttPatch] Sanitized actPttSoUpdate telemetry to success (0)");
-                    } else if ("msf_core_EvtMsfLoadSoError".equals(tag) || "msf_core_EvtLoadUseTxlib".equals(tag)) {
+                    } else if ("msf_core_EvtMsfLoadSoError".equals(tag)) {
                         p.setResult(null);
-                        XposedEntry.log("[TxLibPatch] Suppressed SO load telemetry: " + tag);
+                        XposedEntry.log("[TxLibPatch] Suppressed SO load error telemetry: " + tag);
                     }
                 }
             }
@@ -3357,6 +3396,12 @@ public class QQ950PatchHook {
     private static void sanitizeSecVerifyPacket(Object packetObj) {
         if (packetObj == null) return;
         try {
+            final IVersionProfile profile = HostVersionManager.getCurrentProfile();
+            final HostVersion hostVer = HostVersionManager.getHostVersion();
+            final String officialVerName = hostVer != null ? hostVer.getVersionName() : profile.getVersionName();
+            final String officialMd5 = profile.getOfficialApkMd5Upper();
+            final String officialSig = profile.getOfficialSignatureHashUpper();
+
             Field resField = XposedHelpers.findFieldIfExists(packetObj.getClass(), "uint32_result");
             if (resField != null) {
                 Object pbRes = resField.get(packetObj);
@@ -3368,10 +3413,112 @@ public class QQ950PatchHook {
             if (sigField != null) {
                 Object pbSig = sigField.get(packetObj);
                 if (pbSig != null) {
-                    XposedHelpers.callMethod(pbSig, "set", "A6B745BF24A2C277527716F6F36EB68D");
+                    XposedHelpers.callMethod(pbSig, "set", officialSig);
+                }
+            }
+            Field apkMd5Field = XposedHelpers.findFieldIfExists(packetObj.getClass(), "str_apkmd5");
+            if (apkMd5Field != null) {
+                Object pbApkMd5 = apkMd5Field.get(packetObj);
+                if (pbApkMd5 != null) {
+                    XposedHelpers.callMethod(pbApkMd5, "set", officialMd5);
+                }
+            }
+            Field verField = XposedHelpers.findFieldIfExists(packetObj.getClass(), "str_apkversion");
+            if (verField != null) {
+                Object pbVer = verField.get(packetObj);
+                if (pbVer != null) {
+                    XposedHelpers.callMethod(pbVer, "set", officialVerName);
+                }
+            }
+            Field pkgField = XposedHelpers.findFieldIfExists(packetObj.getClass(), "package_name");
+            if (pkgField != null) {
+                Object pbPkg = pkgField.get(packetObj);
+                if (pbPkg != null) {
+                    XposedHelpers.callMethod(pbPkg, "set", "com.tencent.mobileqq");
+                }
+            }
+            XposedEntry.log("[SecVerifyApk] Normalized SecVerifyApk packet: result=0, sig=" + officialSig + ", md5=" + officialMd5 + ", ver=" + officialVerName);
+        } catch (Throwable t) {
+            XposedEntry.log("[SecVerifyApk] Error sanitizing: " + t.getMessage());
+        }
+    }
+
+    private static void sanitizeClientInfoPacket(Object packetObj) {
+        if (packetObj == null) return;
+        try {
+            final IVersionProfile profile = HostVersionManager.getCurrentProfile();
+            final HostVersion hostVer = HostVersionManager.getHostVersion();
+            final String officialVerName = hostVer != null ? hostVer.getVersionName() : profile.getVersionName();
+            final String officialMd5 = profile.getOfficialApkMd5Upper();
+
+            // ClientInfoA: str_qqmd5
+            Field qqMd5Field = XposedHelpers.findFieldIfExists(packetObj.getClass(), "str_qqmd5");
+            if (qqMd5Field != null) {
+                Object pbQqMd5 = qqMd5Field.get(packetObj);
+                if (pbQqMd5 != null) XposedHelpers.callMethod(pbQqMd5, "set", officialMd5);
+            }
+
+            // ClientInfoB: str_safemd5
+            Field safeMd5Field = XposedHelpers.findFieldIfExists(packetObj.getClass(), "str_safemd5");
+            if (safeMd5Field != null) {
+                Object pbSafeMd5 = safeMd5Field.get(packetObj);
+                if (pbSafeMd5 != null) XposedHelpers.callMethod(pbSafeMd5, "set", officialMd5);
+            }
+
+            // MobileQQDetect: ret
+            Field retField = XposedHelpers.findFieldIfExists(packetObj.getClass(), "ret");
+            if (retField != null) {
+                Object pbRet = retField.get(packetObj);
+                if (pbRet != null) XposedHelpers.callMethod(pbRet, "set", 0);
+            }
+
+            // envParam
+            Field envField = XposedHelpers.findFieldIfExists(packetObj.getClass(), "envParam");
+            if (envField != null) {
+                Object envObj = envField.get(packetObj);
+                if (envObj != null) {
+                    Field verField = XposedHelpers.findFieldIfExists(envObj.getClass(), "str_qqversion");
+                    if (verField != null) {
+                        Object pbVer = verField.get(envObj);
+                        if (pbVer != null) XposedHelpers.callMethod(pbVer, "set", officialVerName);
+                    }
+                    Field platField = XposedHelpers.findFieldIfExists(envObj.getClass(), "u32_platform");
+                    if (platField != null) {
+                        Object pbPlat = platField.get(envObj);
+                        if (pbPlat != null) XposedHelpers.callMethod(pbPlat, "set", 2); // 2 = Android
+                    }
                 }
             }
         } catch (Throwable ignored) {}
+    }
+
+    private static byte[] computeApkEntryMd5(String apkPath, String entryName, XC_LoadPackage.LoadPackageParam lpparam) {
+        if (apkPath == null || entryName == null) return null;
+        String[] paths = {
+            apkPath,
+            lpparam != null && lpparam.appInfo != null ? lpparam.appInfo.sourceDir : null,
+            "/data/app/" + (lpparam != null ? lpparam.packageName : "com.tencent.mobileqq") + "/base.apk"
+        };
+        for (String path : paths) {
+            if (path == null) continue;
+            File f = new File(path);
+            if (!f.exists() || !f.canRead()) continue;
+            try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(f)) {
+                java.util.zip.ZipEntry ze = zf.getEntry(entryName);
+                if (ze != null) {
+                    try (InputStream is = zf.getInputStream(ze)) {
+                        MessageDigest md = MessageDigest.getInstance("MD5");
+                        byte[] buf = new byte[8192];
+                        int r;
+                        while ((r = is.read(buf)) > 0) {
+                            md.update(buf, 0, r);
+                        }
+                        return md.digest();
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+        return null;
     }
 
     private static class PtLoadSegment {
@@ -3591,11 +3738,21 @@ public class QQ950PatchHook {
         if (simpleName.contains("/")) {
             simpleName = simpleName.substring(simpleName.lastIndexOf('/') + 1);
         }
-        if (!simpleName.startsWith("lib")) {
-            simpleName = "lib" + simpleName;
-        }
-        if (!simpleName.endsWith(".so")) {
-            simpleName = simpleName + ".so";
+        if (simpleName.equals("c")) {
+            simpleName = "libc.so";
+        } else if (simpleName.equals("m")) {
+            simpleName = "libm.so";
+        } else if (simpleName.equals("dl")) {
+            simpleName = "libdl.so";
+        } else if (simpleName.equals("z")) {
+            simpleName = "libz.so";
+        } else {
+            if (!simpleName.startsWith("lib") && !simpleName.endsWith(".dex") && !simpleName.endsWith(".apk")) {
+                simpleName = "lib" + simpleName;
+            }
+            if (!simpleName.endsWith(".so") && !simpleName.endsWith(".dex") && !simpleName.endsWith(".apk")) {
+                simpleName = simpleName + ".so";
+            }
         }
 
         // 1. Try runtime memory mapping resolution via /proc/self/maps
@@ -3606,20 +3763,6 @@ public class QQ950PatchHook {
                 try (RandomAccessFile raf = new RandomAccessFile(mappedFile, "r")) {
                     byte[] clean = readFromElfFile(raf, start, end);
                     if (clean != null) {
-                        // Trampoline-Selective verification: check if memory has Dobby hook opcodes and log desensitization
-                        try (RandomAccessFile memRaf = new RandomAccessFile("/proc/self/mem", "r")) {
-                            long targetAddr = mapping.baseVAddr + start;
-                            memRaf.seek(targetAddr);
-                            byte[] memBuf = new byte[Math.min(len, 16)];
-                            int readMem = memRaf.read(memBuf, 0, memBuf.length);
-                            if (readMem >= 8) {
-                                int op1 = (memBuf[0] & 0xFF) | ((memBuf[1] & 0xFF) << 8) | ((memBuf[2] & 0xFF) << 16) | ((memBuf[3] & 0xFF) << 24);
-                                int op2 = (memBuf[4] & 0xFF) | ((memBuf[5] & 0xFF) << 8) | ((memBuf[6] & 0xFF) << 16) | ((memBuf[7] & 0xFF) << 24);
-                                if ((op1 == 0x58000050 || op1 == 0x58000051) && (op2 == 0xd61f0200 || op2 == 0xd61f0220)) {
-                                    XposedEntry.log("[MQPPatch] Sanitized Dobby trampoline in memory for " + simpleName + " at 0x" + Long.toHexString(targetAddr));
-                                }
-                            }
-                        } catch (Throwable ignored) {}
                         return clean;
                     }
                 } catch (Throwable ignored) {}
@@ -3633,10 +3776,18 @@ public class QQ950PatchHook {
             "/apex/com.android.runtime/lib64/bionic/" + simpleName,
             "/system/lib64/" + simpleName,
             "/apex/com.android.art/lib64/" + simpleName,
+            "/apex/com.android.runtime/lib/bionic/" + simpleName,
+            "/system/lib/" + simpleName,
+            "/apex/com.android.art/lib/" + simpleName,
             lpparam != null && lpparam.appInfo != null ? lpparam.appInfo.nativeLibraryDir + "/" + simpleName : null,
             "/data/data/com.tencent.mobileqq/txlib/" + simpleName,
             "/data/user/0/com.tencent.mobileqq/txlib/" + simpleName,
-            "/data/data/com.tencent.mobileqq/files/" + simpleName
+            "/data/user/0/com.tencent.mobileqq/txPttlib/" + simpleName,
+            "/data/user/0/com.tencent.mobileqq/jpeglib/" + simpleName,
+            "/data/user/0/com.tencent.mobileqq/app_lib/" + simpleName,
+            "/data/data/com.tencent.mobileqq/files/" + simpleName,
+            "/data/user/0/com.tencent.mobileqq/files/" + simpleName,
+            "/data/user/0/com.tencent.mobileqq/files/qqso/" + simpleName
         };
 
         for (String path : candidatePaths) {
@@ -3685,9 +3836,73 @@ public class QQ950PatchHook {
             } catch (Throwable ignored) {}
         }
 
-        // 4. Fallback safe buffer to prevent leaking hooked memory opcodes to telemetry
+        // 4. Memory Snapshot with Selective Trampoline Sanitization
+        // Instead of returning an all-zero buffer (which immediately triggers server kick!),
+        // read authentic memory bytes from /proc/self/mem or Unsafe, and sanitize any hook trampoline opcodes
+        if (mapping != null && mapping.baseVAddr > 0) {
+            byte[] memBuf = null;
+            long targetAddr = mapping.baseVAddr + start;
+            try (RandomAccessFile memRaf = new RandomAccessFile("/proc/self/mem", "r")) {
+                memRaf.seek(targetAddr);
+                byte[] buf = new byte[len];
+                int read = memRaf.read(buf, 0, len);
+                if (read == len) {
+                    memBuf = buf;
+                }
+            } catch (Throwable ignored) {}
+
+            // Fallback to Unsafe virtual memory direct read if /proc/self/mem access is denied
+            if (memBuf == null) {
+                initUnsafe();
+                if (sUnsafeInstance != null && sUnsafeGetByteMethod != null) {
+                    try {
+                        byte[] buf = new byte[len];
+                        for (int i = 0; i < len; i++) {
+                            buf[i] = (Byte) sUnsafeGetByteMethod.invoke(sUnsafeInstance, targetAddr + i);
+                        }
+                        memBuf = buf;
+                    } catch (Throwable ignored) {}
+                }
+            }
+
+            if (memBuf != null) {
+                if (len >= 8) {
+                    int op1 = (memBuf[0] & 0xFF) | ((memBuf[1] & 0xFF) << 8) | ((memBuf[2] & 0xFF) << 16) | ((memBuf[3] & 0xFF) << 24);
+                    int op2 = (memBuf[4] & 0xFF) | ((memBuf[5] & 0xFF) << 8) | ((memBuf[6] & 0xFF) << 16) | ((memBuf[7] & 0xFF) << 24);
+                    if ((op1 == 0x58000050 || op1 == 0x58000051) && (op2 == 0xd61f0200 || op2 == 0xd61f0220)) {
+                        // Dobby trampoline detected! Neutralize with clean standard prologue: paciasp / stp x29, x30, [sp, #-16]!
+                        memBuf[0] = (byte) 0x3f; memBuf[1] = (byte) 0x23; memBuf[2] = (byte) 0x03; memBuf[3] = (byte) 0xd5;
+                        memBuf[4] = (byte) 0xfd; memBuf[5] = (byte) 0x7b; memBuf[6] = (byte) 0xbf; memBuf[7] = (byte) 0xa9;
+                        XposedEntry.log("[MQPPatch] Sanitized trampoline in memory snapshot for " + simpleName + " at 0x" + Long.toHexString(targetAddr));
+                    }
+                }
+                XposedEntry.log("[MQPPatch] Memory snapshot served for " + simpleName + " [" + start + ":" + end + "]");
+                return memBuf;
+            }
+        }
+
+        // 5. Ultimate Fallback safe buffer
         XposedEntry.log("[MQPPatch] Fallback clean zeroed buffer for unmapped module: " + moduleName + " [" + start + ":" + end + "]");
         return new byte[len];
+    }
+
+    private static volatile Object sUnsafeInstance = null;
+    private static volatile Method sUnsafeGetByteMethod = null;
+    private static boolean sUnsafeInitialized = false;
+
+    private static void initUnsafe() {
+        if (sUnsafeInitialized) return;
+        synchronized (QQ950PatchHook.class) {
+            if (sUnsafeInitialized) return;
+            try {
+                Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
+                Field f = unsafeClass.getDeclaredField("theUnsafe");
+                f.setAccessible(true);
+                sUnsafeInstance = f.get(null);
+                sUnsafeGetByteMethod = unsafeClass.getMethod("getByte", long.class);
+            } catch (Throwable ignored) {}
+            sUnsafeInitialized = true;
+        }
     }
 
     /**
@@ -4148,6 +4363,516 @@ public class QQ950PatchHook {
             XposedEntry.log("[SyncPatch] Hooked QQAppInterface.setLoadingState for instant reconnect recovery");
         }
     }
+
+    // ==================== Tier 12 - 17: QQ 9.3.75 Deep Security & Polling Defenses ====================
+
+    private static final java.util.Set<Class<?>> sHooked9375Classes =
+        java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+    public static void hookQQ9375DefensesWithClassLoader(ClassLoader cl) {
+        if (cl == null) return;
+        hookQQ9375SafeCenterAndRepack(null, cl);
+        hookApkFileMd5AndSignatures(null, cl);
+        hookIntChkPBDefenses(null, cl);
+        hookGanliangAndAntEstDefenses(null, cl);
+        hookTuringPhoneAndBridge(null, cl);
+        hookSafeReportAndXps(null, cl);
+    }
+
+    /**
+     * Tier 12: SafeCenter Push & Repack Circuit Defenses.
+     * Integrates DexKit dynamic component discovery first, with automatic fallback
+     * to the running HostVersion profile.
+     */
+    public static void hookQQ9375SafeCenterAndRepack(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
+        if (cl == null) cl = HookConfig.getClassLoader();
+        if (cl == null) return;
+
+        final IVersionProfile profile = HostVersionManager.getCurrentProfile();
+        XposedEntry.log("[SafeCenterRepack] Initializing SafeCenter & Repack defenses with profile: " + profile.getVersionName());
+
+        // 1. Dynamic Discovery via DexKit first; fallback to version profile
+        Set<String> pushHandlerNames = new LinkedHashSet<>();
+        List<DexMethodData> dexPushList = DexKitDetector.getSafeCenterPushHandlers();
+        if (dexPushList != null && !dexPushList.isEmpty()) {
+            for (DexMethodData dmd : dexPushList) {
+                if (dmd != null && dmd.getClassName() != null) {
+                    pushHandlerNames.add(dmd.getClassName());
+                }
+            }
+            XposedEntry.log("[SafeCenterRepack] DexKit discovered push handlers: " + pushHandlerNames);
+        }
+        if (profile.getFallbackPushHandlerClass() != null) {
+            pushHandlerNames.add(profile.getFallbackPushHandlerClass());
+        }
+        pushHandlerNames.add("com.tencent.mobileqq.app.di");
+        pushHandlerNames.add("com.tencent.mobileqq.app.dj");
+
+        for (String handlerCls : pushHandlerNames) {
+            Class<?> clazz = XposedHelpers.findClassIfExists(handlerCls, cl);
+            if (clazz != null && sHooked9375Classes.add(clazz)) {
+                HookUtils.hookAllMethods(clazz, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                        if (p.args == null || p.args.length < 1 || !(p.args[0] instanceof byte[])) return;
+                        try {
+                            byte[] bArr = (byte[]) p.args[0];
+                            Class<?> msgBodyCls = XposedHelpers.findClassIfExists("tencent.im.s2c.msgtype0x210.submsgtype0x4a.MsgBody", p.thisObject.getClass().getClassLoader());
+                            if (msgBodyCls != null) {
+                                Object msgBody = msgBodyCls.newInstance();
+                                XposedHelpers.callMethod(msgBody, "mergeFrom", (Object) bArr);
+                                boolean has = (Boolean) XposedHelpers.callMethod(msgBody, "has");
+                                Object uint32SecCmd = XposedHelpers.getObjectField(msgBody, "uint32_sec_cmd");
+                                if (has && uint32SecCmd != null) {
+                                    boolean cmdHas = (Boolean) XposedHelpers.callMethod(uint32SecCmd, "has");
+                                    if (cmdHas) {
+                                        int cmd = (Integer) XposedHelpers.callMethod(uint32SecCmd, "get");
+                                        XposedEntry.log("[SafeCenterPush] Intercepted submsgtype0x4a sec_cmd=" + cmd + " on " + handlerCls);
+                                        // DO NOT drop cmd 1 (Repack challenge) or cmd 2 (IntChk),
+                                        // because dropping them causes server timeout kicks!
+                                        // Our SignatureReport & PB sanitizers guarantee 100% clean official data!
+                                        // ONLY drop cmd 4 (SecCheckBanner alert UI popup):
+                                        if (cmd == 4) {
+                                            p.setResult(null);
+                                            XposedEntry.log("[SafeCenterPush] Disarmed submsgtype0x4a sec_cmd=4 (SecCheckBanner popup blocked)");
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Throwable t) {
+                            XposedEntry.log("[SafeCenterPush] Error inspecting submsgtype0x4a: " + t.getMessage());
+                        }
+                    }
+                });
+                XposedEntry.log("[SafeCenterPush] Hooked SafeCenterPushHandler: " + handlerCls);
+            }
+        }
+
+        // 2. Dynamic Discovery for Repack Checkers via DexKit first; fallback to profile
+        Set<String> repackCheckerNames = new LinkedHashSet<>();
+        List<DexMethodData> dexRepackList = DexKitDetector.getRepackCheckers();
+        if (dexRepackList != null && !dexRepackList.isEmpty()) {
+            for (DexMethodData dmd : dexRepackList) {
+                if (dmd != null && dmd.getClassName() != null) {
+                    repackCheckerNames.add(dmd.getClassName());
+                }
+            }
+            XposedEntry.log("[SafeCenterRepack] DexKit discovered repack checkers: " + repackCheckerNames);
+        }
+        if (profile.getFallbackRepackHelperClass() != null) {
+            repackCheckerNames.add(profile.getFallbackRepackHelperClass());
+        }
+        repackCheckerNames.add("com.tencent.ctsz.m");
+        repackCheckerNames.add("com.tencent.mezs.a");
+
+        // Notice: We DO NOT neutralize d() or b() / c(), because the server needs SignatureReport!
+        // Instead, the data inside SignatureReport is sanitized to official release values.
+
+        // 3. Hook Protobuf Repack & Signature Reporting: signature$SignatureReport
+        Class<?> sigReportCls = XposedHelpers.findClassIfExists("com.tencent.ims.signature$SignatureReport", cl);
+        if (sigReportCls != null && sHooked9375Classes.add(sigReportCls)) {
+            XC_MethodHook sanitizeReportHook = new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    sanitizeSignatureReport(p.thisObject);
+                }
+            };
+            HookUtils.hookAllConstructors(sigReportCls, sanitizeReportHook);
+            HookUtils.hookAllMethods(sigReportCls, "toByteArray", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    sanitizeSignatureReport(p.thisObject);
+                }
+            });
+        }
+
+        // 4. Pre-warm SecSig SharedPreferences cache with authentic official PASS status
+        prewarmSecSigCache(cl, profile);
+
+        // 5. Backstop hook for signature$SignatureResult & signature$SignatureKickData:
+        // Ensure u32_check_result == 0 as fallback without arbitrarily clearing display text.
+        Class<?> sigResultCls = XposedHelpers.findClassIfExists("com.tencent.ims.signature$SignatureResult", cl);
+        if (sigResultCls != null && sHooked9375Classes.add(sigResultCls)) {
+            HookUtils.hookAllMethods(sigResultCls, "mergeFrom", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    try {
+                        Object u32CheckResult = XposedHelpers.getObjectField(p.thisObject, "u32_check_result");
+                        if (u32CheckResult != null && (Integer) XposedHelpers.callMethod(u32CheckResult, "get") != 0) {
+                            XposedHelpers.callMethod(u32CheckResult, "set", 0);
+                            XposedEntry.log("[SignatureResult] Fallback: normalized SignatureResult.u32_check_result -> 0 (PASS)");
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            });
+        }
+
+        Class<?> sigKickCls = XposedHelpers.findClassIfExists("com.tencent.ims.signature$SignatureKickData", cl);
+        if (sigKickCls != null && sHooked9375Classes.add(sigKickCls)) {
+            HookUtils.hookAllMethods(sigKickCls, "mergeFrom", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    try {
+                        Object u32CheckResult = XposedHelpers.getObjectField(p.thisObject, "u32_check_result");
+                        if (u32CheckResult != null && (Integer) XposedHelpers.callMethod(u32CheckResult, "get") != 0) {
+                            XposedHelpers.callMethod(u32CheckResult, "set", 0);
+                            XposedEntry.log("[SignatureKickData] Fallback: normalized SignatureKickData.u32_check_result -> 0 (PASS)");
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            });
+        }
+    }
+
+    private static void prewarmSecSigCache(ClassLoader cl, IVersionProfile profile) {
+        try {
+            Class<?> baseAppCls = XposedHelpers.findClassIfExists("com.tencent.qphone.base.util.BaseApplication", cl);
+            if (baseAppCls != null) {
+                android.content.Context ctx = (android.content.Context) XposedHelpers.callStaticMethod(baseAppCls, "getContext");
+                if (ctx != null) {
+                    android.content.SharedPreferences sp = ctx.getSharedPreferences("SecSig", 0);
+                    android.content.SharedPreferences.Editor edit = sp.edit();
+                    edit.putString("SecMd5Entry", profile.getOfficialApkMd5Upper());
+                    edit.putInt("SecResEntry", 1 ^ 18); // 1 = PASS (1 ^ 18 = 19)
+                    edit.putLong("SecStampEntry", System.currentTimeMillis() ^ 18);
+                    edit.putInt("SecCacheTime", 604800); // 7 days official cache
+                    edit.apply();
+                    XposedEntry.log("[SecSigCache] Pre-warmed SecSig SharedPreferences with official PASS credentials for " + profile.getVersionName());
+                }
+            }
+        } catch (Throwable t) {
+            XposedEntry.log("[SecSigCache] Note on pre-warming: " + t.getMessage());
+        }
+    }
+
+    private static void sanitizeSignatureReport(Object obj) {
+        if (obj == null) return;
+        try {
+            final IVersionProfile profile = HostVersionManager.getCurrentProfile();
+            final HostVersion hostVer = HostVersionManager.getHostVersion();
+            final String officialVerName = hostVer != null ? hostVer.getVersionName() : profile.getVersionName();
+            final String officialMd5 = profile.getOfficialApkMd5Upper();
+            final String officialSig = profile.getOfficialSignatureHashUpper();
+
+            Object isRepack = XposedHelpers.getObjectField(obj, "u32_is_repack");
+            if (isRepack != null) XposedHelpers.callMethod(isRepack, "set", 0);
+
+            Object clientType = XposedHelpers.getObjectField(obj, "u32_client_type");
+            if (clientType != null) XposedHelpers.callMethod(clientType, "set", 0);
+
+            Object signature = XposedHelpers.getObjectField(obj, "str_signature");
+            if (signature != null) XposedHelpers.callMethod(signature, "set", officialSig);
+
+            Object packname = XposedHelpers.getObjectField(obj, "str_packname");
+            if (packname != null) XposedHelpers.callMethod(packname, "set", "com.tencent.mobileqq");
+
+            Object version = XposedHelpers.getObjectField(obj, "str_version");
+            if (version != null) XposedHelpers.callMethod(version, "set", officialVerName);
+
+            Object md5 = XposedHelpers.getObjectField(obj, "str_md5");
+            if (md5 != null) XposedHelpers.callMethod(md5, "set", officialMd5);
+
+            XposedEntry.log("[SignatureReport] Injected official credentials into SignatureReport: ver="
+                + officialVerName + ", md5=" + officialMd5 + ", sig=" + officialSig);
+        } catch (Throwable t) {
+            XposedEntry.log("[SignatureReport] Error sanitizing: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Tier 13: APK File MD5 & Source Signature Defense (Adapted to current HostVersion).
+     */
+    public static void hookApkFileMd5AndSignatures(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
+        if (cl == null) cl = HookConfig.getClassLoader();
+        if (cl == null) return;
+
+        final IVersionProfile profile = HostVersionManager.getCurrentProfile();
+        final String officialMd5Upper = profile.getOfficialApkMd5Upper();
+        final String officialSigUpper = profile.getOfficialSignatureHashUpper();
+
+        XposedEntry.log("[Tier13] Initializing APK File MD5 & Signature Source defenses: md5=" + officialMd5Upper);
+
+        // 1. com.tencent.mdm.a.a(String path)
+        Class<?> mdmA = XposedHelpers.findClassIfExists("com.tencent.mdm.a", cl);
+        if (mdmA != null && sHooked9375Classes.add(mdmA)) {
+            HookUtils.hookAllMethods(mdmA, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    p.setResult(officialMd5Upper);
+                    XposedEntry.log("[MDMPatch] com.tencent.mdm.a.a -> forced official MD5: " + officialMd5Upper);
+                }
+            });
+        }
+
+        // 2. com.tencent.mobileqq.utils.SecUtil.getFileMd5(File), (String), (InputStream)
+        Class<?> secUtilCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.utils.SecUtil", cl);
+        if (secUtilCls != null && sHooked9375Classes.add(secUtilCls)) {
+            XC_MethodHook md5Hook = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    if (p.args == null || p.args.length < 1 || p.args[0] == null) return;
+                    String targetPath = null;
+                    if (p.args[0] instanceof File) {
+                        targetPath = ((File) p.args[0]).getAbsolutePath();
+                    } else if (p.args[0] instanceof String) {
+                        targetPath = (String) p.args[0];
+                    } else if (p.args[0] instanceof java.io.InputStream) {
+                        // SecUtil.toHexString strictly formats in UPPERCASE hex digits
+                        p.setResult(officialMd5Upper);
+                        XposedEntry.log("[SecUtilPatch] SecUtil.getFileMd5(InputStream) -> official MD5: " + officialMd5Upper);
+                        return;
+                    }
+                    if (targetPath != null && (targetPath.contains("mobileqq") || targetPath.contains(".apk"))) {
+                        // SecUtil.toHexString strictly formats in UPPERCASE hex digits
+                        p.setResult(officialMd5Upper);
+                        XposedEntry.log("[SecUtilPatch] SecUtil.getFileMd5(" + targetPath + ") -> official MD5: " + officialMd5Upper);
+                    }
+                }
+            };
+            HookUtils.hookAllMethods(secUtilCls, "getFileMd5", md5Hook);
+
+            HookUtils.hookAllMethods(secUtilCls, "getSignatureHash", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    // SecUtil.getSignatureHash returns UPPERCASE hex digest
+                    p.setResult(officialSigUpper);
+                }
+            });
+
+            HookUtils.hookAllMethods(secUtilCls, "getSign", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    // CRITICAL FIX: SecUtil.getSign returns byte[] (signature DER bytes), NOT String!
+                    try {
+                        byte[] certBytes = android.util.Base64.decode(
+                            DynamicRootDetectionHook.OFFICIAL_QQ_SIGNATURE_B64,
+                            android.util.Base64.DEFAULT
+                        );
+                        p.setResult(certBytes);
+                        XposedEntry.log("[SecUtilPatch] SecUtil.getSign -> returned official DER signature byte array");
+                    } catch (Throwable t) {
+                        XposedEntry.log("[SecUtilPatch] SecUtil.getSign error: " + t.getMessage());
+                    }
+                }
+            });
+        }
+
+        // 3. com.tencent.usq.a.b(InputStream)
+        Class<?> usqA = XposedHelpers.findClassIfExists("com.tencent.usq.a", cl);
+        if (usqA != null && sHooked9375Classes.add(usqA)) {
+            HookUtils.hookAllMethods(usqA, "b", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    p.setResult(officialMd5Upper);
+                    XposedEntry.log("[UsqPatch] com.tencent.usq.a.b -> official MD5: " + officialMd5Upper);
+                }
+            });
+        }
+    }
+
+    /**
+     * Tier 14: PB-Level Integrity Check Neutralization & Native Strike Defenses.
+     */
+    public static void hookIntChkPBDefenses(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
+        if (cl == null) cl = HookConfig.getClassLoader();
+        if (cl == null) return;
+
+        XposedEntry.log("[Tier14] Initializing intchk PB-level result and native strike defenses");
+
+        // 1. Hook com.tencent.mqp.app.sec.MQPSecUtil native methods:
+        // memchk -> returns true (MATCH/PASS) so uint32_memchk_result is natively computed as 1!
+        Class<?> mqpSecUtilCls = XposedHelpers.findClassIfExists("com.tencent.mqp.app.sec.MQPSecUtil", cl);
+        if (mqpSecUtilCls != null && sHooked9375Classes.add(mqpSecUtilCls)) {
+            HookUtils.hookAllMethods(mqpSecUtilCls, "memchk", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    p.setResult(true);
+                    XposedEntry.log("[MQPSecUtil] memchk -> forced true (memory pattern matched/PASS)");
+                }
+            });
+            HookUtils.hookAllMethods(mqpSecUtilCls, "do_report", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    p.setResult(null);
+                    XposedEntry.log("[MQPSecUtil] Neutralized do_report (AntiTrace violation delivery blocked)");
+                }
+            });
+            HookUtils.hookAllMethods(mqpSecUtilCls, "antitrace", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    p.setResult(null);
+                }
+            });
+        }
+
+        // 2. Hook com.tencent.ims.intchk$CheckResult: force uint32_memchk_result -> 1 (PASS)
+        Class<?> checkResultCls = XposedHelpers.findClassIfExists("com.tencent.ims.intchk$CheckResult", cl);
+        if (checkResultCls != null && sHooked9375Classes.add(checkResultCls)) {
+            HookUtils.hookAllMethods(checkResultCls, "toByteArray", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    try {
+                        Object typeField = XposedHelpers.getObjectField(p.thisObject, "uint32_check_type");
+                        if (typeField != null && (Boolean) XposedHelpers.callMethod(typeField, "has")) {
+                            int type = (Integer) XposedHelpers.callMethod(typeField, "get");
+                            if (type == 1) { // memchk
+                                Object resField = XposedHelpers.getObjectField(p.thisObject, "uint32_memchk_result");
+                                if (resField != null) {
+                                    XposedHelpers.callMethod(resField, "set", 1); // 1 = PASS
+                                    XposedEntry.log("[IntChkPB] Forced uint32_memchk_result -> 1 (PASS)");
+                                }
+                            }
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            });
+        }
+
+        // 3. Hook com.tencent.ims.intchk$ReportCheckResultRsp: Disarm server strike at PB level if present
+        Class<?> reportRspCls = XposedHelpers.findClassIfExists("com.tencent.ims.intchk$ReportCheckResultRsp", cl);
+        if (reportRspCls != null && sHooked9375Classes.add(reportRspCls)) {
+            HookUtils.hookAllMethods(reportRspCls, "mergeFrom", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    try {
+                        Object needStrike = XposedHelpers.getObjectField(p.thisObject, "uint32_need_strike");
+                        if (needStrike != null && (Integer) XposedHelpers.callMethod(needStrike, "get") == 1) {
+                            XposedHelpers.callMethod(needStrike, "set", 2); // 2 = NO STRIKE
+                            XposedEntry.log("[IntChkPB] Disarmed intchk strike response: uint32_need_strike -> 2 (NO STRIKE)");
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            });
+        }
+    }
+
+    /**
+     * Tier 15: Screen / Display / Remote Control Defense Expansion (Ganliang & AntEst).
+     */
+    public static void hookGanliangAndAntEstDefenses(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
+        if (cl == null) cl = HookConfig.getClassLoader();
+        if (cl == null) return;
+
+        XposedEntry.log("[Tier15] Initializing Ganliang Display & AntEst Security Estimation defenses");
+
+        // 1. Ganliang.h() (DisplayListener registration) & switch
+        Class<?> ganliangCls = XposedHelpers.findClassIfExists("com.tencent.qqprotect.ganliang.Ganliang", cl);
+        if (ganliangCls != null && sHooked9375Classes.add(ganliangCls)) {
+            HookUtils.hookAllMethods(ganliangCls, "h", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    p.setResult(null);
+                    XposedEntry.log("[GanliangPatch] Neutralized Ganliang.h (prevented DisplayListener registration)");
+                }
+            });
+            HookUtils.hookAllMethods(ganliangCls, "isSwitchOn", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    if (p.args != null && p.args.length > 0 && "ganliang_enable_switch".equals(p.args[0])) {
+                        p.setResult(false);
+                        XposedEntry.log("[GanliangPatch] Forced ganliang_enable_switch -> false");
+                    }
+                }
+            });
+        }
+
+        // 2. AntEst & QSec: DO NOT force empty string!
+        // Empty strings trigger missing-security-token heuristics on Tencent backend risk servers.
+        // Under our native Dobby/maps/getprop environment filtering, native QsecEst produces clean normal tokens.
+        // If native returns null or empty, provide the authentic "e_null" fallback.
+        Class<?> qsecEstCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.qsec.qsecest.QsecEst", cl);
+        if (qsecEstCls != null && sHooked9375Classes.add(qsecEstCls)) {
+            HookUtils.hookAllMethods(qsecEstCls, "a", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    if (p.getResult() == null || "".equals(p.getResult())) {
+                        p.setResult("e_null"); // Official fallback token when not initialized
+                    }
+                }
+            });
+        }
+    }
+
+    /**
+     * Tier 16: Turing PhoneService & Turing Bridge Completion.
+     */
+    public static void hookTuringPhoneAndBridge(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
+        if (cl == null) cl = HookConfig.getClassLoader();
+        if (cl == null) return;
+
+        XposedEntry.log("[Tier16] Initializing Turing PhoneService & Bridge defenses");
+
+        Class<?> turingPhoneCls = XposedHelpers.findClassIfExists("com.tencent.turingfd.sdk.xq.TuringPhoneService", cl);
+        if (turingPhoneCls != null && sHooked9375Classes.add(turingPhoneCls)) {
+            HookUtils.hookAllMethods(turingPhoneCls, "reqPhoneToken", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    if (p.getResult() != null) {
+                        try {
+                            XposedHelpers.setLongField(p.getResult(), "a", 0L); // ErrorCode 0
+                        } catch (Throwable ignored) {}
+                    }
+                }
+            });
+        }
+
+        Set<String> turingBridgeNames = new LinkedHashSet<>();
+        List<DexMethodData> dexTuringList = DexKitDetector.getTuringBridges();
+        if (dexTuringList != null && !dexTuringList.isEmpty()) {
+            for (DexMethodData dmd : dexTuringList) {
+                if (dmd != null && dmd.getClassName() != null) {
+                    turingBridgeNames.add(dmd.getClassName());
+                }
+            }
+            XposedEntry.log("[TuringBridge] DexKit discovered Turing bridges: " + turingBridgeNames);
+        }
+        final IVersionProfile profile = HostVersionManager.getCurrentProfile();
+        if (profile.getFallbackTuringBridgeClass() != null) {
+            turingBridgeNames.add(profile.getFallbackTuringBridgeClass());
+        }
+        turingBridgeNames.add("com.tencent.mobileqq.turingfd.i");
+
+        for (String turingCls : turingBridgeNames) {
+            Class<?> turingBridgeI = XposedHelpers.findClassIfExists(turingCls, cl);
+            if (turingBridgeI != null && sHooked9375Classes.add(turingBridgeI)) {
+                HookUtils.hookAllMethods(turingBridgeI, "d", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                        String ticket = getOrGenerateOpenIdTicket();
+                        if (ticket != null && ticket.length() >= 16) {
+                            p.setResult(ticket);
+                        }
+                    }
+                });
+                HookUtils.hookAllMethods(turingBridgeI, "f", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                        String token = getOrGenerateDeviceToken();
+                        if (token != null && token.length() >= 16) {
+                            p.setResult(token);
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringBridge] Hooked Turing bridge class: " + turingCls);
+            }
+        }
+    }
+
+    /**
+     * Tier 17: SafeReport & XpsReport Telemetry Normalization.
+     */
+    public static void hookSafeReportAndXps(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
+        if (cl == null) cl = HookConfig.getClassLoader();
+        if (cl == null) return;
+
+        XposedEntry.log("[Tier17] Initializing SafeReport and XpsReport telemetry normalization");
+
+        // Do NOT arbitrarily clear report items to empty!
+        // Empty report packets trigger missing-telemetry and packet-format anomaly heuristics on the server.
+        // Genuine logging items are allowed to pass through normally.
+    }
 }
+
 
 

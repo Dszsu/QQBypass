@@ -139,6 +139,9 @@ public class DexKitDetector {
             findAndroidIdReaders();
             findSerialReaders();
             findTuringFdProcReaders();
+            findSafeCenterPushHandlers();
+            findRepackCheckers();
+            findTuringBridges();
 
             XposedBridge.log("[" + TAG + "] === Dynamic scan complete, writing to disk cache ===");
             DexKitCacheManager.saveCache(lpparam, detectionCache);
@@ -590,6 +593,81 @@ public class DexKitDetector {
         } catch (Exception e) {
             return new ArrayList<>();
         }
+    }
+
+    public static List<DexMethodData> findSafeCenterPushHandlers() {
+        if (detectionCache.containsKey("safecenter_push")) {
+            return detectionCache.get("safecenter_push");
+        }
+        if (dexKitBridge == null) return new ArrayList<>();
+
+        try {
+            XposedBridge.log("[" + TAG + "] Searching for SafeCenter push handlers...");
+            List<DexMethodData> results = findMethodsUsingAnyString(
+                "SafeCenterPushHandler", "onReceive: onReceive push package"
+            );
+            detectionCache.put("safecenter_push", results);
+            XposedBridge.log("[" + TAG + "] Found " + results.size() + " SafeCenter push handlers");
+            return results;
+        } catch (Exception e) {
+            XposedBridge.log("[" + TAG + "] Error finding SafeCenter push handlers: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    public static List<DexMethodData> findRepackCheckers() {
+        if (detectionCache.containsKey("repack_checker")) {
+            return detectionCache.get("repack_checker");
+        }
+        if (dexKitBridge == null) return new ArrayList<>();
+
+        try {
+            XposedBridge.log("[" + TAG + "] Searching for Repack signature checkers...");
+            List<DexMethodData> results = findMethodsUsingAnyString(
+                "sig_check", "SignatureReport", "SignatureResult"
+            );
+            detectionCache.put("repack_checker", results);
+            XposedBridge.log("[" + TAG + "] Found " + results.size() + " Repack signature checkers");
+            return results;
+        } catch (Exception e) {
+            XposedBridge.log("[" + TAG + "] Error finding Repack signature checkers: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    public static List<DexMethodData> findTuringBridges() {
+        if (detectionCache.containsKey("turing_bridge")) {
+            return detectionCache.get("turing_bridge");
+        }
+        if (dexKitBridge == null) return new ArrayList<>();
+
+        try {
+            XposedBridge.log("[" + TAG + "] Searching for Turing bridge components...");
+            List<DexMethodData> results = findMethodsUsingAnyString(
+                "TuringSdkInitHelper", "turing risk detect success, deviceToken: ", "turing init failed, error: "
+            );
+            detectionCache.put("turing_bridge", results);
+            XposedBridge.log("[" + TAG + "] Found " + results.size() + " Turing bridge components");
+            return results;
+        } catch (Exception e) {
+            XposedBridge.log("[" + TAG + "] Error finding Turing bridge: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    public static List<DexMethodData> getSafeCenterPushHandlers() {
+        List<DexMethodData> list = detectionCache.get("safecenter_push");
+        return list != null ? list : java.util.Collections.emptyList();
+    }
+
+    public static List<DexMethodData> getRepackCheckers() {
+        List<DexMethodData> list = detectionCache.get("repack_checker");
+        return list != null ? list : java.util.Collections.emptyList();
+    }
+
+    public static List<DexMethodData> getTuringBridges() {
+        List<DexMethodData> list = detectionCache.get("turing_bridge");
+        return list != null ? list : java.util.Collections.emptyList();
     }
 
     private static List<DexMethodData> findMethodsUsingAnyString(String... markers) {

@@ -40,8 +40,9 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         log("Package: " + lpparam.packageName);
         log("Process: " + lpparam.processName);
 
-        // Initialize configuration
+        // Initialize configuration and detect host version profile
         HookConfig.init(lpparam);
+        io.github.xalsace.qqbypass.version.HostVersionManager.init(lpparam);
         io.github.xalsace.qqbypass.utils.ReportAuditManager.setProcessName(lpparam.processName);
 
         // Process gate: DexKit parses the whole ~112MB APK. QQ runs
@@ -184,6 +185,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
             DynamicRootDetectionHook.hookLateStage(cl);
             SecurityLibrariesEnhanceHook.hookLateStage(cl);
             QAuxvCompatHook.hookLateStage(cl);
+            io.github.xalsace.qqbypass.version.HostVersionManager.getCurrentProfile().applyVersionSpecificHooks(HookConfig.loadPackageParam, cl);
         } catch (Throwable t) {
             logError("Error dispatching late-stage hooks: " + t.getMessage(), t);
         }

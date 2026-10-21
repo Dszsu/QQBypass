@@ -105,7 +105,8 @@ public class SecurityLibrariesEnhanceHook {
         hookSafe(cl, feUtilsA, new ClassHookCallback() {
             @Override
             public void onClassFound(Class<?> clazz) {
-                // Hook all methods in fe.utils.a to prevent environment anomaly detection
+                // Hook boolean anomaly detection methods in fe.utils.a to return false (normal)
+                // DO NOT hook String methods to return "" because c(String) is the internal string decryptor!
                 for (Method m : clazz.getDeclaredMethods()) {
                     Class<?> retType = m.getReturnType();
                     if (retType == boolean.class) {
@@ -113,20 +114,6 @@ public class SecurityLibrariesEnhanceHook {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                                 param.setResult(false);
-                            }
-                        });
-                    } else if (retType == String.class) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult("");
-                            }
-                        });
-                    } else if (retType == int.class) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult(0);
                             }
                         });
                     }

@@ -40,9 +40,9 @@ public class NetworkReportHook {
     };
 
     // Targeted block: only pure telemetry and security report commands
+    // Note: trpc.o3.report.Report.SsoReport and SsoEventReport are NOT blocked here because
+    // they carry official sanitized APK signature baseline reports (0df00071646) required by the server.
     private static final String[] TELEMETRY_BLOCK_COMMANDS = {
-        "trpc.o3.report.Report.SsoReport",
-        "trpc.o3.report.Report.SsoEventReport",
         "trpc.ilive_cdn.report",
         "trpc.qq_security.",
         "OidbSvc.0xd79",
@@ -362,6 +362,7 @@ public class NetworkReportHook {
                 List<DexMethodData> procReaders = DexKitDetector.findTuringFdProcReaders();
                 XposedEntry.log("[TuringFD] found " + procReaders.size() + " proc readers by fingerprint");
 
+                final String legitimateProcName = (lpparam != null && lpparam.processName != null) ? lpparam.processName : "com.tencent.mobileqq";
                 for (DexMethodData md : procReaders) {
                     try {
                         Member method = md.getMethodInstance(lpparam.classLoader);
@@ -371,11 +372,21 @@ public class NetworkReportHook {
 
                         XposedBridge.hookMethod(method, new XC_MethodHook() {
                             @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult("");
+                            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                                Object res = param.getResult();
+                                if (res == null || "".equals(res)) {
+                                    param.setResult(legitimateProcName);
+                                    return;
+                                }
+                                if (res instanceof String) {
+                                    String str = (String) res;
+                                    if (isSensitiveTuringPath(str)) {
+                                        param.setResult(legitimateProcName);
+                                    }
+                                }
                             }
                         });
-                        XposedEntry.log("[TuringFD] neutralized proc reader: "
+                        XposedEntry.log("[TuringFD] normalized proc reader: "
                             + md.getClassName() + "." + md.getMethodName());
                     } catch (Throwable t) {
                         XposedEntry.log("[TuringFD] failed to hook proc reader: " + t.getMessage());
