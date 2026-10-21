@@ -3,6 +3,7 @@ package io.github.xalsace.qqbypass;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
+import io.github.xalsace.qqbypass.config.CompileHookConfig;
 import io.github.xalsace.qqbypass.config.HookConfig;
 import io.github.xalsace.qqbypass.detector.DexKitDetector;
 import io.github.xalsace.qqbypass.hooks.*;
@@ -125,7 +126,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
             QQ950PatchHook.hook(lpparam);
 
             // Layer 7: QAuxv (QNotified) compatibility
-            if (isMainProcess) {
+            if (isMainProcess && CompileHookConfig.ENABLE_QAUXILIARY_FILE_COMPAT) {
                 io.github.xalsace.qqbypass.hooks.QAuxvCompatHook.hook(lpparam);
             }
 
@@ -171,7 +172,9 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
             QQ950PatchHook.hookLateStage(cl);
             DynamicRootDetectionHook.hookLateStage(cl);
             SecurityLibrariesEnhanceHook.hookLateStage(cl);
-            QAuxvCompatHook.hookLateStage(cl);
+            if (CompileHookConfig.ENABLE_QAUXILIARY_FILE_COMPAT) {
+                QAuxvCompatHook.hookLateStage(cl);
+            }
             io.github.xalsace.qqbypass.version.HostVersionManager.getCurrentProfile().applyVersionSpecificHooks(HookConfig.loadPackageParam, cl);
         } catch (Throwable t) {
             logError("Error dispatching late-stage hooks: " + t.getMessage(), t);

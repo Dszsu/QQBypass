@@ -16,6 +16,7 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 import io.github.xalsace.qqbypass.XposedEntry;
+import io.github.xalsace.qqbypass.config.CompileHookConfig;
 import io.github.xalsace.qqbypass.config.HookConfig;
 import io.github.xalsace.qqbypass.utils.HookUtils;
 
@@ -40,12 +41,18 @@ public class QAuxvCompatHook {
     private static volatile boolean sBaseApkPatched = false;
 
     public static void hook(final XC_LoadPackage.LoadPackageParam lpparam) {
+        if (!CompileHookConfig.ENABLE_QAUXILIARY_FILE_COMPAT) {
+            return;
+        }
         tryScanExistingClassLoaders();
         ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
         hookUftwrapperBD(cl);
     }
 
     public static void hookLateStage(ClassLoader cl) {
+        if (!CompileHookConfig.ENABLE_QAUXILIARY_FILE_COMPAT) {
+            return;
+        }
         if (cl == null) return;
         try {
             if (!sBaseApkPatched) {

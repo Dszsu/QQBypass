@@ -3,11 +3,12 @@ package io.github.xalsace.qqbypass.config;
 /**
  * 编译期 Hook 条件编译配置 (Compile-Time Conditional Hook Configuration)
  *
- * 保留 4 个受管理的编译期条件编译开关：
+ * 保留 5 个受管理的编译期条件编译开关：
  * 1. 拦截下线 (ENABLE_KICK_INTERCEPT)
  * 2. 设备修改 (ENABLE_DEVICE_SPOOF，附带设备参数)
  * 3. 模拟器伪装 (ENABLE_EMULATOR_SPOOF)
  * 4. 记录 QQ 上报 (ENABLE_RECORD_QQ_REPORT，默认开启)
+ * 5. QAuxiliary 文件处理报错兼容 (ENABLE_QAUXILIARY_FILE_COMPAT)
  *
  * 采用 public static final 编译期常量实现条件编译（JLS §14.21）：
  * 设置为 false 时，Javac 与 R8 编译器在构建时直接将死代码完全裁剪剔除，
@@ -77,4 +78,17 @@ public final class CompileHookConfig {
      * 设置为 false 时，上报审计与日志记录功能被条件编译完全关闭，避免多余的磁盘 I/O 开销与 Hook 挂载。
      */
     public static final boolean ENABLE_RECORD_QQ_REPORT = true;
+
+
+    // =========================================================================
+    // 5. QAuxiliary 文件处理报错兼容 (QAuxiliary / QAuxv File Error Compat)
+    // =========================================================================
+    /**
+     * 是否开启 QAuxiliary (QAuxv) 文件传输与 APK 发送 NPE 崩溃兼容补丁。
+     * 【默认关闭 (false)】：为同时使用 QAuxiliary 的用户提供兼容，防止其在 QQ NT 新版发送 APK/群文件时
+     * 因找不到 Item 字段抛出 NPE 崩溃。
+     * 设置为 false 时，该兼容 Hook 完全被条件编译剔除，不打包进最终 APK，不计入运行时 Hook 统计总数。
+     * 设置为 true 时，挂载该兼容补丁并安全处理 BaseApk 异常与 APK 文件名规范化。
+     */
+    public static final boolean ENABLE_QAUXILIARY_FILE_COMPAT = false;
 }
