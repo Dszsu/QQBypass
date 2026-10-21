@@ -20,7 +20,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -76,10 +79,16 @@ public class ReportAuditManager {
     private static final AtomicBoolean sWorkerStarted = new AtomicBoolean(false);
     private static final SimpleDateFormat sDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
 
+    public static final long LOG_EXPIRATION_MS = 4 * 60 * 60 * 1000L; // 4 hours
+    private static final long CLEANUP_INTERVAL_MS = 15 * 60 * 1000L; // Check every 15 minutes
+    private static final AtomicBoolean sCleanerStarted = new AtomicBoolean(false);
+    private static ScheduledExecutorService sCleanupScheduler = null;
+
     private static String sProcessName = "unknown";
 
     static {
         ensureWorkerStarted();
+        ensureCleanerStarted();
     }
 
     public static void setProcessName(String processName) {
@@ -92,8 +101,33 @@ public class ReportAuditManager {
         return sProcessName;
     }
 
-    public static final long LOG_EXPIRATION_MS = 12 * 60 * 60 * 1000L; // 12 hours
-    private static final long CLEANUP_INTERVAL_MS = 30 * 60 * 1000L; // Check every 30 minutes
+    private static void ensureCleanerStarted() {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+            return;
+        }
+        if (sCleanerStarted.compareAndSet(false, true)) {
+            sCleanupScheduler = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "QQReportAuditCleaner");
+                    t.setDaemon(true);
+                    t.setPriority(Thread.MIN_PRIORITY);
+                    return t;
+                }
+            });
+            // Initial delay 0, repeat every 15 minutes indefinitely so long-running QQ never accumulates stale logs
+            sCleanupScheduler.scheduleWithFixedDelay(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        cleanExpiredLogsInternal();
+                    } catch (Throwable t) {
+                        Log.e(TAG, "Cleaner periodic run error: " + t.getMessage());
+                    }
+                }
+            }, 0, 15, TimeUnit.MINUTES);
+        }
+    }
 
     private static void ensureWorkerStarted() {
         if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
@@ -184,17 +218,17 @@ public class ReportAuditManager {
     }
 
     /**
-     * Manually triggers cleanup of log files and entries older than 12 hours.
+     * Manually triggers cleanup of log files and entries older than 4 hours.
      */
     public static void cleanExpiredLogs() {
         cleanExpiredLogsInternal();
     }
 
     /**
-     * Automatically scans and purges log files and entries older than 12 hours:
-     * 1. Files whose lastModified is older than 12 hours are directly deleted.
-     * 2. Active log files are inspected; entries older than 12 hours are pruned out.
-     * 3. Old rolling backup files (.1, .bak) older than 12 hours are purged.
+     * Automatically scans and purges log files and entries older than 4 hours:
+     * 1. Files whose lastModified is older than 4 hours are directly deleted.
+     * 2. Active log files are inspected; entries older than 4 hours are pruned out.
+     * 3. Old rolling backup files (.1, .bak) older than 4 hours are purged.
      */
     private static synchronized void cleanExpiredLogsInternal() {
         try {
@@ -217,10 +251,10 @@ public class ReportAuditManager {
                     String name = f.getName();
                     if (!name.contains("audit") || !name.contains(".log")) continue;
 
-                    // 1. If file has not been modified for > 12h, delete the entire file directly
+                    // 1. If file has not been modified for > 4h, delete the entire file directly
                     if (now - f.lastModified() > LOG_EXPIRATION_MS) {
                         f.delete();
-                        Log.i(TAG, "[LogCleanup] Deleted expired log file (>12h old): " + f.getAbsolutePath());
+                        Log.i(TAG, "[LogCleanup] Deleted expired log file (>4h old): " + f.getAbsolutePath());
                         continue;
                     }
 
@@ -255,7 +289,7 @@ public class ReportAuditManager {
                 }
             }
             if (firstTs >= cutoffTime) {
-                // Entire file is already within the valid 12-hour window, no I/O needed!
+                // Entire file is already within the valid 4-hour window, no I/O needed!
                 return;
             }
         } catch (Throwable ignored) {
@@ -293,7 +327,7 @@ public class ReportAuditManager {
                 targetFile.delete();
                 tmpFile.renameTo(targetFile);
             }
-            Log.i(TAG, "[LogCleanup] Pruned entries older than 12h in " + targetFile.getAbsolutePath());
+            Log.i(TAG, "[LogCleanup] Pruned entries older than 4h in " + targetFile.getAbsolutePath());
         } else {
             if (tmpFile.exists()) tmpFile.delete();
         }

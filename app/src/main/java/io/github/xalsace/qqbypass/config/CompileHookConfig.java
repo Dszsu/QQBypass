@@ -80,7 +80,7 @@ public final class CompileHookConfig {
      * - /data/user/0/com.tencent.mobileqq/files/report_audit.log
      * - /data/user/0/com.tencent.mobileqq/files/security_environment_audit.log (无噪纯净安全与环境审计)
      * - /storage/emulated/0/Android/data/com.tencent.mobileqq/files/ (外部可读写目录)
-     * - 内置超过 12 小时自动滚动清理机制（自动清除 >12h 过期日志条目与历史备份）。
+     * - 内置超过 4 小时自动滚动清理机制（自动清除 >4h 过期日志条目与历史备份）。
      * 设置为 false 时，上报审计与日志记录功能被条件编译完全关闭，避免多余的磁盘 I/O 开销与 Hook 挂载。
      */
     public static final boolean ENABLE_RECORD_QQ_REPORT = true;
