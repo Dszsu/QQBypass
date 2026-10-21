@@ -4,7 +4,7 @@ package io.github.xalsace.qqbypass.config;
  * 编译期 Hook 条件编译配置 (Compile-Time Conditional Hook Configuration)
  *
  * 保留 5 个受管理的编译期条件编译开关：
- * 1. 拦截下线 (ENABLE_KICK_INTERCEPT)
+ * 1. 拦截下线 (ENABLE_KICK_INTERCEPT，默认关闭且严禁开启)
  * 2. 设备修改 (ENABLE_DEVICE_SPOOF，附带设备参数)
  * 3. 模拟器伪装 (ENABLE_EMULATOR_SPOOF)
  * 4. 记录 QQ 上报 (ENABLE_RECORD_QQ_REPORT，默认开启)
@@ -23,12 +23,15 @@ public final class CompileHookConfig {
     // =========================================================================
     /**
      * 是否开启强制下线拦截。
-     * 【默认开启 (true)】：拦截服务端下线推送 (StatSvc.ReqMSFOffline / ReqForceOffline)
-     * 与本地 Token 清理信令 (_msf_kickedAndCleanTokenResp / ClearUserLoginData / wt_all_sig_clear)，
-     * 阻止会话被动销毁与 ACCOUNT_KICKED 弹窗。
+     * 【默认关闭 (false)，且严禁开启】：
+     * 严禁私自开启或默认开启此功能！
+     * 下线信令（如 StatSvc.ReqMSFOffline / ReqForceOffline / failCode: 2012）属于腾讯服务端权威会话状态变更。
+     * 客户端吞噬、拦截下线信令只会制造“僵尸会话（Zombie Session）”。服务端已作废会话票据与鉴权，
+     * 客户端单方面不退出将导致后续数据包全部鉴权拒绝、异常重试风暴，极速引爆腾讯风控系统导致账号被封禁（w21/冻结）。
+     * 防风控与反检测必须做在“前端检测规避”（如环境/签名/检测点对抗），绝对严禁通过“客户端吞噬下线信令”的方式进行掩耳盗铃。
      * 设置为 false 时，下线拦截逻辑完全被条件编译剔除，不打包进 APK，不计入 Hook 总数。
      */
-    public static final boolean ENABLE_KICK_INTERCEPT = true;
+    public static final boolean ENABLE_KICK_INTERCEPT = false;
 
 
     // =========================================================================

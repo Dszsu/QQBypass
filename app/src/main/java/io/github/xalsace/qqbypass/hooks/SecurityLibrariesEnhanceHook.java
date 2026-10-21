@@ -268,40 +268,22 @@ public class SecurityLibrariesEnhanceHook {
             @Override
             public void onClassFound(Class<?> clazz) {
                 // nativeGetRecords / getRecords -> empty string
-                HookUtils.hookAllMethods(clazz, "nativeGetRecords", new XC_MethodHook() {
+                XC_MethodHook emptyStringHook = new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         param.setResult("");
                     }
-                });
-                HookUtils.hookAllMethods(clazz, "getRecords", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("");
-                    }
-                });
+                };
+                HookUtils.hookCandidateMethods(clazz, new String[]{"nativeGetRecords", "getRecords"}, emptyStringHook);
 
-                // nativeGetRecordable / getRecordable -> false
-                HookUtils.hookAllMethods(clazz, "nativeGetRecordable", new XC_MethodHook() {
+                // nativeGetRecordable / getRecordable / nativeGetDebuggable -> false
+                XC_MethodHook falseHook = new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         param.setResult(false);
                     }
-                });
-                HookUtils.hookAllMethods(clazz, "getRecordable", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(false);
-                    }
-                });
-
-                // nativeGetDebuggable -> false
-                HookUtils.hookAllMethods(clazz, "nativeGetDebuggable", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(false);
-                    }
-                });
+                };
+                HookUtils.hookCandidateMethods(clazz, new String[]{"nativeGetRecordable", "getRecordable", "nativeGetDebuggable", "getDebuggable"}, falseHook);
             }
         });
     }
@@ -398,9 +380,11 @@ public class SecurityLibrariesEnhanceHook {
                     }
                 };
 
-                HookUtils.hookAllMethods(clazz, "a", desensHook);
-                HookUtils.hookAllMethods(clazz, "nativeStrDesensitizeDetectedContentWithMask", desensHook);
-                HookUtils.hookAllMethods(clazz, "nativeStrDesensitizeWithMask", desensHook);
+                HookUtils.hookCandidateMethods(clazz, new String[]{
+                    "a",
+                    "nativeStrDesensitizeDetectedContentWithMask",
+                    "nativeStrDesensitizeWithMask"
+                }, desensHook);
             }
         });
     }

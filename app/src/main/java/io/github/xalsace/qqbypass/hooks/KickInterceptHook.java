@@ -439,16 +439,6 @@ public class KickInterceptHook {
     }
 
     private static void hookIfMethodExists(Class<?> clazz, String methodName, XC_MethodHook callback) {
-        if (clazz == null || methodName == null) return;
-        boolean exists = false;
-        for (Method m : clazz.getDeclaredMethods()) {
-            if (m.getName().equals(methodName)) {
-                exists = true;
-                break;
-            }
-        }
-        if (exists) {
-            HookUtils.hookAllMethods(clazz, methodName, callback);
-        }
+        HookUtils.hookIfMethodExists(clazz, methodName, callback);
     }
 }

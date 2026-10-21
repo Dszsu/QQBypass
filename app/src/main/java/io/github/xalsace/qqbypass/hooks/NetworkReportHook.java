@@ -154,43 +154,42 @@ public class NetworkReportHook {
      * Layer 1: ChannelProxyExt.sendMessage fallback.
      */
     private static void hookChannelProxyExt(XC_LoadPackage.LoadPackageParam lpparam) {
-        String[] methodNames = {"sendMessage", "sendMessageInner", "send"};
+        String[] methodNames = {"sendMessageInner", "sendMessage", "send"};
+        ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
 
-        for (String methodName : methodNames) {
-            HookUtils.hookAllMethods("com.tencent.mobileqq.channel.ChannelProxyExt", methodName,
-                new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args == null || param.args.length < 1 || !(param.args[0] instanceof String)) return;
+        HookUtils.hookCandidateMethods("com.tencent.mobileqq.channel.ChannelProxyExt", methodNames, cl,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 1 || !(param.args[0] instanceof String)) return;
 
-                        String command = (String) param.args[0];
-                        long callbackId = 0L;
-                        for (int i = param.args.length - 1; i >= 1; i--) {
-                            if (param.args[i] instanceof Number) {
-                                callbackId = ((Number) param.args[i]).longValue();
-                                break;
-                            }
-                        }
-
-                        // Always audit if report recording is enabled
-                        if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("ChannelProxyExt", command, null, "callbackId=" + callbackId, 3);
-                        }
-
-                        if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(command)) {
-                            Class<?> returnType = ((java.lang.reflect.Method) param.method).getReturnType();
-                            if (returnType.isPrimitive() && returnType != void.class) {
-                                return;
-                            }
-
-                            injectNativeReceiveSuccess(lpparam.classLoader, command, callbackId);
-                            param.setResult(null);
-                            XposedEntry.log("Intercepted & fulfilled ChannelProxyExt: "
-                                + command + " (callbackId=" + callbackId + ")");
+                    String command = (String) param.args[0];
+                    long callbackId = 0L;
+                    for (int i = param.args.length - 1; i >= 1; i--) {
+                        if (param.args[i] instanceof Number) {
+                            callbackId = ((Number) param.args[i]).longValue();
+                            break;
                         }
                     }
-                });
-        }
+
+                    // Always audit if report recording is enabled
+                    if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("ChannelProxyExt", command, null, "callbackId=" + callbackId, 3);
+                    }
+
+                    if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(command)) {
+                        Class<?> returnType = ((java.lang.reflect.Method) param.method).getReturnType();
+                        if (returnType.isPrimitive() && returnType != void.class) {
+                            return;
+                        }
+
+                        injectNativeReceiveSuccess(lpparam.classLoader, command, callbackId);
+                        param.setResult(null);
+                        XposedEntry.log("Intercepted & fulfilled ChannelProxyExt: "
+                            + command + " (callbackId=" + callbackId + ")");
+                    }
+                }
+            });
     }
 
     /**

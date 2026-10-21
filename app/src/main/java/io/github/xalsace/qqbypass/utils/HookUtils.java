@@ -177,6 +177,59 @@ public class HookUtils {
         return findClass(className, null);
     }
 
+    /**
+     * Hook method only if it exists in clazz (or its non-abstract declared methods).
+     * Does NOT record failure if the method does not exist on this specific version/class.
+     * Returns true if at least one method was hooked.
+     */
+    public static boolean hookIfMethodExists(Class<?> clazz, String methodName, XC_MethodHook callback) {
+        if (clazz == null || clazz.isInterface() || methodName == null) return false;
+        boolean hasMethod = false;
+        for (Method method : clazz.getDeclaredMethods()) {
+            if (method.getName().equals(methodName) && !Modifier.isAbstract(method.getModifiers())) {
+                hasMethod = true;
+                break;
+            }
+        }
+        if (hasMethod) {
+            hookAllMethods(clazz, methodName, callback);
+            return true;
+        }
+        return false;
+    }
+
+    public static boolean hookIfMethodExists(String className, String methodName, ClassLoader cl, XC_MethodHook callback) {
+        Class<?> clazz = findClass(className, cl);
+        if (clazz != null) {
+            return hookIfMethodExists(clazz, methodName, callback);
+        }
+        return false;
+    }
+
+    /**
+     * Hook candidate methods across multiple version variants.
+     * Hooks all matching candidate methods that actually exist.
+     * Returns the count of hooked candidate method names.
+     */
+    public static int hookCandidateMethods(Class<?> clazz, String[] candidateMethodNames, XC_MethodHook callback) {
+        if (clazz == null || candidateMethodNames == null) return 0;
+        int count = 0;
+        for (String methodName : candidateMethodNames) {
+            if (hookIfMethodExists(clazz, methodName, callback)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public static int hookCandidateMethods(String className, String[] candidateMethodNames, ClassLoader cl, XC_MethodHook callback) {
+        Class<?> clazz = findClass(className, cl);
+        if (clazz != null) {
+            return hookCandidateMethods(clazz, candidateMethodNames, callback);
+        }
+        return 0;
+    }
+
     public static void log(String message) {
         // 静默：不再输出细粒度的普通过程日志
     }

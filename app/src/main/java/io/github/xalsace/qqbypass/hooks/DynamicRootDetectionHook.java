@@ -820,9 +820,6 @@ public class DynamicRootDetectionHook {
                 }
             };
             HookUtils.hookAllMethods(pmsClass, "checkSignatures", checkSignaturesHook);
-            if (pmsClass != android.content.pm.PackageManager.class) {
-                HookUtils.hookAllMethods(android.content.pm.PackageManager.class, "checkSignatures", checkSignaturesHook);
-            }
 
             // Hook QQ 内部 PackageUtil 全套探测函数，彻底封堵 Bugly 及风控反查
             Class<?> pkgUtilClass = de.robv.android.xposed.XposedHelpers.findClassIfExists(

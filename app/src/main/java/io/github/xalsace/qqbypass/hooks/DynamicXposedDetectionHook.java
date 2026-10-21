@@ -961,9 +961,7 @@ public class DynamicXposedDetectionHook {
                         }
                     };
 
-                    for (String m : new String[]{"postCatchedException", "postException", "handleCatchException"}) {
-                        HookUtils.hookAllMethods(crashReportCls, m, exceptionHook);
-                    }
+                    HookUtils.hookCandidateMethods(crashReportCls, new String[]{"handleCatchException", "postCatchedException", "postException"}, exceptionHook);
                     XposedEntry.log("[CrashReport] Installed exception sanitization on " + crashClassName);
                 }
             } catch (Throwable ignored) {}

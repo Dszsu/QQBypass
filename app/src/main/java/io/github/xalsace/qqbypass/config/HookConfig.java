@@ -18,7 +18,7 @@ public class HookConfig {
     // =========================================================================
     // 5 个受管理的编译期条件编译开关 (委托至 CompileHookConfig)
     // =========================================================================
-    /** 1. 拦截下线开关 */
+    /** 1. 拦截下线开关 (默认关闭且严禁开启) */
     public static final boolean ENABLE_KICK_INTERCEPT = CompileHookConfig.ENABLE_KICK_INTERCEPT;
 
     /** 2. 设备修改开关 */

@@ -150,6 +150,9 @@ public class QQ950PatchHook {
         // Tier 14: PB-Level Integrity Check Neutralization & Response Disarm
         hookIntChkPBDefenses(lpparam, cl);
 
+        // Tier 14.1: ProtoBuf Root MessageMicro Serialization & Deserialization Defense
+        hookMessageMicroSanitizers(cl);
+
         // Tier 15: Screen / Display / Remote Control Defense Expansion (Ganliang & AntEst)
         hookGanliangAndAntEstDefenses(lpparam, cl);
 
@@ -2260,7 +2263,7 @@ public class QQ950PatchHook {
                     XposedEntry.log("[GanliangPatch] Normalized Ganliang.f (0 mirror apps, screenCnt=1) and allowed report");
                 }
             });
-            HookUtils.hookAllMethods(ganliangClazz, "checkDeviceRisk", new XC_MethodHook() {
+            HookUtils.hookIfMethodExists(ganliangClazz, "checkDeviceRisk", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                     p.setResult(0);
@@ -2299,9 +2302,7 @@ public class QQ950PatchHook {
         String[] tencentLocClasses = {
             "c.t.m.g.h3",
             "com.tencent.map.geolocation.TencentLocation",
-            "com.tencent.map.geolocation.sapp.TencentLocation",
-            "com.tencent.map.geolocation.internal.TencentExtraKeys",
-            "com.tencent.map.geolocation.sapp.internal.TencentExtraKeys"
+            "com.tencent.map.geolocation.sapp.TencentLocation"
         };
         for (String cls : tencentLocClasses) {
             hookSafe(cls, "getFakeReason", lpparam, new XC_MethodHook() {
@@ -2609,19 +2610,7 @@ public class QQ950PatchHook {
 
         // 6. CrashDefend Startup Crash Suppression
         final String crashDefendMgrCls = "com.tencent.qqperf.crashdefend.CrashDefendManager";
-        hookSafe(crashDefendMgrCls, "hasCrashedAtStartup", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
-            }
-        });
-        hookSafe(crashDefendMgrCls, "d", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
-            }
-        });
-        hookSafe(crashDefendMgrCls, "b", lpparam, new XC_MethodHook() {
+        hookCandidateSafe(crashDefendMgrCls, new String[]{"d", "b", "hasCrashedAtStartup"}, lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                 p.setResult(false);
@@ -2765,12 +2754,6 @@ public class QQ950PatchHook {
                 sanitizeScanReport(p.thisObject);
             }
         });
-        hookSafe(safecheckRspCls, "toByteArray", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                sanitizeScanReport(p.thisObject);
-            }
-        });
 
         final String[] secVerifyClasses = {
             "com.tencent.ims.SecVerifyApk$ReportDetectResultPacket",
@@ -2780,12 +2763,6 @@ public class QQ950PatchHook {
             hookSafe(svCls, "<init>", lpparam, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    sanitizeSecVerifyPacket(p.thisObject);
-                }
-            });
-            hookSafe(svCls, "toByteArray", lpparam, new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                     sanitizeSecVerifyPacket(p.thisObject);
                 }
             });
@@ -2800,12 +2777,6 @@ public class QQ950PatchHook {
             hookSafe(ciCls, "<init>", lpparam, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    sanitizeClientInfoPacket(p.thisObject);
-                }
-            });
-            hookSafe(ciCls, "toByteArray", lpparam, new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                     sanitizeClientInfoPacket(p.thisObject);
                 }
             });
@@ -3761,7 +3732,7 @@ public class QQ950PatchHook {
             "com.tencent.qqmini.sdk.launcher.utils.CPUUtil"
         };
         for (final String cn : cpuUtilClasses) {
-            hookSafe(cn, "isX86Emulator", lpparam, new XC_MethodHook() {
+            hookIfMethodExistsSafe(cn, "isX86Emulator", lpparam, new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                     p.setResult(false);
@@ -3876,6 +3847,24 @@ public class QQ950PatchHook {
         }
     }
 
+    private static void hookCandidateSafe(final String className, final String[] methodNames, XC_LoadPackage.LoadPackageParam lpparam, final XC_MethodHook callback) {
+        ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
+        if (cl == null) return;
+        Class<?> clazz = XposedHelpers.findClassIfExists(className, cl);
+        if (clazz != null) {
+            HookUtils.hookCandidateMethods(clazz, methodNames, callback);
+        }
+    }
+
+    private static void hookIfMethodExistsSafe(final String className, final String methodName, XC_LoadPackage.LoadPackageParam lpparam, final XC_MethodHook callback) {
+        ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
+        if (cl == null) return;
+        Class<?> clazz = XposedHelpers.findClassIfExists(className, cl);
+        if (clazz != null) {
+            HookUtils.hookIfMethodExists(clazz, methodName, callback);
+        }
+    }
+
     // ============ Tier 10: Message Sync & Loading State Stabilization ============
 
     private static final java.util.Set<Class<?>> sHookedSyncClasses =
@@ -3978,6 +3967,7 @@ public class QQ950PatchHook {
         hookQQ9375SafeCenterAndRepack(null, cl);
         hookApkFileMd5AndSignatures(null, cl);
         hookIntChkPBDefenses(null, cl);
+        hookMessageMicroSanitizers(cl);
         hookGanliangAndAntEstDefenses(null, cl);
         hookTuringPhoneAndBridge(null, cl);
         hookSafeReportAndXps(null, cl);
@@ -4005,16 +3995,18 @@ public class QQ950PatchHook {
             }
             XposedEntry.log("[SafeCenterRepack] DexKit discovered push handlers: " + pushHandlerNames);
         }
-        if (profile.getFallbackPushHandlerClass() != null) {
-            pushHandlerNames.add(profile.getFallbackPushHandlerClass());
+        if (pushHandlerNames.isEmpty()) {
+            if (profile.getFallbackPushHandlerClass() != null) {
+                pushHandlerNames.add(profile.getFallbackPushHandlerClass());
+            }
+            pushHandlerNames.add("com.tencent.mobileqq.app.di");
+            pushHandlerNames.add("com.tencent.mobileqq.app.dj");
         }
-        pushHandlerNames.add("com.tencent.mobileqq.app.di");
-        pushHandlerNames.add("com.tencent.mobileqq.app.dj");
 
         for (String handlerCls : pushHandlerNames) {
             Class<?> clazz = XposedHelpers.findClassIfExists(handlerCls, cl);
             if (clazz != null && sHooked9375Classes.add(clazz)) {
-                HookUtils.hookAllMethods(clazz, "a", new XC_MethodHook() {
+                HookUtils.hookIfMethodExists(clazz, "a", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                         if (p.args == null || p.args.length < 1 || !(p.args[0] instanceof byte[])) return;
@@ -4075,16 +4067,9 @@ public class QQ950PatchHook {
         // 3. Hook Protobuf Repack & Signature Reporting: signature$SignatureReport
         Class<?> sigReportCls = XposedHelpers.findClassIfExists("com.tencent.ims.signature$SignatureReport", cl);
         if (sigReportCls != null && sHooked9375Classes.add(sigReportCls)) {
-            XC_MethodHook sanitizeReportHook = new XC_MethodHook() {
+            HookUtils.hookAllConstructors(sigReportCls, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    sanitizeSignatureReport(p.thisObject);
-                }
-            };
-            HookUtils.hookAllConstructors(sigReportCls, sanitizeReportHook);
-            HookUtils.hookAllMethods(sigReportCls, "toByteArray", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                     sanitizeSignatureReport(p.thisObject);
                 }
             });
@@ -4097,32 +4082,20 @@ public class QQ950PatchHook {
         // Ensure u32_check_result == 0 as fallback without arbitrarily clearing display text.
         Class<?> sigResultCls = XposedHelpers.findClassIfExists("com.tencent.ims.signature$SignatureResult", cl);
         if (sigResultCls != null && sHooked9375Classes.add(sigResultCls)) {
-            HookUtils.hookAllMethods(sigResultCls, "mergeFrom", new XC_MethodHook() {
+            HookUtils.hookAllConstructors(sigResultCls, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    try {
-                        Object u32CheckResult = XposedHelpers.getObjectField(p.thisObject, "u32_check_result");
-                        if (u32CheckResult != null && (Integer) XposedHelpers.callMethod(u32CheckResult, "get") != 0) {
-                            XposedHelpers.callMethod(u32CheckResult, "set", 0);
-                            XposedEntry.log("[SignatureResult] Fallback: normalized SignatureResult.u32_check_result -> 0 (PASS)");
-                        }
-                    } catch (Throwable ignored) {}
+                    sanitizeSignatureResult(p.thisObject);
                 }
             });
         }
 
         Class<?> sigKickCls = XposedHelpers.findClassIfExists("com.tencent.ims.signature$SignatureKickData", cl);
         if (sigKickCls != null && sHooked9375Classes.add(sigKickCls)) {
-            HookUtils.hookAllMethods(sigKickCls, "mergeFrom", new XC_MethodHook() {
+            HookUtils.hookAllConstructors(sigKickCls, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    try {
-                        Object u32CheckResult = XposedHelpers.getObjectField(p.thisObject, "u32_check_result");
-                        if (u32CheckResult != null && (Integer) XposedHelpers.callMethod(u32CheckResult, "get") != 0) {
-                            XposedHelpers.callMethod(u32CheckResult, "set", 0);
-                            XposedEntry.log("[SignatureKickData] Fallback: normalized SignatureKickData.u32_check_result -> 0 (PASS)");
-                        }
-                    } catch (Throwable ignored) {}
+                    sanitizeSignatureKickData(p.thisObject);
                 }
             });
         }
@@ -4181,6 +4154,107 @@ public class QQ950PatchHook {
         } catch (Throwable t) {
             XposedEntry.log("[SignatureReport] Error sanitizing: " + t.getMessage());
         }
+    }
+
+    private static void sanitizeIntChkCheckResult(Object obj) {
+        if (obj == null) return;
+        try {
+            Object typeField = XposedHelpers.getObjectField(obj, "uint32_check_type");
+            if (typeField != null && (Boolean) XposedHelpers.callMethod(typeField, "has")) {
+                int type = (Integer) XposedHelpers.callMethod(typeField, "get");
+                if (type == 1) { // memchk
+                    Object resField = XposedHelpers.getObjectField(obj, "uint32_memchk_result");
+                    if (resField != null) {
+                        XposedHelpers.callMethod(resField, "set", 1); // 1 = PASS
+                        XposedEntry.log("[IntChkPB] Forced uint32_memchk_result -> 1 (PASS)");
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void sanitizeSignatureResult(Object obj) {
+        if (obj == null) return;
+        try {
+            Object u32CheckResult = XposedHelpers.getObjectField(obj, "u32_check_result");
+            if (u32CheckResult != null && (Integer) XposedHelpers.callMethod(u32CheckResult, "get") != 0) {
+                XposedHelpers.callMethod(u32CheckResult, "set", 0);
+                XposedEntry.log("[SignatureResult] Fallback: normalized SignatureResult.u32_check_result -> 0 (PASS)");
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void sanitizeSignatureKickData(Object obj) {
+        if (obj == null) return;
+        try {
+            Object u32CheckResult = XposedHelpers.getObjectField(obj, "u32_check_result");
+            if (u32CheckResult != null && (Integer) XposedHelpers.callMethod(u32CheckResult, "get") != 0) {
+                XposedHelpers.callMethod(u32CheckResult, "set", 0);
+                XposedEntry.log("[SignatureKickData] Fallback: normalized SignatureKickData.u32_check_result -> 0 (PASS)");
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void sanitizeIntChkReportRsp(Object obj) {
+        if (obj == null) return;
+        try {
+            Object needStrike = XposedHelpers.getObjectField(obj, "uint32_need_strike");
+            if (needStrike != null && (Integer) XposedHelpers.callMethod(needStrike, "get") == 1) {
+                XposedHelpers.callMethod(needStrike, "set", 2); // 2 = NO STRIKE
+                XposedEntry.log("[IntChkPB] Disarmed intchk strike response: uint32_need_strike -> 2 (NO STRIKE)");
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static final java.util.Set<ClassLoader> sHookedPbClassLoaders =
+        java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+    public static void hookMessageMicroSanitizers(ClassLoader cl) {
+        if (cl == null) cl = HookConfig.getClassLoader();
+        if (cl == null || !sHookedPbClassLoaders.add(cl)) return;
+
+        Class<?> messageMicroCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.pb.MessageMicro", cl);
+        if (messageMicroCls == null) return;
+
+        // 1. Root toByteArray() hook: sanitize outgoing ProtoBuf packets before serialization
+        HookUtils.hookAllMethods(messageMicroCls, "toByteArray", new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.thisObject == null) return;
+                String clsName = p.thisObject.getClass().getName();
+                if ("com.tencent.ims.safecheckPB$RspMQScanReport".equals(clsName)) {
+                    sanitizeScanReport(p.thisObject);
+                } else if ("com.tencent.ims.SecVerifyApk$ReportDetectResultPacket".equals(clsName)
+                        || "com.tencent.qqprotect.sfcfg.pb.SecVerifyApk$ReportDetectResultPacket".equals(clsName)) {
+                    sanitizeSecVerifyPacket(p.thisObject);
+                } else if ("com.tencent.ims.ClientInfoA$ReportDetectResultPacket".equals(clsName)
+                        || "com.tencent.ims.ClientInfoB$ReportDetectResultPacket".equals(clsName)
+                        || "com.tencent.ims.MobileQQDetect$ReportDetectResultPacket".equals(clsName)) {
+                    sanitizeClientInfoPacket(p.thisObject);
+                } else if ("com.tencent.ims.signature$SignatureReport".equals(clsName)) {
+                    sanitizeSignatureReport(p.thisObject);
+                } else if ("com.tencent.ims.intchk$CheckResult".equals(clsName)) {
+                    sanitizeIntChkCheckResult(p.thisObject);
+                }
+            }
+        });
+
+        // 2. Root mergeFrom() hook: sanitize incoming ProtoBuf responses after deserialization
+        HookUtils.hookAllMethods(messageMicroCls, "mergeFrom", new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.thisObject == null) return;
+                String clsName = p.thisObject.getClass().getName();
+                if ("com.tencent.ims.signature$SignatureResult".equals(clsName)) {
+                    sanitizeSignatureResult(p.thisObject);
+                } else if ("com.tencent.ims.signature$SignatureKickData".equals(clsName)) {
+                    sanitizeSignatureKickData(p.thisObject);
+                } else if ("com.tencent.ims.intchk$ReportCheckResultRsp".equals(clsName)) {
+                    sanitizeIntChkReportRsp(p.thisObject);
+                }
+            }
+        });
+        XposedEntry.log("[MessageMicroPatch] Installed unified ProtoBuf root toByteArray & mergeFrom sanitizers");
     }
 
     /**
@@ -4308,22 +4382,10 @@ public class QQ950PatchHook {
         // 2. Hook com.tencent.ims.intchk$CheckResult: force uint32_memchk_result -> 1 (PASS)
         Class<?> checkResultCls = XposedHelpers.findClassIfExists("com.tencent.ims.intchk$CheckResult", cl);
         if (checkResultCls != null && sHooked9375Classes.add(checkResultCls)) {
-            HookUtils.hookAllMethods(checkResultCls, "toByteArray", new XC_MethodHook() {
+            HookUtils.hookAllConstructors(checkResultCls, new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    try {
-                        Object typeField = XposedHelpers.getObjectField(p.thisObject, "uint32_check_type");
-                        if (typeField != null && (Boolean) XposedHelpers.callMethod(typeField, "has")) {
-                            int type = (Integer) XposedHelpers.callMethod(typeField, "get");
-                            if (type == 1) { // memchk
-                                Object resField = XposedHelpers.getObjectField(p.thisObject, "uint32_memchk_result");
-                                if (resField != null) {
-                                    XposedHelpers.callMethod(resField, "set", 1); // 1 = PASS
-                                    XposedEntry.log("[IntChkPB] Forced uint32_memchk_result -> 1 (PASS)");
-                                }
-                            }
-                        }
-                    } catch (Throwable ignored) {}
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    sanitizeIntChkCheckResult(p.thisObject);
                 }
             });
         }
@@ -4331,16 +4393,10 @@ public class QQ950PatchHook {
         // 3. Hook com.tencent.ims.intchk$ReportCheckResultRsp: Disarm server strike at PB level if present
         Class<?> reportRspCls = XposedHelpers.findClassIfExists("com.tencent.ims.intchk$ReportCheckResultRsp", cl);
         if (reportRspCls != null && sHooked9375Classes.add(reportRspCls)) {
-            HookUtils.hookAllMethods(reportRspCls, "mergeFrom", new XC_MethodHook() {
+            HookUtils.hookAllConstructors(reportRspCls, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    try {
-                        Object needStrike = XposedHelpers.getObjectField(p.thisObject, "uint32_need_strike");
-                        if (needStrike != null && (Integer) XposedHelpers.callMethod(needStrike, "get") == 1) {
-                            XposedHelpers.callMethod(needStrike, "set", 2); // 2 = NO STRIKE
-                            XposedEntry.log("[IntChkPB] Disarmed intchk strike response: uint32_need_strike -> 2 (NO STRIKE)");
-                        }
-                    } catch (Throwable ignored) {}
+                    sanitizeIntChkReportRsp(p.thisObject);
                 }
             });
         }
@@ -4363,7 +4419,7 @@ public class QQ950PatchHook {
                     XposedEntry.log("[GanliangPatch] Neutralized Ganliang.h (prevented DisplayListener registration)");
                 }
             });
-            HookUtils.hookAllMethods(ganliangCls, "isSwitchOn", new XC_MethodHook() {
+            HookUtils.hookIfMethodExists(ganliangCls, "isSwitchOn", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                     if (p.args != null && p.args.length > 0 && "ganliang_enable_switch".equals(p.args[0])) {
