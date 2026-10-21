@@ -17,7 +17,7 @@ import io.github.xalsace.qqbypass.NativeBypass;
  * 3. 最终汇总输出且仅输出一条总统计日志。
  */
 public class HookTracker {
-    private static final String TAG = "QQEnhancedBypass";
+    private static final String TAG = "QQBypass";
 
     private static final AtomicInteger sJavaTotal = new AtomicInteger(0);
     private static final AtomicInteger sJavaSuccess = new AtomicInteger(0);

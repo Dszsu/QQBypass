@@ -21,7 +21,7 @@ public:
             failed_++;
             std::string failName = name ? name : "unknown";
             failed_names_.push_back(failName);
-            LOGE("[QQEnhancedBypass] Native Hook 失败: %s", failName.c_str());
+            LOGE("[QQBypass] Native Hook 失败: %s", failName.c_str());
         }
     }
 

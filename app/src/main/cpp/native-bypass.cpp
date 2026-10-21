@@ -17,7 +17,7 @@
 #include "hooks/hook_libqimei.h"
 
 /**
- * Native Bypass Module for QQ Enhanced Bypass (ByteHook Engine)
+ * Native Bypass Module for QQBypass (ByteHook Engine)
  *
  * This module provides comprehensive native protection against QQ & Tencent risk detection:
  * - Engine: ByteHook (Automatic PLT/GOT hooking across library linkage boundaries)

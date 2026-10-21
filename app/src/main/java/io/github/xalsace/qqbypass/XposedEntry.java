@@ -8,7 +8,7 @@ import io.github.xalsace.qqbypass.detector.DexKitDetector;
 import io.github.xalsace.qqbypass.hooks.*;
 
 /**
- * QQ Enhanced Bypass - Comprehensive Detection Bypass Module
+ * QQBypass - Comprehensive Detection Bypass Module
  *
  * This module provides multi-layered protection against QQ's environment detection:
  * - Java Layer: Root/Xposed/Debug detection bypass (30%)
@@ -20,7 +20,7 @@ import de.robv.android.xposed.IXposedHookZygoteInit;
 
 public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteInit {
 
-    private static final String TAG = "QQEnhancedBypass";
+    private static final String TAG = "QQBypass";
     private static final String TARGET_PACKAGE = "com.tencent.mobileqq";
     public static String MODULE_PATH = null;
 

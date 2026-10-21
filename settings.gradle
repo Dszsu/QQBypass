@@ -17,5 +17,5 @@ dependencyResolutionManagement {
         }
     }
 }
-rootProject.name = "QQEnhancedBypass"
+rootProject.name = "QQBypass"
 include ':app'
