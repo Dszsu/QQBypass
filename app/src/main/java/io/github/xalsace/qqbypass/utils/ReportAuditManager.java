@@ -12,9 +12,13 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
+import java.io.FilenameFilter;
 import java.lang.reflect.Field;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -53,15 +57,19 @@ public class ReportAuditManager {
     private static final String TAG = "QQReportAudit";
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB rolling limit
 
-    // All events log targets
-    private static final File PRIMARY_ALL_FILE = new File("/data/user/0/com.tencent.mobileqq/files/report_audit.log");
-    private static final File SECONDARY_ALL_FILE = new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files/report_audit.log");
-    private static final File TERTIARY_ALL_FILE = new File("/storage/emulated/0/0_TM/report_audit.log");
+    // Base directories for report audit logs
+    private static final File PRIMARY_DIR = new File("/data/user/0/com.tencent.mobileqq/files");
+    private static final File SECONDARY_DIR = new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files");
+    private static final File TERTIARY_DIR = new File("/storage/emulated/0/0_TM");
 
-    // Pure Security & Environment Audit log targets (noise-free)
-    private static final File PRIMARY_SEC_FILE = new File("/data/user/0/com.tencent.mobileqq/files/security_environment_audit.log");
-    private static final File SECONDARY_SEC_FILE = new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files/security_environment_audit.log");
-    private static final File TERTIARY_SEC_FILE = new File("/storage/emulated/0/0_TM/security_environment_audit.log");
+    public static final String PREFIX_ALL = "report_audit_";
+    public static final String PREFIX_SEC = "security_environment_audit_";
+
+    public static final int MAX_RETAINED_FILES = 8; // Retain latest 8 files (8 * 30min = 4 hours)
+    public static final long CLEANUP_INTERVAL_MS = 60 * 60 * 1000L; // Check every 1 hour
+
+    private static final AtomicBoolean sCleanerStarted = new AtomicBoolean(false);
+    private static ScheduledExecutorService sCleanupScheduler = null;
 
     public static class AuditEntry {
         public final String text;
@@ -78,11 +86,6 @@ public class ReportAuditManager {
     private static final BlockingQueue<AuditEntry> sLogQueue = new LinkedBlockingQueue<>(4096);
     private static final AtomicBoolean sWorkerStarted = new AtomicBoolean(false);
     private static final SimpleDateFormat sDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
-
-    public static final long LOG_EXPIRATION_MS = 4 * 60 * 60 * 1000L; // 4 hours
-    private static final long CLEANUP_INTERVAL_MS = 15 * 60 * 1000L; // Check every 15 minutes
-    private static final AtomicBoolean sCleanerStarted = new AtomicBoolean(false);
-    private static ScheduledExecutorService sCleanupScheduler = null;
 
     private static String sProcessName = "unknown";
 
@@ -101,6 +104,19 @@ public class ReportAuditManager {
         return sProcessName;
     }
 
+    public static String get30MinTimeTag(long timestamp) {
+        Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(timestamp);
+        int minute = cal.get(Calendar.MINUTE);
+        int bucketMinute = (minute / 30) * 30; // 0 or 30
+        return String.format(Locale.US, "%04d%02d%02d_%02d%02d",
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH) + 1,
+                cal.get(Calendar.DAY_OF_MONTH),
+                cal.get(Calendar.HOUR_OF_DAY),
+                bucketMinute);
+    }
+
     private static void ensureCleanerStarted() {
         if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
             return;
@@ -115,7 +131,7 @@ public class ReportAuditManager {
                     return t;
                 }
             });
-            // Initial delay 0, repeat every 15 minutes indefinitely so long-running QQ never accumulates stale logs
+            // Initial delay 0, repeat every 1 hour indefinitely: keeps latest 8 files (30 min each = 4 hours)
             sCleanupScheduler.scheduleWithFixedDelay(new Runnable() {
                 @Override
                 public void run() {
@@ -125,7 +141,7 @@ public class ReportAuditManager {
                         Log.e(TAG, "Cleaner periodic run error: " + t.getMessage());
                     }
                 }
-            }, 0, 15, TimeUnit.MINUTES);
+            }, 0, 1, TimeUnit.HOURS);
         }
     }
 
@@ -169,16 +185,22 @@ public class ReportAuditManager {
     private static synchronized void writeEntryInternal(AuditEntry entry) {
         if (entry == null || entry.text == null || entry.text.isEmpty()) return;
 
-        // 1. Write to All-Events files
-        writeToSingleFile(PRIMARY_ALL_FILE, entry.text);
-        writeToOptionalFile(SECONDARY_ALL_FILE, entry.text);
-        writeToOptionalFile(TERTIARY_ALL_FILE, entry.text);
+        long now = System.currentTimeMillis();
+        String timeTag = get30MinTimeTag(now);
 
-        // 2. If it's a security/environment event, route to dedicated noise-free security log
+        String allFileName = PREFIX_ALL + timeTag + ".log";
+        String secFileName = PREFIX_SEC + timeTag + ".log";
+
+        // 1. Write to All-Events files (30-minute bucket)
+        writeToSingleFile(new File(PRIMARY_DIR, allFileName), entry.text);
+        writeToOptionalFile(new File(SECONDARY_DIR, allFileName), entry.text);
+        writeToOptionalFile(new File(TERTIARY_DIR, allFileName), entry.text);
+
+        // 2. If it's a security/environment event, route to dedicated noise-free security log (30-minute bucket)
         if (entry.isSecurity) {
-            writeToSingleFile(PRIMARY_SEC_FILE, entry.text);
-            writeToOptionalFile(SECONDARY_SEC_FILE, entry.text);
-            writeToOptionalFile(TERTIARY_SEC_FILE, entry.text);
+            writeToSingleFile(new File(PRIMARY_DIR, secFileName), entry.text);
+            writeToOptionalFile(new File(SECONDARY_DIR, secFileName), entry.text);
+            writeToOptionalFile(new File(TERTIARY_DIR, secFileName), entry.text);
         }
     }
 
@@ -218,137 +240,88 @@ public class ReportAuditManager {
     }
 
     /**
-     * Manually triggers cleanup of log files and entries older than 4 hours.
+     * Manually triggers cleanup of log files.
      */
     public static void cleanExpiredLogs() {
         cleanExpiredLogsInternal();
     }
 
     /**
-     * Automatically scans and purges log files and entries older than 4 hours:
-     * 1. Files whose lastModified is older than 4 hours are directly deleted.
-     * 2. Active log files are inspected; entries older than 4 hours are pruned out.
-     * 3. Old rolling backup files (.1, .bak) older than 4 hours are purged.
+     * Deletion executed once every hour:
+     * Retains strictly the most recent 8 log files (each covering 30 minutes, total 4 hours),
+     * and deletes all older files across internal, external, and tertiary directories.
      */
     private static synchronized void cleanExpiredLogsInternal() {
         try {
-            long now = System.currentTimeMillis();
-            long cutoffTime = now - LOG_EXPIRATION_MS;
-
             File[] searchDirs = new File[] {
-                new File("/data/user/0/com.tencent.mobileqq/files"),
-                new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files"),
-                new File("/storage/emulated/0/0_TM")
+                PRIMARY_DIR,
+                SECONDARY_DIR,
+                TERTIARY_DIR
             };
 
             for (File dir : searchDirs) {
                 if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
-                File[] files = dir.listFiles();
-                if (files == null) continue;
 
-                for (File f : files) {
-                    if (f == null || !f.isFile()) continue;
-                    String name = f.getName();
-                    if (!name.contains("audit") || !name.contains(".log")) continue;
+                // 1. Retain only the 8 most recent report_audit_*.log files
+                cleanDirectoryByPrefix(dir, PREFIX_ALL, MAX_RETAINED_FILES);
 
-                    // 1. If file has not been modified for > 4h, delete the entire file directly
-                    if (now - f.lastModified() > LOG_EXPIRATION_MS) {
-                        f.delete();
-                        Log.i(TAG, "[LogCleanup] Deleted expired log file (>4h old): " + f.getAbsolutePath());
-                        continue;
-                    }
+                // 2. Retain only the 8 most recent security_environment_audit_*.log files
+                cleanDirectoryByPrefix(dir, PREFIX_SEC, MAX_RETAINED_FILES);
 
-                    // 2. Backup or rolled files (.1, .bak, .old) modified recently:
-                    if (name.endsWith(".1") || name.contains(".bak") || name.contains(".old")) {
-                        pruneFileEntriesOlderThan(f, cutoffTime);
-                        if (f.length() == 0) f.delete();
-                        continue;
-                    }
-
-                    // 3. Active log files (report_audit.log, security_environment_audit.log):
-                    pruneFileEntriesOlderThan(f, cutoffTime);
-                }
+                // 3. Clean legacy non-bucketed audit files and old temporary/prune files
+                cleanLegacyFiles(dir);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in cleanExpiredLogsInternal: " + t.getMessage());
         }
     }
 
-    private static void pruneFileEntriesOlderThan(File targetFile, long cutoffTime) {
-        if (targetFile == null || !targetFile.exists() || targetFile.length() == 0) return;
-
-        // Fast check: verify if the first event in the file is already within the 12-hour window
-        try (BufferedReader checkReader = new BufferedReader(new FileReader(targetFile))) {
-            String firstLine;
-            long firstTs = -1;
-            while ((firstLine = checkReader.readLine()) != null) {
-                long ts = parseLineTimestamp(firstLine);
-                if (ts > 0) {
-                    firstTs = ts;
-                    break;
-                }
+    private static void cleanDirectoryByPrefix(File dir, final String prefix, int maxKeep) {
+        File[] files = dir.listFiles(new FilenameFilter() {
+            @Override
+            public boolean accept(File d, String name) {
+                return name.startsWith(prefix) && name.endsWith(".log");
             }
-            if (firstTs >= cutoffTime) {
-                // Entire file is already within the valid 4-hour window, no I/O needed!
-                return;
-            }
-        } catch (Throwable ignored) {
-            return;
-        }
+        });
+        if (files == null || files.length <= maxKeep) return;
 
-        File tmpFile = new File(targetFile.getAbsolutePath() + ".prune.tmp");
-        boolean currentEventKeep = false;
-        boolean prunedAny = false;
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(targetFile));
-             BufferedWriter writer = new BufferedWriter(new FileWriter(tmpFile))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                long ts = parseLineTimestamp(line);
-                if (ts > 0) {
-                    currentEventKeep = (ts >= cutoffTime);
-                    if (!currentEventKeep) {
-                        prunedAny = true;
-                    }
-                }
-                if (currentEventKeep) {
-                    writer.write(line);
-                    writer.newLine();
-                }
+        // Sort descending: newest files first.
+        // File names format: prefix_YYYYMMDD_HHmm.log
+        // Lexicographical sorting order strictly equals chronological order!
+        Arrays.sort(files, new Comparator<File>() {
+            @Override
+            public int compare(File f1, File f2) {
+                return f2.getName().compareTo(f1.getName());
             }
-            writer.flush();
-        } catch (Throwable t) {
-            if (tmpFile.exists()) tmpFile.delete();
-            return;
-        }
+        });
 
-        if (prunedAny && tmpFile.exists()) {
-            if (!tmpFile.renameTo(targetFile)) {
-                targetFile.delete();
-                tmpFile.renameTo(targetFile);
+        // Retain index 0 .. maxKeep - 1, delete all older files (index >= maxKeep)
+        for (int i = maxKeep; i < files.length; i++) {
+            try {
+                File stale = files[i];
+                boolean deleted = stale.delete();
+                Log.i(TAG, "[LogCleanup] Deleted stale log file (> " + maxKeep + " recent kept): "
+                        + stale.getName() + " (success=" + deleted + ")");
+            } catch (Throwable ignored) {
             }
-            Log.i(TAG, "[LogCleanup] Pruned entries older than 4h in " + targetFile.getAbsolutePath());
-        } else {
-            if (tmpFile.exists()) tmpFile.delete();
         }
     }
 
-    private static long parseLineTimestamp(String line) {
-        if (line == null || line.length() < 24) return -1;
+    private static void cleanLegacyFiles(File dir) {
         try {
-            if (line.charAt(0) == '[' && line.charAt(24) == ']') {
-                String timeStr = line.substring(1, 24);
-                synchronized (sDateFormat) {
-                    return sDateFormat.parse(timeStr).getTime();
-                }
-            } else if (line.startsWith("Time: ") && line.length() >= 29) {
-                String timeStr = line.substring(6, 29).trim();
-                synchronized (sDateFormat) {
-                    return sDateFormat.parse(timeStr).getTime();
+            File[] files = dir.listFiles();
+            if (files == null) return;
+            for (File f : files) {
+                if (f == null || !f.isFile()) continue;
+                String name = f.getName();
+                // If it's a legacy un-bucketed log or temporary prune file
+                if (name.equals("report_audit.log") || name.equals("security_environment_audit.log")
+                        || name.contains(".prune.tmp") || name.endsWith(".bak") || name.contains(".log.1")) {
+                    f.delete();
                 }
             }
-        } catch (Throwable ignored) {}
-        return -1;
+        } catch (Throwable ignored) {
+        }
     }
 
     private static String getCurrentTimestamp() {
