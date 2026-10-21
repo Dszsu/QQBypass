@@ -41,34 +41,11 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         io.github.xalsace.qqbypass.version.HostVersionManager.init(lpparam);
         io.github.xalsace.qqbypass.utils.ReportAuditManager.setProcessName(lpparam.processName);
 
-        // Process gate: DexKit parses the whole ~112MB APK. QQ runs
-        // several processes (main, :MSF, ...). Subprocesses keep
-        // the cheap universal framework hooks.
+        // Process gate: DexKit parses the whole ~112MB APK, so DexKit is strictly gated to isMainProcess.
+        // Universal framework hooks and security libraries run across ALL processes (:MSF, :video, :tool, etc.)
+        // to prevent security library leaks (e.g., :video running unhooked libqsec/libfekit leading to flag-2 kicks).
         boolean isMainProcess = lpparam.packageName.equals(lpparam.processName);
-        boolean isMsfProcess = (lpparam.processName != null && lpparam.processName.endsWith(":MSF"));
-        boolean isOpenSdkProcess = (lpparam.processName != null && lpparam.processName.endsWith(":openSdk"));
         DexKitDetector.setEnabled(isMainProcess && HookConfig.ENABLE_DEXKIT);
-
-        // Subprocess isolation: :tool (webview/captcha), :peak, :picture, etc. only need
-        // lightweight environment spoofing and network auditing.
-        // :openSdk runs Face Recognition & MFA (IdentificationFragmentActivity, MainAuthActivity)
-        // and requires full QQ950PatchHook, SecurityLibrariesEnhanceHook, and ClassLoader hooks!
-        if (!isMainProcess && !isMsfProcess && !isOpenSdkProcess) {
-            try {
-                UnifiedHookCoordinator.initialize(lpparam);
-                NetworkReportHook.hook(lpparam);
-                DynamicRootDetectionHook.hook(lpparam);
-                DynamicXposedDetectionHook.hook(lpparam);
-                DynamicDebugDetectionHook.hook(lpparam);
-                DynamicRuntimeMonitorHook.hook(lpparam);
-                ManagedHooks.installManagedHooks(lpparam);
-                io.github.xalsace.qqbypass.defense.SideChannelDefense.hook(lpparam);
-                UnifiedHookCoordinator.reportSummaryLogAsync(lpparam);
-            } catch (Throwable t) {
-                logError("Error initializing subprocess hooks: " + t.getMessage(), t);
-            }
-            return;
-        }
 
         // === DexKit Disk Cache Check (< 5ms) ===
         // If valid cache exists on disk, load cached method signatures directly
@@ -175,6 +152,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
             if (CompileHookConfig.ENABLE_QAUXILIARY_FILE_COMPAT) {
                 QAuxvCompatHook.hookLateStage(cl);
             }
+            ManagedHooks.hookLateStage(cl);
             io.github.xalsace.qqbypass.version.HostVersionManager.getCurrentProfile().applyVersionSpecificHooks(HookConfig.loadPackageParam, cl);
         } catch (Throwable t) {
             logError("Error dispatching late-stage hooks: " + t.getMessage(), t);

@@ -38,4 +38,13 @@ public final class ManagedHooks {
             EmulatorCamouflageHook.hook(lpparam);
         }
     }
+
+    /**
+     * 次级 Dex 或热补丁动态加载时补充挂载受管特性 Hook
+     */
+    public static void hookLateStage(ClassLoader cl) {
+        if (CompileHookConfig.ENABLE_KICK_INTERCEPT) {
+            KickInterceptHook.hookLateStage(cl);
+        }
+    }
 }

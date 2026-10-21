@@ -23,11 +23,12 @@ public final class CompileHookConfig {
     // =========================================================================
     /**
      * 是否开启强制下线拦截。
-     * 【默认关闭 (false)】：强制下线属于服务端权威会话状态。若客户端私自拦截或吞噬 kick 信令，
-     * 将导致“僵尸会话”（发不出也收不到消息，持续暴露异常特征导致封号）。
+     * 【默认开启 (true)】：拦截服务端下线推送 (StatSvc.ReqMSFOffline / ReqForceOffline)
+     * 与本地 Token 清理信令 (_msf_kickedAndCleanTokenResp / ClearUserLoginData / wt_all_sig_clear)，
+     * 阻止会话被动销毁与 ACCOUNT_KICKED 弹窗。
      * 设置为 false 时，下线拦截逻辑完全被条件编译剔除，不打包进 APK，不计入 Hook 总数。
      */
-    public static final boolean ENABLE_KICK_INTERCEPT = false;
+    public static final boolean ENABLE_KICK_INTERCEPT = true;
 
 
     // =========================================================================
@@ -85,10 +86,10 @@ public final class CompileHookConfig {
     // =========================================================================
     /**
      * 是否开启 QAuxiliary (QAuxv) 文件传输与 APK 发送 NPE 崩溃兼容补丁。
-     * 【默认关闭 (false)】：为同时使用 QAuxiliary 的用户提供兼容，防止其在 QQ NT 新版发送 APK/群文件时
+     * 【默认开启 (true)】：为同时使用 QAuxiliary 的用户提供兼容，防止其在 QQ NT 新版发送 APK/群文件时
      * 因找不到 Item 字段抛出 NPE 崩溃。
      * 设置为 false 时，该兼容 Hook 完全被条件编译剔除，不打包进最终 APK，不计入运行时 Hook 统计总数。
      * 设置为 true 时，挂载该兼容补丁并安全处理 BaseApk 异常与 APK 文件名规范化。
      */
-    public static final boolean ENABLE_QAUXILIARY_FILE_COMPAT = false;
+    public static final boolean ENABLE_QAUXILIARY_FILE_COMPAT = true;
 }
