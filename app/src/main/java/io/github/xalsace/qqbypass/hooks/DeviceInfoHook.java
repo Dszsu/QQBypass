@@ -1,103 +1,97 @@
 package io.github.xalsace.qqbypass.hooks;
 
 import android.os.Build;
-import android.telephony.TelephonyManager;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
-
 import io.github.xalsace.qqbypass.XposedEntry;
-import io.github.xalsace.qqbypass.config.HookConfig;
+import io.github.xalsace.qqbypass.config.CompileHookConfig;
 import io.github.xalsace.qqbypass.utils.HookUtils;
 
 /**
- * Device Info Hook - Consistency Protection
+ * 设备修改受管 Hook (Device Modification & Spoofing Hook)
  *
- * Handles Pandora's multi-path cross-validation:
- * - Ensures consistent values across different API calls
- * - Prevents detection of single-API hooks
- * - Maintains device fingerprint consistency
- *
- * Pandora DeviceInfoMonitor uses 6+ different methods to get the same info:
- * - TelephonyManager.getImei()
- * - TelephonyManager.getDeviceId()
- * - Build.SERIAL (field)
- * - Build.getSerial() (method)
- * - SystemProperties.get()
- * - SubscriptionManager APIs
+ * 条件编译受管类：仅在 CompileHookConfig.ENABLE_DEVICE_SPOOF 为 true 时编译打包并生效。
+ * 带对应设备参数 (FAKE_BRAND, FAKE_MODEL, FAKE_IMEI, FAKE_ANDROID_ID, FAKE_SERIAL, FAKE_MAC 等)。
+ * 若设置为 false，该类在打包时将被 R8 完全剥离剔除，绝不计入 Hook 统计总数。
  */
 public class DeviceInfoHook {
 
-    private static String cachedImei = null;
-    private static String cachedDeviceId = null;
-    private static String cachedSerial = null;
-    private static String cachedAndroidId = null;
-
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
-        if (!HookConfig.ENABLE_DEVICE_SPOOF) return;
+        if (!CompileHookConfig.ENABLE_DEVICE_SPOOF) return;
 
-        XposedEntry.log("Initializing Device Info Hook");
-
-        // Initialize cached values from config or real device
-        initCachedValues();
-
-        // Hook all device ID retrieval methods with consistent values
-        hookTelephonyManager();
-        hookBuildSerial();
-        hookSystemProperties();
-        hookAndroidId();
-
-        // Hook Pandora monitoring framework
-        hookPandoraMonitor();
+        try {
+            spoofBuildFields();
+            hookTelephonyManager();
+            hookBuildSerial();
+            hookSystemProperties();
+            hookAndroidId();
+            hookWifiMac();
+            hookPandoraMonitor();
+        } catch (Throwable t) {
+            XposedEntry.logError("Failed to initialize DeviceInfoHook: " + t.getMessage(), t);
+        }
     }
 
-    private static void initCachedValues() {
-        // Use configured fake values or null to pass through real values
-        cachedImei = HookConfig.FAKE_IMEI;
-        cachedDeviceId = HookConfig.FAKE_IMEI; // Same as IMEI for consistency
-        cachedSerial = HookConfig.FAKE_SERIAL;
-        cachedAndroidId = HookConfig.FAKE_ANDROID_ID;
+    private static void spoofBuildFields() {
+        setStaticField(Build.class, "BRAND", CompileHookConfig.FAKE_BRAND);
+        setStaticField(Build.class, "MANUFACTURER", CompileHookConfig.FAKE_MANUFACTURER);
+        setStaticField(Build.class, "MODEL", CompileHookConfig.FAKE_MODEL);
+        setStaticField(Build.class, "PRODUCT", CompileHookConfig.FAKE_PRODUCT);
+        setStaticField(Build.class, "DEVICE", CompileHookConfig.FAKE_DEVICE);
+        setStaticField(Build.class, "BOARD", CompileHookConfig.FAKE_BOARD);
+        setStaticField(Build.class, "HARDWARE", CompileHookConfig.FAKE_HARDWARE);
+        setStaticField(Build.class, "FINGERPRINT", CompileHookConfig.FAKE_FINGERPRINT);
+        setStaticField(Build.class, "SERIAL", CompileHookConfig.FAKE_SERIAL);
+    }
+
+    private static void setStaticField(Class<?> clazz, String fieldName, String value) {
+        if (value == null) return;
+        try {
+            Field f = clazz.getDeclaredField(fieldName);
+            f.setAccessible(true);
+            Field mod = Field.class.getDeclaredField("modifiers");
+            mod.setAccessible(true);
+            mod.setInt(f, f.getModifiers() & ~Modifier.FINAL);
+            f.set(null, value);
+        } catch (Throwable ignored) {}
     }
 
     private static void hookTelephonyManager() {
-        // Hook all IMEI/DeviceId retrieval methods
         String[] methods = {"getImei", "getDeviceId", "getMeid"};
-
         for (String method : methods) {
             HookUtils.hookAllMethods("android.telephony.TelephonyManager", method,
                 new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (cachedImei != null) {
-                            param.setResult(cachedImei);
+                        if (CompileHookConfig.FAKE_IMEI != null) {
+                            param.setResult(CompileHookConfig.FAKE_IMEI);
                         }
-                        // If null, let real value pass through for consistency
                     }
                 });
         }
 
-        // Hook getSimSerialNumber
         HookUtils.hookAllMethods("android.telephony.TelephonyManager", "getSimSerialNumber",
             new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (cachedSerial != null) {
-                        param.setResult(cachedSerial);
+                    if (CompileHookConfig.FAKE_SERIAL != null) {
+                        param.setResult(CompileHookConfig.FAKE_SERIAL);
                     }
                 }
             });
     }
 
     private static void hookBuildSerial() {
-        // Hook Build.SERIAL field access (difficult to hook directly)
-        // Hook Build.getSerial() method instead
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             HookUtils.hookMethod(Build.class, "getSerial",
                 new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (cachedSerial != null) {
-                            param.setResult(cachedSerial);
+                        if (CompileHookConfig.FAKE_SERIAL != null) {
+                            param.setResult(CompileHookConfig.FAKE_SERIAL);
                         }
                     }
                 });
@@ -105,19 +99,22 @@ public class DeviceInfoHook {
     }
 
     private static void hookSystemProperties() {
-        // Hook SystemProperties.get() to return consistent values
         HookUtils.hookAllMethods("android.os.SystemProperties", "get",
             new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args.length > 0) {
+                    if (param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
                         String key = (String) param.args[0];
-
-                        // Override specific properties
-                        if ("ro.boot.serialno".equals(key) && cachedSerial != null) {
-                            param.setResult(cachedSerial);
-                        } else if ("gsm.serial".equals(key) && cachedSerial != null) {
-                            param.setResult(cachedSerial);
+                        if ("ro.boot.serialno".equals(key) || "gsm.serial".equals(key)) {
+                            if (CompileHookConfig.FAKE_SERIAL != null) param.setResult(CompileHookConfig.FAKE_SERIAL);
+                        } else if ("ro.product.model".equals(key)) {
+                            if (CompileHookConfig.FAKE_MODEL != null) param.setResult(CompileHookConfig.FAKE_MODEL);
+                        } else if ("ro.product.brand".equals(key)) {
+                            if (CompileHookConfig.FAKE_BRAND != null) param.setResult(CompileHookConfig.FAKE_BRAND);
+                        } else if ("ro.product.manufacturer".equals(key)) {
+                            if (CompileHookConfig.FAKE_MANUFACTURER != null) param.setResult(CompileHookConfig.FAKE_MANUFACTURER);
+                        } else if ("ro.build.fingerprint".equals(key)) {
+                            if (CompileHookConfig.FAKE_FINGERPRINT != null) param.setResult(CompileHookConfig.FAKE_FINGERPRINT);
                         }
                     }
                 }
@@ -125,50 +122,41 @@ public class DeviceInfoHook {
     }
 
     private static void hookAndroidId() {
-        // Hook Settings.Secure.getString for android_id
         HookUtils.hookAllMethods("android.provider.Settings.Secure", "getString",
             new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args.length >= 2) {
-                        String key = (String) param.args[1];
-                        if ("android_id".equals(key) && cachedAndroidId != null) {
-                            param.setResult(cachedAndroidId);
+                    if (param.args != null && param.args.length >= 2) {
+                        String key = String.valueOf(param.args[1]);
+                        if ("android_id".equals(key) && CompileHookConfig.FAKE_ANDROID_ID != null) {
+                            param.setResult(CompileHookConfig.FAKE_ANDROID_ID);
                         }
                     }
                 }
             });
     }
 
+    private static void hookWifiMac() {
+        HookUtils.hookAllMethods("android.net.wifi.WifiInfo", "getMacAddress",
+            new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (CompileHookConfig.FAKE_MAC != null) {
+                        param.setResult(CompileHookConfig.FAKE_MAC);
+                    }
+                }
+            });
+    }
+
     private static void hookPandoraMonitor() {
-        // Hook Pandora's DeviceInfoMonitor to prevent cross-validation
         HookUtils.hookAllMethods("com.tencent.qmethod.pandoraex.monitor.DeviceInfoMonitor", "getImei",
             new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (cachedImei != null) {
-                        param.setResult(cachedImei);
+                    if (CompileHookConfig.FAKE_IMEI != null) {
+                        param.setResult(CompileHookConfig.FAKE_IMEI);
                     }
                 }
             });
-
-        // Hook MonitorReporter.report (void method) to suppress anomaly reports.
-        // report() returns void, so setResult(null) is type-safe.
-        HookUtils.hookAllMethods("com.tencent.qmethod.pandoraex.core.MonitorReporter", "report",
-            new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    // Block all monitoring reports
-                    param.setResult(null);
-                }
-            });
-
-        // NOTE: Do NOT hook getStrategyAndReport().
-        // It sits on the NORMAL data-retrieval path (DeviceInfoMonitor.getModel,
-        // InstalledAppListMonitor.getRunningAppProcesses) and returns a typed
-        // strategy object. Forcing setResult(0) triggers a ClassCastException
-        // ("Return value's type from hook callback does not match the hooked method")
-        // thrown by Xposed during proceed() - impossible to catch - which crashes
-        // QQ's startup tasks and blocks entry to the main UI (QQ 9.3.50).
     }
 }

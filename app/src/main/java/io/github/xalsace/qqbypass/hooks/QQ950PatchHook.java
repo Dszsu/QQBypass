@@ -97,8 +97,6 @@ public class QQ950PatchHook {
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         if (!HookConfig.ENABLE_QQ950_PATCH) return;
 
-        XposedEntry.log("Initializing QQ 9.3.70 detection & kick patch");
-
         // Tier 1: void-return, crash-safe backstops
         // hookMsfTelemetry(lpparam); // Abolished: Allow genuine MSF core lifecycle telemetry and keepalives (tryReportMSFAlive, tryReportJobAlive, doReportOnInitComplete, reportMsfCoreInit) to report naturally
         hookMsfCheckWTSig(lpparam);
@@ -1073,7 +1071,7 @@ public class QQ950PatchHook {
             // Guard all other methods in TroopSecurityTipsBanner against UninitializedPropertyAccessException
             for (Method method : bannerClass.getDeclaredMethods()) {
                 if ("m".equals(method.getName())) continue;
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                HookUtils.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         Throwable t = param.getThrowable();
@@ -1170,7 +1168,7 @@ public class QQ950PatchHook {
                 for (Method m : methods) {
                     Class<?> ret = m.getReturnType();
                     if (ret == boolean.class) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        HookUtils.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                                 param.setResult(false);
@@ -1178,7 +1176,6 @@ public class QQ950PatchHook {
                         });
                     }
                 }
-                XposedEntry.log("[FEKitCensor] Successfully neutralized com.tencent.mobileqq.fe.utils.a via LateStage");
             }
         } catch (Throwable t) {
             XposedEntry.log("[FEKitCensor] Error hooking fe.utils.a in LateStage: " + t.getMessage());
@@ -1195,7 +1192,7 @@ public class QQ950PatchHook {
                 Method[] methods = ntKickProcessorCls.getDeclaredMethods();
                 for (Method m : methods) {
                     if (Modifier.isStatic(m.getModifiers()) || m.getName().equals("a") || m.getName().equals("b")) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        HookUtils.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                                 String kickInfoSummary = null;
@@ -2297,7 +2294,7 @@ public class QQ950PatchHook {
                 sHookedFaceClasses.add(adc);
                 for (Method m : adc.getDeclaredMethods()) {
                     if (m.getReturnType() == float.class && m.getParameterTypes().length == 0) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        HookUtils.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                                 Object r = param.getResult();
@@ -3034,8 +3031,6 @@ public class QQ950PatchHook {
      *      suppresses msf_core_EvtMsfLoadSoError and msf_core_EvtLoadUseTxlib.
      */
     private static void hookTxlibAndPttProtection(XC_LoadPackage.LoadPackageParam lpparam) {
-        XposedEntry.log("[Tier6] Initializing txlib, txPttlib & MQP integrity protection");
-
         // --- 1. txlib & Dynamic SO Integrity Telemetry ---
         final String msfReportJCls = "com.tencent.mobileqq.msf.core.report.j";
         hookSafe(msfReportJCls, "a", lpparam, new XC_MethodHook() {
@@ -3939,8 +3934,6 @@ public class QQ950PatchHook {
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void hookRFixFailureSanitization(XC_LoadPackage.LoadPackageParam lpparam) {
-        XposedEntry.log("[Tier7] Initializing RFix & Hotfix failure sanitization and telemetry drop");
-
         // 1. RFix Quality Reporter: Drop failure reports in com.tencent.rfix.lib.reporter.e
         XC_MethodHook dropFailureReportHook = new XC_MethodHook() {
             @Override
@@ -4393,7 +4386,6 @@ public class QQ950PatchHook {
         if (cl == null) return;
 
         final IVersionProfile profile = HostVersionManager.getCurrentProfile();
-        XposedEntry.log("[SafeCenterRepack] Initializing SafeCenter & Repack defenses with profile: " + profile.getVersionName());
 
         // 1. Dynamic Discovery via DexKit first; fallback to version profile
         Set<String> pushHandlerNames = new LinkedHashSet<>();
@@ -4595,8 +4587,6 @@ public class QQ950PatchHook {
         final String officialMd5Upper = profile.getOfficialApkMd5Upper();
         final String officialSigUpper = profile.getOfficialSignatureHashUpper();
 
-        XposedEntry.log("[Tier13] Initializing APK File MD5 & Signature Source defenses: md5=" + officialMd5Upper);
-
         // 1. com.tencent.mdm.a.a(String path)
         Class<?> mdmA = XposedHelpers.findClassIfExists("com.tencent.mdm.a", cl);
         if (mdmA != null && sHooked9375Classes.add(mdmA)) {
@@ -4682,8 +4672,6 @@ public class QQ950PatchHook {
         if (cl == null) cl = HookConfig.getClassLoader();
         if (cl == null) return;
 
-        XposedEntry.log("[Tier14] Initializing intchk PB-level result and native strike defenses");
-
         // 1. Hook com.tencent.mqp.app.sec.MQPSecUtil native methods:
         // memchk -> returns true (MATCH/PASS) so uint32_memchk_result is natively computed as 1!
         Class<?> mqpSecUtilCls = XposedHelpers.findClassIfExists("com.tencent.mqp.app.sec.MQPSecUtil", cl);
@@ -4758,8 +4746,6 @@ public class QQ950PatchHook {
         if (cl == null) cl = HookConfig.getClassLoader();
         if (cl == null) return;
 
-        XposedEntry.log("[Tier15] Initializing Ganliang Display & AntEst Security Estimation defenses");
-
         // 1. Ganliang.h() (DisplayListener registration) & switch
         Class<?> ganliangCls = XposedHelpers.findClassIfExists("com.tencent.qqprotect.ganliang.Ganliang", cl);
         if (ganliangCls != null && sHooked9375Classes.add(ganliangCls)) {
@@ -4804,8 +4790,6 @@ public class QQ950PatchHook {
     public static void hookTuringPhoneAndBridge(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
         if (cl == null) cl = HookConfig.getClassLoader();
         if (cl == null) return;
-
-        XposedEntry.log("[Tier16] Initializing Turing PhoneService & Bridge defenses");
 
         Class<?> turingPhoneCls = XposedHelpers.findClassIfExists("com.tencent.turingfd.sdk.xq.TuringPhoneService", cl);
         if (turingPhoneCls != null && sHooked9375Classes.add(turingPhoneCls)) {
@@ -4869,8 +4853,6 @@ public class QQ950PatchHook {
     public static void hookSafeReportAndXps(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
         if (cl == null) cl = HookConfig.getClassLoader();
         if (cl == null) return;
-
-        XposedEntry.log("[Tier17] Initializing SafeReport and XpsReport telemetry normalization");
 
         // Do NOT arbitrarily clear report items to empty!
         // Empty report packets trigger missing-telemetry and packet-format anomaly heuristics on the server.

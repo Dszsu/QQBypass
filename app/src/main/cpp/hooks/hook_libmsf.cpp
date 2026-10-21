@@ -1,5 +1,6 @@
 #include "hook_libmsf.h"
 #include "../utils/log.h"
+#include "../utils/native_hook_tracker.h"
 #include <bytehook.h>
 #include <jni.h>
 
@@ -38,10 +39,8 @@ static void hooked_GetSignature(JNIEnv* env, jobject context, void* vec) {
 }
 
 void install_hooks() {
-    LOGI("Installing libmsf & libcodecwrapper signature bypass hooks (ByteHook)...");
-
     // 1. Hook CMSFJavaUtil::IsSignatureValid
-    bytehook_hook_single(
+    TRACK_NATIVE_HOOK_SINGLE(
         "libmsfbootV2.so",
         nullptr,
         "_ZN12CMSFJavaUtil16IsSignatureValidEP7_JNIEnvP8_jobject",
@@ -50,7 +49,7 @@ void install_hooks() {
         nullptr
     );
 
-    bytehook_hook_single(
+    TRACK_NATIVE_HOOK_SINGLE(
         "libMSFKernel.so",
         nullptr,
         "_ZN12CMSFJavaUtil16IsSignatureValidEP7_JNIEnvP8_jobject",
@@ -59,7 +58,7 @@ void install_hooks() {
         nullptr
     );
 
-    bytehook_hook_all(
+    TRACK_NATIVE_HOOK_ALL(
         nullptr,
         "_ZN12CMSFJavaUtil16IsSignatureValidEP7_JNIEnvP8_jobject",
         (void*)hooked_IsSignatureValid,
@@ -68,7 +67,7 @@ void install_hooks() {
     );
 
     // 2. Hook GetSignature in libcodecwrapperV2.so (PLT hook)
-    bytehook_hook_single(
+    TRACK_NATIVE_HOOK_SINGLE(
         "libcodecwrapperV2.so",
         nullptr,
         "_Z12GetSignatureP7_JNIEnvP8_jobjectRNSt6__ndk16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEE",
@@ -76,8 +75,6 @@ void install_hooks() {
         nullptr,
         nullptr
     );
-
-    LOGI("libmsf signature hooks installed successfully");
 }
 
 } // namespace hook_libmsf

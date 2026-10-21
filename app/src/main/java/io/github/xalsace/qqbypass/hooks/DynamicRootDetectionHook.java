@@ -62,8 +62,6 @@ public class DynamicRootDetectionHook {
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         if (!HookConfig.ENABLE_ROOT_BYPASS) return;
 
-        XposedEntry.log("Initializing DexKit-based Root Detection Bypass");
-
         // Targeted checklist hooks (04_检测点清单.md): Wlogin, LightDevice, ChargeV2, UserInfo, DeviceInfo, CrashReport
         RootDetectionHook.hook(lpparam);
 
@@ -107,7 +105,7 @@ public class DynamicRootDetectionHook {
 
     private static void hookNetworkInterfaces() {
         try {
-            XposedHelpers.findAndHookMethod(NetworkInterface.class, "getNetworkInterfaces", new XC_MethodHook() {
+            HookUtils.hookMethod(NetworkInterface.class, "getNetworkInterfaces", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.getResult() == null) return;
@@ -130,7 +128,6 @@ public class DynamicRootDetectionHook {
                     param.setResult(Collections.enumeration(filtered));
                 }
             });
-            XposedEntry.log("NetworkInterface: Successfully hooked getNetworkInterfaces to filter virtual/VPN interfaces");
         } catch (Throwable t) {
             XposedEntry.log("NetworkInterface hook failed: " + t.getMessage());
         }
@@ -519,7 +516,7 @@ public class DynamicRootDetectionHook {
                     continue;
                 }
 
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                HookUtils.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         // If method returns boolean (isRooted check), force false
@@ -538,8 +535,6 @@ public class DynamicRootDetectionHook {
                     }
                 });
 
-                XposedEntry.log("Hooked su path checker: " + className + "." + methodName);
-
             } catch (Exception e) {
                 XposedEntry.log("Failed to hook su checker: " + e.getMessage());
             }
@@ -553,8 +548,6 @@ public class DynamicRootDetectionHook {
             return;
         }
 
-        XposedEntry.log("DynamicRoot: Hooking " + packageQueries.size() + " package queries");
-
         for (DexMethodData methodData : packageQueries) {
             try {
                 String className = methodData.getClassName();
@@ -567,7 +560,7 @@ public class DynamicRootDetectionHook {
                     continue;
                 }
 
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                HookUtils.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         // Check if querying for suspicious packages
@@ -603,8 +596,6 @@ public class DynamicRootDetectionHook {
                         }
                     }
                 });
-
-                XposedEntry.log("Hooked package query: " + className + "." + methodName);
 
             } catch (Exception e) {
                 XposedEntry.log("Failed to hook package query: " + e.getMessage());

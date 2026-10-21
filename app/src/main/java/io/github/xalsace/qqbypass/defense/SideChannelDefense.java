@@ -190,8 +190,6 @@ public class SideChannelDefense {
     // ==========================================================
 
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
-        XposedEntry.log("[SideChannelDefense] Initializing dynamic side-channel defense hooks");
-
         // 1. Hook BatteryManager query via Intent.ACTION_BATTERY_CHANGED
         hookBatteryReceiver();
 

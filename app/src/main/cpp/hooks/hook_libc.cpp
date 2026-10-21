@@ -1,5 +1,6 @@
 #include "hook_libc.h"
 #include "../utils/log.h"
+#include "../utils/native_hook_tracker.h"
 #include "../utils/safe_bytehook.h"
 #include <bytehook.h>
 #include <stdio.h>
@@ -2992,10 +2993,9 @@ static bool libc_caller_filter(const char* caller_path_name, void* arg) {
 }
 
 #define HOOK_PARTIAL_LIBC(sym, fake_func) \
-    bytehook_hook_partial(libc_caller_filter, nullptr, nullptr, (sym), (void*)(fake_func), nullptr, nullptr)
+    TRACK_NATIVE_HOOK_PARTIAL(libc_caller_filter, nullptr, nullptr, (sym), (void*)(fake_func), nullptr)
 
 void install_hooks() {
-    LOGI("Installing libc hooks (ByteHook partial with filter)...");
     ensure_real_funcs();
 
     HOOK_PARTIAL_LIBC("fopen", fake_fopen);
@@ -3049,8 +3049,6 @@ void install_hooks() {
     HOOK_PARTIAL_LIBC("timer_create", fake_timer_create);
     HOOK_PARTIAL_LIBC("timer_settime", fake_timer_settime);
     HOOK_PARTIAL_LIBC("timer_delete", fake_timer_delete);
-
-    LOGI("libc hooks installed (filesystem, maps, mounts, syscalls, timers, and properties)");
 }
 
 } // namespace hook_libc

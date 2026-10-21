@@ -23,8 +23,6 @@ public class DynamicXposedDetectionHook {
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         if (!HookConfig.ENABLE_XPOSED_BYPASS) return;
 
-        XposedEntry.log("Initializing DexKit-based Xposed Detection Bypass");
-
         // Universal hook: Stack trace sanitization (removes xposed/lsposed/qb frames)
         hookStackTrace();
 
@@ -64,8 +62,6 @@ public class DynamicXposedDetectionHook {
             return;
         }
 
-        XposedEntry.log("DynamicXposed: Hooking " + artDetectors.size() + " ArtMethod detectors");
-
         for (DexMethodData methodData : artDetectors) {
             try {
                 String className = methodData.getClassName();
@@ -78,7 +74,7 @@ public class DynamicXposedDetectionHook {
                     continue;
                 }
 
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                HookUtils.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         Object result = param.getResult();
@@ -103,8 +99,6 @@ public class DynamicXposedDetectionHook {
                     }
                 });
 
-                XposedEntry.log("Hooked ArtMethod detector: " + className + "." + methodName);
-
             } catch (Exception e) {
                 XposedEntry.log("Failed to hook ArtMethod detector: " + e.getMessage());
             }
@@ -118,8 +112,6 @@ public class DynamicXposedDetectionHook {
             return;
         }
 
-        XposedEntry.log("DynamicXposed: Hooking " + mapsReaders.size() + " /proc/self/maps readers");
-
         for (DexMethodData methodData : mapsReaders) {
             try {
                 String className = methodData.getClassName();
@@ -132,7 +124,7 @@ public class DynamicXposedDetectionHook {
                     continue;
                 }
 
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                HookUtils.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         Object result = param.getResult();
@@ -162,8 +154,6 @@ public class DynamicXposedDetectionHook {
                     }
                 });
 
-                XposedEntry.log("Hooked maps reader: " + className + "." + methodName);
-
             } catch (Exception e) {
                 XposedEntry.log("Failed to hook maps reader: " + e.getMessage());
             }
@@ -177,8 +167,6 @@ public class DynamicXposedDetectionHook {
             return;
         }
 
-        XposedEntry.log("DynamicXposed: Hooking " + qsecDetectors.size() + " QSec hook detectors");
-
         for (DexMethodData methodData : qsecDetectors) {
             try {
                 String className = methodData.getClassName();
@@ -191,7 +179,7 @@ public class DynamicXposedDetectionHook {
                     continue;
                 }
 
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                HookUtils.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         Object result = param.getResult();
@@ -214,8 +202,6 @@ public class DynamicXposedDetectionHook {
                         }
                     }
                 });
-
-                XposedEntry.log("Hooked QSec detector: " + className + "." + methodName);
 
             } catch (Exception e) {
                 XposedEntry.log("Failed to hook QSec detector: " + e.getMessage());

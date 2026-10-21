@@ -1,6 +1,7 @@
 #include "hook_libfekit.h"
 #include "hook_libc.h"
 #include "../utils/log.h"
+#include "../utils/native_hook_tracker.h"
 #include "../utils/safe_bytehook.h"
 #include <bytehook.h>
 #include <stdio.h>
@@ -231,26 +232,22 @@ static ssize_t fake_fekit_readlink(const char* pathname, char* buf, size_t bufsi
 }
 
 void install_hooks() {
-    LOGI("Installing libfekit hooks (ByteHook)...");
-
     // 命令执行类：全局拦截（调用频率低，安全）
-    bytehook_hook_all(nullptr, "system", (void*)fake_system, nullptr, nullptr);
-    bytehook_hook_all(nullptr, "popen", (void*)fake_popen, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_ALL(nullptr, "system", (void*)fake_system, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_ALL(nullptr, "popen", (void*)fake_popen, nullptr, nullptr);
 
     // 字符串匹配：仅对 libfekit.so 作为调用方拦截，避免全局性能损耗
-    bytehook_hook_single("libfekit.so", nullptr, "strstr", (void*)fake_strstr, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "strstr", (void*)fake_strstr, nullptr, nullptr);
 
     // 文件访问与探测类：针对 libfekit.so 拦截所有探测 API
-    bytehook_hook_single("libfekit.so", nullptr, "access", (void*)fake_fekit_access, nullptr, nullptr);
-    bytehook_hook_single("libfekit.so", nullptr, "faccessat", (void*)fake_fekit_faccessat, nullptr, nullptr);
-    bytehook_hook_single("libfekit.so", nullptr, "stat", (void*)fake_fekit_stat, nullptr, nullptr);
-    bytehook_hook_single("libfekit.so", nullptr, "lstat", (void*)fake_fekit_lstat, nullptr, nullptr);
-    bytehook_hook_single("libfekit.so", nullptr, "open", (void*)fake_fekit_open, nullptr, nullptr);
-    bytehook_hook_single("libfekit.so", nullptr, "fopen", (void*)fake_fekit_fopen, nullptr, nullptr);
-    bytehook_hook_single("libfekit.so", nullptr, "opendir", (void*)fake_fekit_opendir, nullptr, nullptr);
-    bytehook_hook_single("libfekit.so", nullptr, "readlink", (void*)fake_fekit_readlink, nullptr, nullptr);
-
-    LOGI("libfekit hooks installed");
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "access", (void*)fake_fekit_access, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "faccessat", (void*)fake_fekit_faccessat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "stat", (void*)fake_fekit_stat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "lstat", (void*)fake_fekit_lstat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "open", (void*)fake_fekit_open, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "fopen", (void*)fake_fekit_fopen, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "opendir", (void*)fake_fekit_opendir, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "readlink", (void*)fake_fekit_readlink, nullptr, nullptr);
 }
 
 } // namespace hook_libfekit

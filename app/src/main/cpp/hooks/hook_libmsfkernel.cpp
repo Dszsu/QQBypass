@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <string.h>
 #include "../utils/log.h"
+#include "../utils/native_hook_tracker.h"
 #include "bytehook.h"
 
 // MSFKernel 关键函数的原始指针
@@ -36,17 +37,7 @@ static void hooked_setQimei36(JNIEnv* env, jobject thiz, jstring qimei36) {
  * 安装 libMSFKernel 的 hook
  */
 void install_msfkernel_hooks() {
-    LOGI("Installing libMSFKernel hooks (ByteHook)...");
-
-    // Hook native_setQimei36
-    // 注意：JNI 函数名需要完整的签名
-    // 格式：Java_包名_类名_方法名
-    // 实际名称需要通过逆向确认，这里是推测
-    // Verified real export symbol (QQ 9.3.50, via llvm-nm on libMSFKernel.so):
-    //   Java_com_tencent_mobileqq_msfcore_MSFKernelBridge_00024CppProxy_native_1setQimei36
-    // Previous symbol was wrong on 3 counts (msf_core->msfcore, missing $CppProxy
-    // encoded as _00024CppProxy), so this hook never installed on 9.3.50.
-    bytehook_stub_t stub = bytehook_hook_single(
+    TRACK_NATIVE_HOOK_SINGLE(
         "libMSFKernel.so",
         nullptr,
         "Java_com_tencent_mobileqq_msfcore_MSFKernelBridge_00024CppProxy_native_1setQimei36",
@@ -54,10 +45,4 @@ void install_msfkernel_hooks() {
         nullptr,
         nullptr
     );
-
-    if (stub == nullptr) {
-        LOGE("Failed to hook MSFKernel setQimei36 (symbol not found in libMSFKernel.so)");
-    } else {
-        LOGI("libMSFKernel setQimei36 hook installed (real CppProxy symbol)");
-    }
 }

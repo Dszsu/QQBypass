@@ -25,16 +25,11 @@ public class UnifiedHookCoordinator {
     private static boolean nativeLayerAvailable = false;
 
     public static void initialize(XC_LoadPackage.LoadPackageParam lpparam) {
-        XposedEntry.log("=== Initializing Unified Hook Coordinator ===");
-
         // Check Native layer availability
         nativeLayerAvailable = NativeBypass.isLibraryLoaded();
 
         if (nativeLayerAvailable) {
-            XposedEntry.log("Native layer available - Full protection (80%)");
             initNativeIntegration();
-        } else {
-            XposedEntry.log("Native layer unavailable - Java only (30%)");
         }
 
         // Install coordinated hooks
@@ -85,10 +80,8 @@ public class UnifiedHookCoordinator {
             new Thread(() -> {
                 try {
                     Thread.sleep(3000);
-                    String status = NativeBypass.getHookStatus();
-                    XposedEntry.log("[Coordinator] Native status: " + status);
-                } catch (Exception e) {
-                    XposedEntry.logError("[Coordinator] Status check failed", e);
+                    NativeBypass.getHookStatus();
+                } catch (Exception ignored) {
                 }
             }).start();
         }
@@ -144,41 +137,36 @@ public class UnifiedHookCoordinator {
     }
 
     /**
-     * 异步等待 Native 层安装完成后，报告最终保护等级。
-     *
-     * Native hook 在后台线程延迟安装（约需 2-3 秒），如果同步读取会得到
-     * "Native loading (60%)" 的中间态。这里轮询等待，直到装完或超时。
+     * 异步等待 Native 层安装完成后，输出全量统一汇总日志。
      */
     public static void reportFinalProtectionLevelAsync() {
-        if (!nativeLayerAvailable) {
-            // 没有 Native 层，当前状态即最终状态
-            XposedEntry.log("=== Final Protection Level: " + getProtectionLevel() + " ===");
-            return;
-        }
+        reportSummaryLogAsync(null);
+    }
 
+    public static void reportSummaryLogAsync(final XC_LoadPackage.LoadPackageParam lpparam) {
         new Thread(() -> {
-            final int maxWaitMs = 10000;   // 最多等 10 秒
-            final int intervalMs = 300;
-            int waited = 0;
+            if (nativeLayerAvailable) {
+                final int maxWaitMs = 5000;   // 最多等 5 秒
+                final int intervalMs = 150;
+                int waited = 0;
 
-            while (waited < maxWaitMs) {
-                if (NativeBypass.isHooksInstalled()) {
-                    XposedEntry.log("=== Final Protection Level: Full (80%) ===");
-                    XposedEntry.log("Native hook statistics:\n" + NativeBypass.getHookStatistics());
-                    return;
-                }
-                try {
-                    Thread.sleep(intervalMs);
-                    waited += intervalMs;
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
+                while (waited < maxWaitMs) {
+                    if (NativeBypass.isHooksInstalled()) {
+                        break;
+                    }
+                    try {
+                        Thread.sleep(intervalMs);
+                        waited += intervalMs;
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
 
-            // 超时仍未装完
-            XposedEntry.log("=== Final Protection Level: " + getProtectionLevel()
-                    + " (native install timed out) ===");
-        }, "QQBypass-StatusReporter").start();
+            // 输出最终唯一的 Hook 汇总统计日志
+            String procName = (lpparam != null && lpparam.processName != null) ? lpparam.processName : "";
+            io.github.xalsace.qqbypass.utils.HookTracker.printSummaryReport(procName);
+        }, "QQBypass-SummaryReporter").start();
     }
 }

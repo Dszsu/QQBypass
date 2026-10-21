@@ -25,8 +25,6 @@ public class DynamicDebugDetectionHook {
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         if (!HookConfig.ENABLE_DEBUG_BYPASS) return;
 
-        XposedEntry.log("Initializing DexKit-based Debug Detection Bypass");
-
         // Universal hooks: Android debug APIs
         hookDebugAPIs();
 
@@ -39,7 +37,9 @@ public class DynamicDebugDetectionHook {
                     return;
                 }
                 hookDebugCheckers(lpparam);
-                hookEmulatorCheckers(lpparam);
+                if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_EMULATOR_SPOOF) {
+                    hookEmulatorCheckers(lpparam);
+                }
 
             } catch (Throwable e) {
                 XposedEntry.log("Dynamic debug detection hook failed: " + e.getMessage());
@@ -181,7 +181,7 @@ public class DynamicDebugDetectionHook {
                     continue;
                 }
 
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                HookUtils.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         Object result = param.getResult();

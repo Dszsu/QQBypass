@@ -2,6 +2,7 @@
 #include <dlfcn.h>
 #include <string.h>
 #include "../utils/log.h"
+#include "../utils/native_hook_tracker.h"
 #include "../utils/safe_bytehook.h"
 #include "bytehook.h"
 #include "hook_libc.h"
@@ -181,8 +182,6 @@ static int hooked_dladdr(const void* addr, Dl_info* info) {
  * 安装 libQSec 及 libfekit 的 anti-hook 防护
  */
 void install_qsec_hooks() {
-    LOGI("Installing libQSec & libfekit anti-hook hooks (ByteHook)...");
-
     const char* targets[] = {
         "libQSec.so", "libfekit.so", "libBeaconDT.so", "libqimei.so",
         "libnativefilescan.so", "libunusedcodecheck.so", "libKcsdk-2.0.9.so",
@@ -201,8 +200,7 @@ void install_qsec_hooks() {
     for (int i = 0; targets[i]; i++) {
         const char* target = targets[i];
 
-        // Hook dlopen
-        bytehook_stub_t stub = bytehook_hook_single(
+        TRACK_NATIVE_HOOK_SINGLE(
             target,
             nullptr,
             "dlopen",
@@ -210,12 +208,8 @@ void install_qsec_hooks() {
             nullptr,
             nullptr
         );
-        if (stub == nullptr) {
-            LOGD("Failed to hook %s dlopen", target);
-        }
 
-        // Hook dlsym
-        stub = bytehook_hook_single(
+        TRACK_NATIVE_HOOK_SINGLE(
             target,
             nullptr,
             "dlsym",
@@ -223,12 +217,8 @@ void install_qsec_hooks() {
             nullptr,
             nullptr
         );
-        if (stub == nullptr) {
-            LOGD("Failed to hook %s dlsym", target);
-        }
 
-        // Hook dladdr
-        stub = bytehook_hook_single(
+        TRACK_NATIVE_HOOK_SINGLE(
             target,
             nullptr,
             "dladdr",
@@ -236,11 +226,6 @@ void install_qsec_hooks() {
             nullptr,
             nullptr
         );
-        if (stub == nullptr) {
-            LOGD("Failed to hook %s dladdr", target);
-        }
     }
-
-    LOGI("libQSec & libfekit anti-hook hooks installed");
 }
 

@@ -1,6 +1,7 @@
 #include "hook_libturingmfa.h"
 #include "hook_libc.h"
 #include "../utils/log.h"
+#include "../utils/native_hook_tracker.h"
 #include <bytehook.h>
 #include <string.h>
 #include <errno.h>
@@ -72,10 +73,8 @@ static char* fake_mfa_strstr(const char* haystack, const char* needle) {
 } // namespace
 
 void install_turingmfa_hooks() {
-    LOGI("Installing libturingmfa hooks (ByteHook)...");
-
     // 1. Hook syscall in libturingmfa.so
-    bytehook_stub_t s1 = bytehook_hook_single(
+    TRACK_NATIVE_HOOK_SINGLE(
         "libturingmfa.so",
         nullptr,
         "syscall",
@@ -85,7 +84,7 @@ void install_turingmfa_hooks() {
     );
 
     // 2. Hook real_syscall in libturingmfa.so
-    bytehook_stub_t s2 = bytehook_hook_single(
+    TRACK_NATIVE_HOOK_SINGLE(
         "libturingmfa.so",
         nullptr,
         "real_syscall",
@@ -95,7 +94,7 @@ void install_turingmfa_hooks() {
     );
 
     // 3. Hook strstr in libturingmfa.so
-    bytehook_hook_single(
+    TRACK_NATIVE_HOOK_SINGLE(
         "libturingmfa.so",
         nullptr,
         "strstr",
@@ -103,10 +102,4 @@ void install_turingmfa_hooks() {
         nullptr,
         nullptr
     );
-
-    if (s1 != nullptr || s2 != nullptr) {
-        LOGI("libturingmfa syscall/real_syscall hook installed successfully");
-    } else {
-        LOGW("libturingmfa.so not loaded yet; registered for automatic hook on load");
-    }
 }

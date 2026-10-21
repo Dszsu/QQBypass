@@ -56,7 +56,6 @@ public class NetworkReportHook {
     };
 
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
-        XposedEntry.log("NetworkReportHook: Initializing targeted network telemetry, audit logging, and inspection hooks");
         // Layer 0: ChannelManager report auditing & optional interception
         hookChannelManager(lpparam);
 
@@ -360,7 +359,6 @@ public class NetworkReportHook {
                 }
 
                 List<DexMethodData> procReaders = DexKitDetector.findTuringFdProcReaders();
-                XposedEntry.log("[TuringFD] found " + procReaders.size() + " proc readers by fingerprint");
 
                 final String legitimateProcName = (lpparam != null && lpparam.processName != null) ? lpparam.processName : "com.tencent.mobileqq";
                 for (DexMethodData md : procReaders) {
@@ -370,7 +368,7 @@ public class NetworkReportHook {
                         Class<?> ret = ((java.lang.reflect.Method) method).getReturnType();
                         if (ret != String.class) continue;
 
-                        XposedBridge.hookMethod(method, new XC_MethodHook() {
+                        HookUtils.hookMethod(method, new XC_MethodHook() {
                             @Override
                             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                                 Object res = param.getResult();
@@ -386,8 +384,6 @@ public class NetworkReportHook {
                                 }
                             }
                         });
-                        XposedEntry.log("[TuringFD] normalized proc reader: "
-                            + md.getClassName() + "." + md.getMethodName());
                     } catch (Throwable t) {
                         XposedEntry.log("[TuringFD] failed to hook proc reader: " + t.getMessage());
                     }

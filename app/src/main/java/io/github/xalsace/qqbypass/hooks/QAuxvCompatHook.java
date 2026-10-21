@@ -40,7 +40,6 @@ public class QAuxvCompatHook {
     private static volatile boolean sBaseApkPatched = false;
 
     public static void hook(final XC_LoadPackage.LoadPackageParam lpparam) {
-        XposedEntry.log("[" + TAG + "] Initializing QAuxv compatibility and BaseApk crash prevention");
         tryScanExistingClassLoaders();
         ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
         hookUftwrapperBD(cl);
@@ -89,7 +88,7 @@ public class QAuxvCompatHook {
         for (Method m : declaredMethods) {
             if (m.getName().contains("lambda$initOnce$1")) {
                 m.setAccessible(true);
-                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                HookUtils.hookMethod(m, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                         try {
@@ -103,7 +102,6 @@ public class QAuxvCompatHook {
                         p.setResult(null);
                     }
                 });
-                XposedEntry.log("[" + TAG + "] Successfully hooked " + m.getName() + " on BaseApk");
             }
         }
 
@@ -123,7 +121,6 @@ public class QAuxvCompatHook {
                     p.setResult(null);
                 }
             });
-            XposedEntry.log("[" + TAG + "] Successfully hooked BaseApk$$ExternalSyntheticLambda0.beforeHookedMethod");
         }
     }
 
@@ -154,7 +151,6 @@ public class QAuxvCompatHook {
                 }
             }
         });
-        XposedEntry.log("[" + TAG + "] Successfully hooked uftwrapper.b.d with PRIORITY_HIGHEST");
     }
 
     private static void handleSafeBaseApkRename(Object methodHookParamObj) {

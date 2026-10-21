@@ -28,8 +28,6 @@ public class DynamicRuntimeMonitorHook {
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         if (!HookConfig.ENABLE_RUNTIME_BYPASS) return;
 
-        XposedEntry.log("Initializing DexKit-based Runtime Monitor Bypass");
-
         // Universal hook: ProcessBuilder.start() - catches all command execution
         hookProcessBuilder();
 
@@ -92,8 +90,6 @@ public class DynamicRuntimeMonitorHook {
             return;
         }
 
-        XposedEntry.log("DynamicRuntime: Hooking " + execCallers.size() + " Runtime.exec callers");
-
         for (DexMethodData methodData : execCallers) {
             try {
                 String className = methodData.getClassName();
@@ -107,14 +103,12 @@ public class DynamicRuntimeMonitorHook {
                     continue;
                 }
 
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                HookUtils.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         logCommandArgs("Runtime.exec caller: " + className, param.args);
                     }
                 });
-
-                XposedEntry.log("Hooked Runtime.exec caller: " + className + "." + methodName);
 
             } catch (Exception e) {
                 XposedEntry.log("Failed to hook Runtime.exec caller: " + e.getMessage());

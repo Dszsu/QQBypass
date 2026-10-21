@@ -89,14 +89,12 @@ public class DexKitDetector {
         synchronized (initLock) {
             if (dexKitBridge != null) return;
             try {
-                XposedBridge.log("[" + TAG + "] Initializing DexKit with APK: " + apkPath);
                 loadDexKitNativeLib();
                 dexKitBridge = DexKitBridge.create(apkPath);
                 try {
                     dexKitBridge.setThreadNum(1);
                 } catch (Throwable ignored) {}
                 ready = true;
-                XposedBridge.log("[" + TAG + "] DexKit initialized successfully");
             } catch (Throwable e) {
                 XposedBridge.log("[" + TAG + "] Failed to initialize DexKit: "
                     + e.getClass().getName() + ": " + e.getMessage());

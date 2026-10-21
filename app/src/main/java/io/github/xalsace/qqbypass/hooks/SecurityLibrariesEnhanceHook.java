@@ -44,7 +44,6 @@ public class SecurityLibrariesEnhanceHook {
     };
 
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
-        XposedEntry.log("SecurityLibrariesEnhanceHook: Initializing enhanced security and censor hooks");
         ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
         hookAll(cl);
     }
@@ -64,7 +63,9 @@ public class SecurityLibrariesEnhanceHook {
         hookUnusedCodeCheck(cl);
         hookNativeFileScan(cl);
         hookQSec(cl);
-        hookMSFCoreKick(cl);
+        if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_KICK_INTERCEPT) {
+            hookMSFCoreKick(cl);
+        }
     }
 
     private static String getSafePropValue(String key) {
@@ -110,7 +111,7 @@ public class SecurityLibrariesEnhanceHook {
                 for (Method m : clazz.getDeclaredMethods()) {
                     Class<?> retType = m.getReturnType();
                     if (retType == boolean.class) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        HookUtils.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                                 param.setResult(false);
@@ -118,7 +119,6 @@ public class SecurityLibrariesEnhanceHook {
                         });
                     }
                 }
-                XposedEntry.log("[FEKitCensor] Successfully neutralized com.tencent.mobileqq.fe.utils.a");
             }
         });
 
@@ -236,8 +236,6 @@ public class SecurityLibrariesEnhanceHook {
                         }
                     }
                 });
-
-                XposedEntry.log("[FEKitCensor] Successfully neutralized com.tencent.mobileqq.dt.app.Dtc");
             }
         });
 
@@ -253,10 +251,9 @@ public class SecurityLibrariesEnhanceHook {
                 };
                 for (Method m : clazz.getDeclaredMethods()) {
                     if (List.class.isAssignableFrom(m.getReturnType())) {
-                        XposedBridge.hookMethod(m, emptyListHook);
+                        HookUtils.hookMethod(m, emptyListHook);
                     }
                 }
-                XposedEntry.log("[FEKitCensor] Successfully neutralized com.tencent.mobileqq.dt.app.h");
             }
         });
     }
@@ -306,8 +303,6 @@ public class SecurityLibrariesEnhanceHook {
                         param.setResult(false);
                     }
                 });
-
-                XposedEntry.log("[ShadowHook] Successfully neutralized com.bytedance.shadowhook.ShadowHook records");
             }
         });
     }
@@ -370,8 +365,6 @@ public class SecurityLibrariesEnhanceHook {
                         param.setResult(0);
                     }
                 });
-
-                XposedEntry.log("[QQPerfTool] Successfully hooked SignalCatcherJNI");
             }
         });
     }
@@ -409,8 +402,6 @@ public class SecurityLibrariesEnhanceHook {
                 HookUtils.hookAllMethods(clazz, "a", desensHook);
                 HookUtils.hookAllMethods(clazz, "nativeStrDesensitizeDetectedContentWithMask", desensHook);
                 HookUtils.hookAllMethods(clazz, "nativeStrDesensitizeWithMask", desensHook);
-
-                XposedEntry.log("[Desensitization] Successfully hooked DesensitizationJni");
             }
         });
     }
@@ -455,7 +446,7 @@ public class SecurityLibrariesEnhanceHook {
                 for (Method m : clazz.getDeclaredMethods()) {
                     String name = m.getName();
                     if ("nativeHookStackTrace".equals(name)) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        HookUtils.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                                 p.setResult(false);
@@ -463,7 +454,7 @@ public class SecurityLibrariesEnhanceHook {
                             }
                         });
                     } else if ("nativeInit".equals(name)) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        HookUtils.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                                 p.setResult(0);
@@ -471,14 +462,14 @@ public class SecurityLibrariesEnhanceHook {
                             }
                         });
                     } else if ("nativeSuspendThread".equals(name)) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        HookUtils.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                                 p.setResult(false);
                             }
                         });
                     } else if ("nativeResumeThread".equals(name)) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        HookUtils.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                                 p.setResult(true);
@@ -498,14 +489,14 @@ public class SecurityLibrariesEnhanceHook {
                     if (name.startsWith("nSet") || name.startsWith("nEnable") || name.startsWith("nStrip")) {
                         Class<?> ret = m.getReturnType();
                         if (ret == boolean.class) {
-                            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            HookUtils.hookMethod(m, new XC_MethodHook() {
                                 @Override
                                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                                     p.setResult(false);
                                 }
                             });
                         } else if (ret == void.class) {
-                            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            HookUtils.hookMethod(m, new XC_MethodHook() {
                                 @Override
                                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                                     p.setResult(null);
@@ -514,7 +505,6 @@ public class SecurityLibrariesEnhanceHook {
                         }
                     }
                 }
-                XposedEntry.log("[BuglyPatch] Neutralized StripHeapDumper native hooks");
             }
         });
 
@@ -525,7 +515,7 @@ public class SecurityLibrariesEnhanceHook {
                 for (Method m : clazz.getDeclaredMethods()) {
                     String name = m.getName();
                     if ("nInitForkDump".equals(name)) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        HookUtils.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                                 p.setResult(false);
@@ -533,7 +523,7 @@ public class SecurityLibrariesEnhanceHook {
                             }
                         });
                     } else if ("dump".equals(name)) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        HookUtils.hookMethod(m, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                                 p.setResult(101); // DUMP_DISABLED / FAIL
@@ -571,8 +561,6 @@ public class SecurityLibrariesEnhanceHook {
                         param.setResult(true);
                     }
                 });
-
-                XposedEntry.log("[CheckCore] Successfully neutralized CheckCore code integrity checks");
             }
         });
 
@@ -606,8 +594,6 @@ public class SecurityLibrariesEnhanceHook {
                         param.setResult(null);
                     }
                 });
-
-                XposedEntry.log("[CheckCore] Successfully neutralized InitClassInfo dex integrity checks");
             }
         });
     }
@@ -652,8 +638,6 @@ public class SecurityLibrariesEnhanceHook {
                 HookUtils.hookAllMethods(clazz, "getTargetFormatFileList", scanSuppressHook);
                 HookUtils.hookAllMethods(clazz, "d", scanSuppressHook);
                 HookUtils.hookAllMethods(clazz, "e", scanSuppressHook);
-
-                XposedEntry.log("[FileScanCore] Successfully guarded FileScanCore directory scans");
             }
         });
     }
@@ -735,7 +719,6 @@ public class SecurityLibrariesEnhanceHook {
                         }
                     }
                 });
-                XposedEntry.log("[MSFShield] Successfully hooked com.tencent.mobileqq.msf.core.t (switchable)");
             }
         });
 
@@ -772,7 +755,6 @@ public class SecurityLibrariesEnhanceHook {
                         }
                     }
                 });
-                XposedEntry.log("[MSFShield] Successfully protected com.tencent.mobileqq.msf.core.auth.b (AccountCenter)");
             }
         });
 
@@ -795,7 +777,6 @@ public class SecurityLibrariesEnhanceHook {
                         }
                     }
                 });
-                XposedEntry.log("[MSFShield] Successfully hooked com.tencent.mobileqq.msf.core.auth.q (OnGetStWithoutPasswd2)");
             }
         });
 
@@ -812,7 +793,6 @@ public class SecurityLibrariesEnhanceHook {
                         }
                     }
                 });
-                XposedEntry.log("[MSFShield] Successfully hooked oicq.wlogin_sdk.tools.util.shouldKick -> false");
             }
         });
     }
@@ -837,7 +817,6 @@ public class SecurityLibrariesEnhanceHook {
                         }
                     }
                 });
-                XposedEntry.log("[QSec] Successfully neutralized QSec.detectMethod reflection probes");
             }
         });
     }

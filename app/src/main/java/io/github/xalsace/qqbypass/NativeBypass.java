@@ -79,7 +79,6 @@ public class NativeBypass {
                             }
                             System.load(nativeBypassSo.getAbsolutePath());
                             libraryLoaded = true;
-                            XposedEntry.log("Native library loaded directly from module libDir: " + nativeBypassSo.getAbsolutePath());
                             return;
                         }
                     }
@@ -100,7 +99,6 @@ public class NativeBypass {
             }
             System.loadLibrary("native-bypass");
             libraryLoaded = true;
-            XposedEntry.log("Native library loaded successfully via System.loadLibrary");
             return;
         } catch (Throwable e) {
             XposedEntry.logError("All native library loading strategies failed: " + e.getMessage(), e);
@@ -129,7 +127,6 @@ public class NativeBypass {
 
         try {
             initNativeHooksNative();
-            XposedEntry.log("Native hooks initialization started");
         } catch (Throwable t) {
             XposedEntry.logError("Failed to init native hooks", t);
         }
@@ -219,4 +216,8 @@ public class NativeBypass {
     private static native void notifyDetectionNative(String event, String data);
     private static native boolean isHookActiveNative(String hookName);
     private static native String getHookStatisticsNative();
+    public static native int getNativeHookTotal();
+    public static native int getNativeHookSuccess();
+    public static native int getNativeHookFailed();
+    public static native String getNativeFailedHooks();
 }

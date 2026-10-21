@@ -6,6 +6,7 @@
 #include <dlfcn.h>
 #include <bytehook.h>
 #include "utils/log.h"
+#include "utils/native_hook_tracker.h"
 #include "hooks/hook_libc.h"
 #include "hooks/hook_libfekit.h"
 #include "hooks/hook_libturingxq.h"
@@ -50,8 +51,6 @@ static pthread_mutex_t g_init_mutex = PTHREAD_MUTEX_INITIALIZER;
  */
 static void* install_hooks_thread(void* arg) {
     (void)arg;
-    LOGI("=== Native Bypass Module (ByteHook Engine) Starting ===");
-    LOGI("Process: %d", getpid());
 
     pthread_mutex_lock(&g_init_mutex);
 
@@ -67,11 +66,8 @@ static void* install_hooks_thread(void* arg) {
         pthread_mutex_unlock(&g_init_mutex);
         return nullptr;
     }
-    LOGI("ByteHook initialized (AUTOMATIC mode)");
 
     // Install hooks in order of importance
-    LOGI("Installing ByteHook hooks...");
-
     // 1. libc hooks (highest priority - intercept file I/O & syscalls)
     hook_libc::install_hooks();
 
@@ -91,13 +87,12 @@ static void* install_hooks_thread(void* arg) {
     hook_libmsf::install_hooks();
 
     // 6. Hook bytehook & shadowhook query APIs (prevent Tencent monitor from enumerating hooks)
-    bytehook_hook_all(nullptr, "bytehook_get_records", (void*)fake_bytehook_get_records, nullptr, nullptr);
-    bytehook_hook_all(nullptr, "bytehook_dump_records", (void*)fake_bytehook_dump_records, nullptr, nullptr);
-    bytehook_hook_all(nullptr, "shadowhook_get_records", (void*)fake_shadowhook_get_records, nullptr, nullptr);
-    bytehook_hook_all(nullptr, "shadowhook_dump_records", (void*)fake_shadowhook_dump_records, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_ALL(nullptr, "bytehook_get_records", (void*)fake_bytehook_get_records, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_ALL(nullptr, "bytehook_dump_records", (void*)fake_bytehook_dump_records, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_ALL(nullptr, "shadowhook_get_records", (void*)fake_shadowhook_get_records, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_ALL(nullptr, "shadowhook_dump_records", (void*)fake_shadowhook_dump_records, nullptr, nullptr);
 
     g_bytehook_hooks_installed = true;
-    LOGI("=== All ByteHook Native Hooks Installed Successfully ===");
 
     pthread_mutex_unlock(&g_init_mutex);
 
@@ -111,10 +106,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_io_github_xalsace_qqbypass_NativeBypass_initNativeHooksNative(JNIEnv* env, jclass clazz) {
     (void)env;
     (void)clazz;
-    LOGI("initNativeHooks called from Java layer");
 
     if (g_bytehook_hooks_installed) {
-        LOGW("ByteHook native hooks already installed");
         return;
     }
 
@@ -122,7 +115,6 @@ Java_io_github_xalsace_qqbypass_NativeBypass_initNativeHooksNative(JNIEnv* env, 
     pthread_t thread;
     if (pthread_create(&thread, nullptr, install_hooks_thread, nullptr) == 0) {
         pthread_detach(thread);
-        LOGI("ByteHook installation thread started");
     } else {
         LOGE("Failed to create hook installation thread");
     }
@@ -181,6 +173,33 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_io_github_xalsace_qqbypass_NativeBypass_getHookStatisticsNative(JNIEnv* env, jclass clazz) {
     (void)clazz;
     return env->NewStringUTF("ByteHook PLT hooks active");
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_xalsace_qqbypass_NativeBypass_getNativeHookTotal(JNIEnv* env, jclass clazz) {
+    (void)env;
+    (void)clazz;
+    return NativeHookTracker::getInstance().getTotal();
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_xalsace_qqbypass_NativeBypass_getNativeHookSuccess(JNIEnv* env, jclass clazz) {
+    (void)env;
+    (void)clazz;
+    return NativeHookTracker::getInstance().getSuccess();
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_xalsace_qqbypass_NativeBypass_getNativeHookFailed(JNIEnv* env, jclass clazz) {
+    (void)env;
+    (void)clazz;
+    return NativeHookTracker::getInstance().getFailed();
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_io_github_xalsace_qqbypass_NativeBypass_getNativeFailedHooks(JNIEnv* env, jclass clazz) {
+    (void)clazz;
+    return env->NewStringUTF(NativeHookTracker::getInstance().getFailedNames().c_str());
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

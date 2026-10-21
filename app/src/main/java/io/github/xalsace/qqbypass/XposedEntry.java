@@ -27,7 +27,6 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
     @Override
     public void initZygote(StartupParam startupParam) throws Throwable {
         MODULE_PATH = startupParam.modulePath;
-        log("initZygote: MODULE_PATH=" + MODULE_PATH);
     }
 
     @Override
@@ -35,10 +34,6 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         if (!TARGET_PACKAGE.equals(lpparam.packageName)) {
             return;
         }
-
-        log("=== QQ Enhanced Bypass v2.0 ===");
-        log("Package: " + lpparam.packageName);
-        log("Process: " + lpparam.processName);
 
         // Initialize configuration and detect host version profile
         HookConfig.init(lpparam);
@@ -52,7 +47,6 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         boolean isMsfProcess = (lpparam.processName != null && lpparam.processName.endsWith(":MSF"));
         boolean isOpenSdkProcess = (lpparam.processName != null && lpparam.processName.endsWith(":openSdk"));
         DexKitDetector.setEnabled(isMainProcess && HookConfig.ENABLE_DEXKIT);
-        log("DexKit enabled for this process: " + (isMainProcess && HookConfig.ENABLE_DEXKIT));
 
         // Subprocess isolation: :tool (webview/captcha), :peak, :picture, etc. only need
         // lightweight environment spoofing and network auditing.
@@ -64,11 +58,11 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                 NetworkReportHook.hook(lpparam);
                 DynamicRootDetectionHook.hook(lpparam);
                 DynamicXposedDetectionHook.hook(lpparam);
-                DynamicDeviceInfoHook.hook(lpparam);
                 DynamicDebugDetectionHook.hook(lpparam);
                 DynamicRuntimeMonitorHook.hook(lpparam);
+                ManagedHooks.installManagedHooks(lpparam);
                 io.github.xalsace.qqbypass.defense.SideChannelDefense.hook(lpparam);
-                log("=== Subprocess Lightweight Protection Initialized: " + lpparam.processName + " ===");
+                UnifiedHookCoordinator.reportSummaryLogAsync(lpparam);
             } catch (Throwable t) {
                 logError("Error initializing subprocess hooks: " + t.getMessage(), t);
             }
@@ -78,13 +72,10 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         // === DexKit Disk Cache Check (< 5ms) ===
         // If valid cache exists on disk, load cached method signatures directly
         boolean cacheHit = DexKitDetector.tryInitWithCache(lpparam);
-        if (cacheHit) {
-            log("=== DexKit: Cache HIT! Restored " + DexKitDetector.getCachedCount() + " detection points, native DexKit scan skipped ===");
-        } else if (isMainProcess && HookConfig.ENABLE_DEXKIT) {
+        if (!cacheHit && isMainProcess && HookConfig.ENABLE_DEXKIT) {
             // === DexKit Dynamic Detection (Background Thread) on Cache Miss ===
             new Thread(() -> {
                 try {
-                    log("=== DexKit: Disk cache MISS or EXPIRED, starting dynamic scan ===");
                     String apkPath = lpparam.appInfo != null ? lpparam.appInfo.sourceDir : null;
                     if (apkPath == null) {
                         try {
@@ -101,10 +92,9 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
 
                     if (apkPath != null) {
                         DexKitDetector.scanAndCache(apkPath, lpparam);
-                        log("=== DexKit Scan & Disk Caching Complete (" + DexKitDetector.getCachedCount() + " points cached) ===");
                     }
                 } catch (Throwable e) {
-                    log("DexKit scan failed: " + e.getMessage());
+                    logError("DexKit scan failed: " + e.getMessage(), e);
                 }
             }).start();
         }
@@ -125,41 +115,38 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
             // Layer 3: Xposed/Hook framework detection mitigation (DexKit-based dynamic version)
             DynamicXposedDetectionHook.hook(lpparam);
 
-            // Layer 4: Device info consistency protection (DexKit-based dynamic version)
-            DynamicDeviceInfoHook.hook(lpparam);
-
-            // Layer 5: Debug/Emulator detection bypass (DexKit-based dynamic version)
+            // Layer 4: Debug detection bypass (DexKit-based dynamic version)
             DynamicDebugDetectionHook.hook(lpparam);
 
-            // Layer 6: Runtime monitoring bypass (DexKit-based dynamic version)
+            // Layer 5: Runtime monitoring bypass (DexKit-based dynamic version)
             DynamicRuntimeMonitorHook.hook(lpparam);
 
-            // Layer 7: QQ 9.3.50 detection-point completion (real risk/kick targets)
+            // Layer 6: QQ 9.3.50 detection-point completion (real risk/kick targets)
             QQ950PatchHook.hook(lpparam);
 
-            // Layer 8: QAuxv (QNotified) compatibility
+            // Layer 7: QAuxv (QNotified) compatibility
             if (isMainProcess) {
                 io.github.xalsace.qqbypass.hooks.QAuxvCompatHook.hook(lpparam);
             }
 
-            // Layer 9: Security Libraries & FEKit Censor Enhancement (ShadowHook, QQPerfTool, Desensitization, Dtc, fe.utils.a)
+            // Layer 8: Security Libraries & FEKit Censor Enhancement (ShadowHook, QQPerfTool, Desensitization, Dtc, fe.utils.a)
             SecurityLibrariesEnhanceHook.hook(lpparam);
 
-            // Layer 10: Dynamic secondary dex & Tinker hot patch lifecycle monitor
+            // Layer 9: Dynamic secondary dex & Tinker hot patch lifecycle monitor
             hookClassLoaderAndLifecycle(lpparam);
 
-            // Layer 11: Dynamic side-channel defense & physics simulation (Sensors, Battery, Timing benchmark, Traffic)
+            // Layer 10: Dynamic side-channel defense & physics simulation (Sensors, Battery, Timing benchmark, Traffic)
             io.github.xalsace.qqbypass.defense.SideChannelDefense.hook(lpparam);
 
+            // Layer 11: Managed conditional compile hooks (Kick Intercept, Device Spoof, Emulator Camouflage)
+            ManagedHooks.installManagedHooks(lpparam);
+
             // === Report Status ===
-            log("=== Java Hooks Initialized ===");
-            log("Initial Protection Level: " + UnifiedHookCoordinator.getProtectionLevel());
-            // Native 层在后台线程异步安装，稍后报告最终等级
-            UnifiedHookCoordinator.reportFinalProtectionLevelAsync();
+            // 异步等待 Native 层安装完成后，最终统一输出一条汇总报告
+            UnifiedHookCoordinator.reportSummaryLogAsync(lpparam);
 
         } catch (Throwable t) {
-            log("Error during hook initialization: " + t.getMessage());
-            t.printStackTrace();
+            logError("Error during hook initialization: " + t.getMessage(), t);
         }
     }
 

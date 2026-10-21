@@ -6,29 +6,42 @@ import de.robv.android.xposed.XposedHelpers;
 
 import io.github.xalsace.qqbypass.config.HookConfig;
 
+import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 
 /**
- * Utility class for common Xposed hook operations
+ * Utility class for common Xposed hook operations with unified tracking.
  */
 public class HookUtils {
 
-    private static final String TAG = "QQEnhancedBypass";
+    /**
+     * Hook a Member (Method or Constructor) directly with tracking
+     */
+    public static void hookMethod(Member member, XC_MethodHook callback) {
+        if (member == null) return;
+        String name = member.getDeclaringClass().getName() + "." + member.getName();
+        try {
+            XposedBridge.hookMethod(member, callback);
+            HookTracker.recordJavaSuccess(name);
+        } catch (Throwable t) {
+            HookTracker.recordJavaFailure(name, t);
+        }
+    }
 
     /**
-     * Safe hook with error handling
+     * Safe hook with class name and error handling
      */
     public static void hookMethod(String className, String methodName, Object... parameterTypesAndCallback) {
         try {
             Class<?> clazz = XposedHelpers.findClassIfExists(className, HookConfig.getClassLoader());
             if (clazz != null) {
                 hookMethod(clazz, methodName, parameterTypesAndCallback);
+            } else {
+                HookTracker.recordJavaFailure(className + "." + methodName, new ClassNotFoundException("Class not found: " + className));
             }
         } catch (Throwable t) {
-            if (HookConfig.VERBOSE_LOGGING) {
-                log("Failed to hook: " + className + "." + methodName + " - " + t.getMessage());
-            }
+            HookTracker.recordJavaFailure(className + "." + methodName, t);
         }
     }
 
@@ -37,29 +50,28 @@ public class HookUtils {
      */
     public static void hookMethod(Class<?> clazz, String methodName, Object... parameterTypesAndCallback) {
         if (clazz == null || clazz.isInterface()) return;
+        String name = clazz.getName() + "." + methodName;
         try {
             XposedHelpers.findAndHookMethod(clazz, methodName, parameterTypesAndCallback);
-            log("Hooked: " + clazz.getName() + "." + methodName);
+            HookTracker.recordJavaSuccess(name);
         } catch (Throwable t) {
-            if (HookConfig.VERBOSE_LOGGING) {
-                log("Failed to hook: " + clazz.getName() + "." + methodName + " - " + t.getMessage());
-            }
+            HookTracker.recordJavaFailure(name, t);
         }
     }
 
     /**
-     * Hook all methods with specific name
+     * Hook all methods with specific name by class name
      */
     public static void hookAllMethods(String className, String methodName, XC_MethodHook callback) {
         try {
             Class<?> clazz = XposedHelpers.findClassIfExists(className, HookConfig.getClassLoader());
             if (clazz != null) {
                 hookAllMethods(clazz, methodName, callback);
+            } else {
+                HookTracker.recordJavaFailure(className + "." + methodName, new ClassNotFoundException("Class not found: " + className));
             }
         } catch (Throwable t) {
-            if (HookConfig.VERBOSE_LOGGING) {
-                log("Failed to hook all methods: " + className + "." + methodName + " - " + t.getMessage());
-            }
+            HookTracker.recordJavaFailure(className + "." + methodName, t);
         }
     }
 
@@ -68,6 +80,7 @@ public class HookUtils {
      */
     public static void hookAllMethods(Class<?> clazz, String methodName, XC_MethodHook callback) {
         if (clazz == null || clazz.isInterface()) return;
+        String name = clazz.getName() + "." + methodName;
         try {
             int hooked = 0;
             for (Method method : clazz.getDeclaredMethods()) {
@@ -79,62 +92,61 @@ public class HookUtils {
                         XposedBridge.hookMethod(method, callback);
                         hooked++;
                     } catch (Throwable t) {
-                        if (HookConfig.VERBOSE_LOGGING) {
-                            log("Failed to hook method: " + clazz.getName() + "." + methodName + " - " + t.getMessage());
-                        }
+                        HookTracker.recordJavaFailure(name + "()", t);
                     }
                 }
             }
             if (hooked > 0) {
-                log("Hooked " + hooked + " method(s): " + clazz.getName() + "." + methodName);
+                HookTracker.recordJavaSuccess(name);
+            } else {
+                HookTracker.recordJavaFailure(name, new NoSuchMethodException("Method not found: " + methodName));
             }
         } catch (Throwable t) {
-            if (HookConfig.VERBOSE_LOGGING) {
-                log("Failed to hook all methods: " + clazz.getName() + "." + methodName + " - " + t.getMessage());
-            }
+            HookTracker.recordJavaFailure(name, t);
         }
     }
 
     /**
-     * Hook constructor
+     * Hook constructor by class name
      */
     public static void hookConstructor(String className, Object... parameterTypesAndCallback) {
+        String name = className + ".<init>";
         try {
             Class<?> clazz = XposedHelpers.findClass(className, HookConfig.getClassLoader());
             XposedHelpers.findAndHookConstructor(clazz, parameterTypesAndCallback);
-            log("Hooked constructor: " + className);
+            HookTracker.recordJavaSuccess(name);
         } catch (Throwable t) {
-            if (HookConfig.VERBOSE_LOGGING) {
-                log("Failed to hook constructor: " + className + " - " + t.getMessage());
-            }
+            HookTracker.recordJavaFailure(name, t);
         }
     }
 
     /**
-     * Hook all constructors of class
+     * Hook all constructors of class by class name
      */
     public static void hookAllConstructors(String className, XC_MethodHook callback) {
         try {
             Class<?> clazz = XposedHelpers.findClassIfExists(className, HookConfig.getClassLoader());
             if (clazz != null && !clazz.isInterface() && !Modifier.isAbstract(clazz.getModifiers())) {
                 hookAllConstructors(clazz, callback);
+            } else {
+                HookTracker.recordJavaFailure(className + ".<init>", new ClassNotFoundException("Class not found: " + className));
             }
         } catch (Throwable t) {
-            if (HookConfig.VERBOSE_LOGGING) {
-                log("Failed to hook all constructors: " + className + " - " + t.getMessage());
-            }
+            HookTracker.recordJavaFailure(className + ".<init>", t);
         }
     }
 
+    /**
+     * Hook all constructors of class by Class object
+     */
     public static void hookAllConstructors(Class<?> clazz, XC_MethodHook callback) {
         if (clazz == null || clazz.isInterface() || Modifier.isAbstract(clazz.getModifiers())) return;
+        String name = clazz.getName() + ".<init>";
         try {
             XposedBridge.hookAllConstructors(clazz, callback);
-            log("Hooked all constructors: " + clazz.getName());
+            HookTracker.recordJavaSuccess(name);
         } catch (Throwable t) {
-            if (HookConfig.VERBOSE_LOGGING) {
-                log("Failed to hook all constructors: " + clazz.getName() + " - " + t.getMessage());
-            }
+            HookTracker.recordJavaFailure(name, t);
         }
     }
 
@@ -166,8 +178,6 @@ public class HookUtils {
     }
 
     public static void log(String message) {
-        if (HookConfig.VERBOSE_LOGGING) {
-            io.github.xalsace.qqbypass.XposedEntry.log(message);
-        }
+        // 静默：不再输出细粒度的普通过程日志
     }
 }

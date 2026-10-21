@@ -3,50 +3,53 @@ package io.github.xalsace.qqbypass.config;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * Central configuration for hook modules
+ * 模块全局配置与运行期参数 (Central Configuration)
  */
 public class HookConfig {
 
     public static XC_LoadPackage.LoadPackageParam loadPackageParam;
     public static ClassLoader classLoader;
 
-    // Module version info & cache schema
+    // 模块版本信息与缓存版本
     public static final int MODULE_VERSION_CODE = 80;
     public static final String MODULE_VERSION_NAME = "1.0.80";
     public static final int CACHE_SCHEMA_VERSION = 3;
 
-    // Feature toggles
-    public static boolean ENABLE_DEXKIT = true;
-    public static boolean ENABLE_NATIVE_HOOKS = true;        // Native layer hooks (70% coverage)
-    public static boolean ENABLE_ROOT_BYPASS = true;
-    public static boolean ENABLE_XPOSED_BYPASS = true;
-    public static boolean ENABLE_DEBUG_BYPASS = true;
-    public static boolean ENABLE_DEVICE_SPOOF = false;       // Disabled: Real device mode, preserve genuine device identity
-    public static boolean ENABLE_NETWORK_INTERCEPT = false;  // Disabled: allow normal requests to proceed
-    public static boolean ENABLE_RUNTIME_BYPASS = true;
-    public static boolean ENABLE_QQ950_PATCH = true;        // QQ 9.3.50 detection-point completion
-    public static boolean ENABLE_QQ950_RISK_BLOCK = true;   // Tier 2: object-return risk blocks (NPE-caveat; disable if NPE appears)
+    // =========================================================================
+    // 3 个受管理的编译期条件编译开关 (委托至 CompileHookConfig)
+    // =========================================================================
+    /** 1. 拦截下线开关 */
+    public static final boolean ENABLE_KICK_INTERCEPT = CompileHookConfig.ENABLE_KICK_INTERCEPT;
 
-    // Kick Interception feature toggle (打包时确定，无需动态开销)
-    // 【严禁开启防kick】：强制下线属于服务端权威会话状态。若客户端私自拦截或吞噬kick信令，将导致“僵尸会话”
-    // （客户端显示在线但网络包全部被服务端以-10003/2001丢弃，发不出也收不到消息，持续暴露异常特征导致封号）。
-    public static final boolean ENABLE_KICK_INTERCEPT = false;
+    /** 2. 设备修改开关 */
+    public static final boolean ENABLE_DEVICE_SPOOF = CompileHookConfig.ENABLE_DEVICE_SPOOF;
 
-    /**
-     * 判断当前是否开启拦截下线功能。
-     * 严禁开启防kick，永久保持纯被动审计模式。
-     */
+    /** 3. 模拟器伪装开关 */
+    public static final boolean ENABLE_EMULATOR_SPOOF = CompileHookConfig.ENABLE_EMULATOR_SPOOF;
+
+    /** 判断当前是否开启拦截下线 */
     public static boolean isKickInterceptEnabled() {
-        return false;
+        return ENABLE_KICK_INTERCEPT;
     }
 
-    // Verbose logging (output to LSPosed log via XposedBridge.log)
-    public static boolean VERBOSE_LOGGING = true;
+    // 核心固定开关（模块默认防御基础，始终激活）
+    public static final boolean ENABLE_DEXKIT = true;
+    public static final boolean ENABLE_NATIVE_HOOKS = true;
+    public static final boolean ENABLE_ROOT_BYPASS = true;
+    public static final boolean ENABLE_XPOSED_BYPASS = true;
+    public static final boolean ENABLE_DEBUG_BYPASS = true;
+    public static final boolean ENABLE_RUNTIME_BYPASS = true;
+    public static final boolean ENABLE_QQ950_PATCH = true;
+    public static final boolean ENABLE_QQ950_RISK_BLOCK = true;
+    public static final boolean ENABLE_NETWORK_INTERCEPT = false;
 
-    // Fake device info (used when spoofing is enabled)
-    public static String FAKE_IMEI = null; // null = use real device info
-    public static String FAKE_ANDROID_ID = null;
-    public static String FAKE_SERIAL = null;
+    // 详细调试日志开关
+    public static boolean VERBOSE_LOGGING = false;
+
+    // 伪造设备信息 (由 CompileHookConfig 静态注入)
+    public static final String FAKE_IMEI = CompileHookConfig.FAKE_IMEI;
+    public static final String FAKE_ANDROID_ID = CompileHookConfig.FAKE_ANDROID_ID;
+    public static final String FAKE_SERIAL = CompileHookConfig.FAKE_SERIAL;
 
     public static void init(XC_LoadPackage.LoadPackageParam lpparam) {
         loadPackageParam = lpparam;

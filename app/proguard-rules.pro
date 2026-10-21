@@ -8,11 +8,18 @@
     <init>(...);
 }
 
-# 2. 保留整个模块包下的所有类、方法和字段（包括 hooks, detector, config, utils 及根包）
-# 防止 Hook 逻辑、DexKit 动态探测、配置项、反射工具类在 Release 优化阶段被 R8 裁剪、内联或混淆
--keep class io.github.xalsace.qqbypass.** {
-    *;
-}
+# 2. 保留核心支持类（配置、探测器、工具类及版本适配）
+-keep class io.github.xalsace.qqbypass.config.** { *; }
+-keep class io.github.xalsace.qqbypass.detector.** { *; }
+-keep class io.github.xalsace.qqbypass.utils.** { *; }
+-keep class io.github.xalsace.qqbypass.version.** { *; }
+-keep class io.github.xalsace.qqbypass.NativeBypass { *; }
+
+# 3. Hook 与防御类：使用 allowshrinking 规则支持条件编译裁剪
+# 当受管 Hook（拦截下线、设备修改、模拟器伪装）在 CompileHookConfig 中为 false 时，
+# 对应死代码未被引用，R8 在打包时将该 Hook 类完全从 APK 中裁剪剔除（不被打包进去）
+-keep,allowshrinking class io.github.xalsace.qqbypass.hooks.** { *; }
+-keep,allowshrinking class io.github.xalsace.qqbypass.defense.** { *; }
 
 # 3. 保留 Native 方法及其声明类（防止 JNI 方法签名不一致）
 -keepclasseswithmembernames class * {

@@ -1,6 +1,7 @@
 #include "hook_libturingxq.h"
 #include "hook_libc.h"
 #include "../utils/log.h"
+#include "../utils/native_hook_tracker.h"
 #include "../utils/safe_bytehook.h"
 #include <bytehook.h>
 #include <string.h>
@@ -53,9 +54,7 @@ static char* fake_xq_strstr(const char* haystack, const char* needle) {
 }
 
 void install_hooks() {
-    LOGI("Installing libturingxq direct syscall hooks (ByteHook)...");
-
-    bytehook_hook_single(
+    TRACK_NATIVE_HOOK_SINGLE(
         "libturingxq.so",
         nullptr,
         "syscall",
@@ -64,7 +63,7 @@ void install_hooks() {
         (void**)&original_syscall
     );
 
-    bytehook_hook_single(
+    TRACK_NATIVE_HOOK_SINGLE(
         "libturingxq.so",
         nullptr,
         "real_syscall",
@@ -73,7 +72,7 @@ void install_hooks() {
         (void**)&original_real_syscall
     );
 
-    bytehook_hook_single(
+    TRACK_NATIVE_HOOK_SINGLE(
         "libturingxq.so",
         nullptr,
         "strstr",
@@ -81,8 +80,6 @@ void install_hooks() {
         nullptr,
         nullptr
     );
-
-    LOGI("libturingxq hooks installed (syscall, real_syscall, strstr)");
 }
 
 } // namespace hook_libturingxq

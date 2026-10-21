@@ -25,8 +25,6 @@ public class RootDetectionHook {
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         if (!HookConfig.ENABLE_ROOT_BYPASS) return;
 
-        XposedEntry.log("Initializing Root Detection Bypass");
-
         // Hook 1: Wlogin SDK root check & isFileExist
         hookWloginRoot();
 
