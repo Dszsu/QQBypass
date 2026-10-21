@@ -11,6 +11,7 @@ import java.lang.reflect.Member;
 import java.util.List;
 
 import io.github.xalsace.qqbypass.XposedEntry;
+import io.github.xalsace.qqbypass.config.CompileHookConfig;
 import io.github.xalsace.qqbypass.config.HookConfig;
 import io.github.xalsace.qqbypass.detector.DexKitDetector;
 import io.github.xalsace.qqbypass.utils.HookUtils;
@@ -56,23 +57,19 @@ public class NetworkReportHook {
     };
 
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
-        // Layer 0: ChannelManager report auditing & optional interception
-        hookChannelManager(lpparam);
+        // Layer 0 - 3: Channel / MSF report auditing & optional interception
+        if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT || HookConfig.ENABLE_NETWORK_INTERCEPT) {
+            hookChannelManager(lpparam);
+            hookChannelProxyExt(lpparam);
+            hookMSFKernelBridge(lpparam);
+            hookMsfCore(lpparam);
+        }
 
-        // Layer 1: ChannelProxyExt fallback auditing & optional interception
-        hookChannelProxyExt(lpparam);
-
-        // Layer 2: MSFKernelBridge native packet choke point auditing & optional interception
-        hookMSFKernelBridge(lpparam);
-
-        // Layer 3: MsfCore SSO dispatcher auditing & optional interception
-        hookMsfCore(lpparam);
-
-        // Layer 4: StatisticCollector performance & telemetry auditing
-        hookStatisticCollector(lpparam);
-
-        // Layer 5: ReportController business & security reporting auditing
-        hookReportController(lpparam);
+        // Layer 4 & 5: StatisticCollector & ReportController telemetry auditing
+        if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+            hookStatisticCollector(lpparam);
+            hookReportController(lpparam);
+        }
 
         // Inspection checks (TuringFD /proc scanner neutralization)
         hookTuringFD(lpparam);
@@ -138,8 +135,10 @@ public class NetworkReportHook {
                         dataLen = ((byte[]) param.args[1]).length;
                     }
 
-                    // Always audit outgoing ChannelManager reports
-                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordChannelManager(command, callbackId, dataLen);
+                    // Always audit outgoing ChannelManager reports if report recording is enabled
+                    if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordChannelManager(command, callbackId, dataLen);
+                    }
 
                     if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(command)) {
                         injectNativeReceiveSuccess(lpparam.classLoader, command, callbackId);
@@ -173,8 +172,10 @@ public class NetworkReportHook {
                             }
                         }
 
-                        // Always audit
-                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("ChannelProxyExt", command, null, "callbackId=" + callbackId, 3);
+                        // Always audit if report recording is enabled
+                        if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("ChannelProxyExt", command, null, "callbackId=" + callbackId, 3);
+                        }
 
                         if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(command)) {
                             Class<?> returnType = ((java.lang.reflect.Method) param.method).getReturnType();
@@ -210,8 +211,10 @@ public class NetworkReportHook {
                             seq = ((Number) XposedHelpers.callMethod(adapter, "getSeq")).intValue();
                         } catch (Throwable ignored) { }
 
-                        // Always audit
-                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("MSFKernelBridge", cmd, null, "seq=" + seq, 3);
+                        // Always audit if report recording is enabled
+                        if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("MSFKernelBridge", cmd, null, "seq=" + seq, 3);
+                        }
 
                         if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(cmd)) {
                             param.setResult(seq);
@@ -245,8 +248,8 @@ public class NetworkReportHook {
                         needResp = (boolean) XposedHelpers.callMethod(toServiceMsg, "isNeedResp");
                     } catch (Throwable ignored) {}
 
-                    // Always audit outgoing SSO messages (excluding Heartbeat.Alive to prevent log flood)
-                    if (command != null && !command.startsWith("Heartbeat.")) {
+                    // Always audit outgoing SSO messages if enabled (excluding Heartbeat.Alive to prevent log flood)
+                    if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT && command != null && !command.startsWith("Heartbeat.")) {
                         io.github.xalsace.qqbypass.utils.ReportAuditManager.recordMsfSso(command, uin, ssoSeq, needResp);
                     }
 
@@ -306,6 +309,7 @@ public class NetworkReportHook {
      * Layer 4: StatisticCollector performance & error report auditing.
      */
     private static void hookStatisticCollector(XC_LoadPackage.LoadPackageParam lpparam) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
         HookUtils.hookAllMethods("com.tencent.mobileqq.statistics.StatisticCollector", "collectPerformance",
             new XC_MethodHook() {
                 @Override
@@ -328,6 +332,7 @@ public class NetworkReportHook {
      * Layer 5: ReportController business & security reporting auditing.
      */
     private static void hookReportController(XC_LoadPackage.LoadPackageParam lpparam) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
         HookUtils.hookAllMethods("com.tencent.mobileqq.statistics.ReportController", "b",
             new XC_MethodHook() {
                 @Override

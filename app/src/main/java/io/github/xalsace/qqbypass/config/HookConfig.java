@@ -16,7 +16,7 @@ public class HookConfig {
     public static final int CACHE_SCHEMA_VERSION = 3;
 
     // =========================================================================
-    // 3 个受管理的编译期条件编译开关 (委托至 CompileHookConfig)
+    // 4 个受管理的编译期条件编译开关 (委托至 CompileHookConfig)
     // =========================================================================
     /** 1. 拦截下线开关 */
     public static final boolean ENABLE_KICK_INTERCEPT = CompileHookConfig.ENABLE_KICK_INTERCEPT;
@@ -27,9 +27,17 @@ public class HookConfig {
     /** 3. 模拟器伪装开关 */
     public static final boolean ENABLE_EMULATOR_SPOOF = CompileHookConfig.ENABLE_EMULATOR_SPOOF;
 
+    /** 4. 记录 QQ 上报开关 (默认开启) */
+    public static final boolean ENABLE_RECORD_QQ_REPORT = CompileHookConfig.ENABLE_RECORD_QQ_REPORT;
+
     /** 判断当前是否开启拦截下线 */
     public static boolean isKickInterceptEnabled() {
         return ENABLE_KICK_INTERCEPT;
+    }
+
+    /** 判断当前是否开启记录 QQ 上报 */
+    public static boolean isRecordQqReportEnabled() {
+        return ENABLE_RECORD_QQ_REPORT;
     }
 
     // 核心固定开关（模块默认防御基础，始终激活）

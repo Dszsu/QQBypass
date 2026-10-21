@@ -430,7 +430,9 @@ public class DynamicRootDetectionHook {
                                 appKey = (String) de.robv.android.xposed.XposedHelpers.callMethod(event, "getAppKey");
                             } catch (Throwable ignored) {}
 
-                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordBeacon(eventCode, isSuccess, params, appKey);
+                            if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordBeacon(eventCode, isSuccess, params, appKey);
+                            }
                         } catch (Throwable ignored) {}
                     }
                 }

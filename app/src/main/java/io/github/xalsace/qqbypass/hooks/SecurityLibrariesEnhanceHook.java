@@ -232,7 +232,9 @@ public class SecurityLibrariesEnhanceHook {
                             String cmd = String.valueOf(param.args[0]);
                             byte[] data = param.args.length > 1 && param.args[1] instanceof byte[] ? (byte[]) param.args[1] : null;
                             long cbId = param.args.length > 2 && param.args[2] instanceof Number ? ((Number) param.args[2]).longValue() : 0L;
-                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("Dtc", cmd, null, "cbId=" + cbId + ", dataLen=" + (data != null ? data.length : 0), 3);
+                            if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("Dtc", cmd, null, "cbId=" + cbId + ", dataLen=" + (data != null ? data.length : 0), 3);
+                            }
                         }
                     }
                 });

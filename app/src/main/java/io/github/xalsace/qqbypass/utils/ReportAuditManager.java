@@ -5,6 +5,7 @@ import android.util.Log;
 
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
+import io.github.xalsace.qqbypass.config.CompileHookConfig;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -64,6 +65,9 @@ public class ReportAuditManager {
     }
 
     private static void ensureWorkerStarted() {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+            return;
+        }
         if (sWorkerStarted.compareAndSet(false, true)) {
             Thread workerThread = new Thread(new Runnable() {
                 @Override
@@ -164,6 +168,9 @@ public class ReportAuditManager {
      * General telemetry / network report audit logger.
      */
     public static void recordReport(String channel, String eventOrCmd, Map<String, ?> params, String extraDetail, int stackDepth) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+            return;
+        }
         try {
             String time = getCurrentTimestamp();
             int pid = Process.myPid();
@@ -326,7 +333,9 @@ public class ReportAuditManager {
         }
 
         String fullLog = sb.toString();
-        sLogQueue.offer(fullLog);
+        if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+            sLogQueue.offer(fullLog);
+        }
         Log.w(TAG, fullLog);
         XposedBridge.log("[ReportAudit] " + fullLog);
 
@@ -427,8 +436,10 @@ public class ReportAuditManager {
 
             String fullLog = sb.toString();
 
-            // Synchronously flush to disk to guarantee persistence before potential process exit
-            writeToFileInternal(fullLog);
+            // Synchronously flush to disk if report recording is enabled
+            if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+                writeToFileInternal(fullLog);
+            }
 
             // Also output to Logcat and LSPosed
             Log.e(TAG, fullLog);
