@@ -78,7 +78,9 @@ public final class CompileHookConfig {
      * 是否开启记录 QQ 内部各类数据上报、SSO 信令与网络审计日志。
      * 【默认开启 (true)】：将 QQ 发起的各类数据上报、SSO 信令、Beacon 与统计埋点异步审计记录到：
      * - /data/user/0/com.tencent.mobileqq/files/report_audit.log
-     * - /storage/emulated/0/0_TM/report_audit.log
+     * - /data/user/0/com.tencent.mobileqq/files/security_environment_audit.log (无噪纯净安全与环境审计)
+     * - /storage/emulated/0/Android/data/com.tencent.mobileqq/files/ (外部可读写目录)
+     * - 内置超过 12 小时自动滚动清理机制（自动清除 >12h 过期日志条目与历史备份）。
      * 设置为 false 时，上报审计与日志记录功能被条件编译完全关闭，避免多余的磁盘 I/O 开销与 Hook 挂载。
      */
     public static final boolean ENABLE_RECORD_QQ_REPORT = true;

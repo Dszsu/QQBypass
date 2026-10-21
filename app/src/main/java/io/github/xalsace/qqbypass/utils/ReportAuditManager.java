@@ -7,8 +7,10 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import io.github.xalsace.qqbypass.config.CompileHookConfig;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.lang.reflect.Field;
 import java.text.SimpleDateFormat;
@@ -19,6 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -89,6 +92,9 @@ public class ReportAuditManager {
         return sProcessName;
     }
 
+    public static final long LOG_EXPIRATION_MS = 12 * 60 * 60 * 1000L; // 12 hours
+    private static final long CLEANUP_INTERVAL_MS = 30 * 60 * 1000L; // Check every 30 minutes
+
     private static void ensureWorkerStarted() {
         if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
             return;
@@ -97,10 +103,21 @@ public class ReportAuditManager {
             Thread workerThread = new Thread(new Runnable() {
                 @Override
                 public void run() {
+                    // Initial cleanup of expired logs at startup
+                    cleanExpiredLogsInternal();
+                    long lastCleanupTime = System.currentTimeMillis();
+
                     while (true) {
                         try {
-                            AuditEntry entry = sLogQueue.take();
-                            writeEntryInternal(entry);
+                            AuditEntry entry = sLogQueue.poll(5000, TimeUnit.MILLISECONDS);
+                            if (entry != null) {
+                                writeEntryInternal(entry);
+                            }
+                            long now = System.currentTimeMillis();
+                            if (now - lastCleanupTime > CLEANUP_INTERVAL_MS) {
+                                lastCleanupTime = now;
+                                cleanExpiredLogsInternal();
+                            }
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             break;
@@ -164,6 +181,140 @@ public class ReportAuditManager {
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    /**
+     * Manually triggers cleanup of log files and entries older than 12 hours.
+     */
+    public static void cleanExpiredLogs() {
+        cleanExpiredLogsInternal();
+    }
+
+    /**
+     * Automatically scans and purges log files and entries older than 12 hours:
+     * 1. Files whose lastModified is older than 12 hours are directly deleted.
+     * 2. Active log files are inspected; entries older than 12 hours are pruned out.
+     * 3. Old rolling backup files (.1, .bak) older than 12 hours are purged.
+     */
+    private static synchronized void cleanExpiredLogsInternal() {
+        try {
+            long now = System.currentTimeMillis();
+            long cutoffTime = now - LOG_EXPIRATION_MS;
+
+            File[] searchDirs = new File[] {
+                new File("/data/user/0/com.tencent.mobileqq/files"),
+                new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files"),
+                new File("/storage/emulated/0/0_TM")
+            };
+
+            for (File dir : searchDirs) {
+                if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
+                File[] files = dir.listFiles();
+                if (files == null) continue;
+
+                for (File f : files) {
+                    if (f == null || !f.isFile()) continue;
+                    String name = f.getName();
+                    if (!name.contains("audit") || !name.contains(".log")) continue;
+
+                    // 1. If file has not been modified for > 12h, delete the entire file directly
+                    if (now - f.lastModified() > LOG_EXPIRATION_MS) {
+                        f.delete();
+                        Log.i(TAG, "[LogCleanup] Deleted expired log file (>12h old): " + f.getAbsolutePath());
+                        continue;
+                    }
+
+                    // 2. Backup or rolled files (.1, .bak, .old) modified recently:
+                    if (name.endsWith(".1") || name.contains(".bak") || name.contains(".old")) {
+                        pruneFileEntriesOlderThan(f, cutoffTime);
+                        if (f.length() == 0) f.delete();
+                        continue;
+                    }
+
+                    // 3. Active log files (report_audit.log, security_environment_audit.log):
+                    pruneFileEntriesOlderThan(f, cutoffTime);
+                }
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in cleanExpiredLogsInternal: " + t.getMessage());
+        }
+    }
+
+    private static void pruneFileEntriesOlderThan(File targetFile, long cutoffTime) {
+        if (targetFile == null || !targetFile.exists() || targetFile.length() == 0) return;
+
+        // Fast check: verify if the first event in the file is already within the 12-hour window
+        try (BufferedReader checkReader = new BufferedReader(new FileReader(targetFile))) {
+            String firstLine;
+            long firstTs = -1;
+            while ((firstLine = checkReader.readLine()) != null) {
+                long ts = parseLineTimestamp(firstLine);
+                if (ts > 0) {
+                    firstTs = ts;
+                    break;
+                }
+            }
+            if (firstTs >= cutoffTime) {
+                // Entire file is already within the valid 12-hour window, no I/O needed!
+                return;
+            }
+        } catch (Throwable ignored) {
+            return;
+        }
+
+        File tmpFile = new File(targetFile.getAbsolutePath() + ".prune.tmp");
+        boolean currentEventKeep = false;
+        boolean prunedAny = false;
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(targetFile));
+             BufferedWriter writer = new BufferedWriter(new FileWriter(tmpFile))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                long ts = parseLineTimestamp(line);
+                if (ts > 0) {
+                    currentEventKeep = (ts >= cutoffTime);
+                    if (!currentEventKeep) {
+                        prunedAny = true;
+                    }
+                }
+                if (currentEventKeep) {
+                    writer.write(line);
+                    writer.newLine();
+                }
+            }
+            writer.flush();
+        } catch (Throwable t) {
+            if (tmpFile.exists()) tmpFile.delete();
+            return;
+        }
+
+        if (prunedAny && tmpFile.exists()) {
+            if (!tmpFile.renameTo(targetFile)) {
+                targetFile.delete();
+                tmpFile.renameTo(targetFile);
+            }
+            Log.i(TAG, "[LogCleanup] Pruned entries older than 12h in " + targetFile.getAbsolutePath());
+        } else {
+            if (tmpFile.exists()) tmpFile.delete();
+        }
+    }
+
+    private static long parseLineTimestamp(String line) {
+        if (line == null || line.length() < 24) return -1;
+        try {
+            if (line.charAt(0) == '[' && line.charAt(24) == ']') {
+                String timeStr = line.substring(1, 24);
+                synchronized (sDateFormat) {
+                    return sDateFormat.parse(timeStr).getTime();
+                }
+            } else if (line.startsWith("Time: ") && line.length() >= 29) {
+                String timeStr = line.substring(6, 29).trim();
+                synchronized (sDateFormat) {
+                    return sDateFormat.parse(timeStr).getTime();
+                }
+            }
+        } catch (Throwable ignored) {}
+        return -1;
     }
 
     private static String getCurrentTimestamp() {
