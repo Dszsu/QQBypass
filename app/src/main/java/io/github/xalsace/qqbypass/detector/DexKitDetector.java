@@ -81,7 +81,7 @@ public class DexKitDetector {
      */
     public static void init(String apkPath) {
         if (ready && dexKitBridge != null) return;
-        if (!enabled || !HookConfig.ENABLE_DEXKIT || android.os.Build.VERSION.SDK_INT >= 35) {
+        if (!enabled || !HookConfig.ENABLE_DEXKIT) {
             ready = true;
             readyLatch.countDown();
             return;
@@ -110,8 +110,8 @@ public class DexKitDetector {
      * Full scan and cache generation workflow on cache miss.
      */
     public static void scanAndCache(String apkPath, XC_LoadPackage.LoadPackageParam lpparam) {
-        if (!enabled || !HookConfig.ENABLE_DEXKIT || android.os.Build.VERSION.SDK_INT >= 35) {
-            XposedBridge.log("[" + TAG + "] DexKit dynamic scan skipped: disabled or Android 15/16+ jemalloc protection");
+        if (!enabled || !HookConfig.ENABLE_DEXKIT) {
+            XposedBridge.log("[" + TAG + "] DexKit dynamic scan skipped: disabled");
             ready = true;
             readyLatch.countDown();
             return;

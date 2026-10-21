@@ -75,8 +75,8 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
             return;
         }
 
-        // === DexKit Disk / Asset Cache Check (< 5ms) ===
-        // If valid cache exists on disk or in bundled assets, load cached method signatures directly
+        // === DexKit Disk Cache Check (< 5ms) ===
+        // If valid cache exists on disk, load cached method signatures directly
         boolean cacheHit = DexKitDetector.tryInitWithCache(lpparam);
         if (cacheHit) {
             log("=== DexKit: Cache HIT! Restored " + DexKitDetector.getCachedCount() + " detection points, native DexKit scan skipped ===");

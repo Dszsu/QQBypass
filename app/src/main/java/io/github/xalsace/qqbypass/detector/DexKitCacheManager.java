@@ -59,11 +59,7 @@ public class DexKitCacheManager {
     }
 
     public static Map<String, List<DexMethodData>> loadCache(XC_LoadPackage.LoadPackageParam lpparam) {
-        Map<String, List<DexMethodData>> diskResult = loadFromDisk(lpparam);
-        if (diskResult != null && !diskResult.isEmpty()) {
-            return diskResult;
-        }
-        return loadFromAssets(lpparam);
+        return loadFromDisk(lpparam);
     }
 
     private static Map<String, List<DexMethodData>> loadFromDisk(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -124,66 +120,6 @@ public class DexKitCacheManager {
             XposedBridge.log("[" + TAG + "] Error reading disk cache: " + t.getMessage());
             return null;
         }
-    }
-
-    private static Map<String, List<DexMethodData>> loadFromAssets(XC_LoadPackage.LoadPackageParam lpparam) {
-        try {
-            String jsonStr = null;
-            String modulePath = io.github.xalsace.qqbypass.XposedEntry.MODULE_PATH;
-            if (modulePath != null && new File(modulePath).exists()) {
-                try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(modulePath)) {
-                    java.util.zip.ZipEntry ze = zf.getEntry("assets/qqbypass_dexkit_cache.json");
-                    if (ze != null) {
-                        try (BufferedReader reader = new BufferedReader(new InputStreamReader(zf.getInputStream(ze), StandardCharsets.UTF_8))) {
-                            StringBuilder sb = new StringBuilder();
-                            String line;
-                            while ((line = reader.readLine()) != null) sb.append(line);
-                            jsonStr = sb.toString();
-                        }
-                    }
-                }
-            }
-
-            if (jsonStr == null) {
-                File appDir = new File("/data/app");
-                if (appDir.exists() && appDir.isDirectory()) {
-                    File[] subdirs = appDir.listFiles((dir, name) -> name.contains("io.github.xalsace.qqbypass"));
-                    if (subdirs != null) {
-                        for (File subdir : subdirs) {
-                            File apk = new File(subdir, "base.apk");
-                            if (apk.exists()) {
-                                try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(apk)) {
-                                    java.util.zip.ZipEntry ze = zf.getEntry("assets/qqbypass_dexkit_cache.json");
-                                    if (ze != null) {
-                                        try (BufferedReader reader = new BufferedReader(new InputStreamReader(zf.getInputStream(ze), StandardCharsets.UTF_8))) {
-                                            StringBuilder sb = new StringBuilder();
-                                            String line;
-                                            while ((line = reader.readLine()) != null) sb.append(line);
-                                            jsonStr = sb.toString();
-                                            break;
-                                        }
-                                    }
-                                } catch (Throwable ignored) {}
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (jsonStr != null) {
-                JSONObject root = new JSONObject(jsonStr);
-                JSONObject methodsObj = root.optJSONObject("methods");
-                if (methodsObj != null) {
-                    Map<String, List<DexMethodData>> resultMap = parseMethodsMap(methodsObj);
-                    XposedBridge.log("[" + TAG + "] Bundled Asset Cache HIT! Restored " + resultMap.size() + " categories from module assets");
-                    saveCache(lpparam, resultMap);
-                    return resultMap;
-                }
-            }
-        } catch (Throwable t) {
-            XposedBridge.log("[" + TAG + "] Failed to load bundled asset cache: " + t.getMessage());
-        }
-        return null;
     }
 
     private static Map<String, List<DexMethodData>> parseMethodsMap(JSONObject methodsObj) {
