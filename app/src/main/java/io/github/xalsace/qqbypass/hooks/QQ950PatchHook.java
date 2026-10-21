@@ -100,6 +100,13 @@ public class QQ950PatchHook {
         // Tier 1: void-return, crash-safe backstops
         // hookMsfTelemetry(lpparam); // Abolished: Allow genuine MSF core lifecycle telemetry and keepalives (tryReportMSFAlive, tryReportJobAlive, doReportOnInitComplete, reportMsfCoreInit) to report naturally
         hookMsfCheckWTSig(lpparam);
+        hookMsfTokenLifecycle(lpparam);
+        hookWtloginTicketProtection(lpparam);
+
+        // Native security DSO inline syscall proximity trampoline triggers
+        io.github.xalsace.qqbypass.NativeBypass.patchLibrary("fekit");
+        io.github.xalsace.qqbypass.NativeBypass.patchLibrary("QSec");
+
         hookTuringWrapper(lpparam);
         hookChannelReport(lpparam);
         hookSignatureAndIntegrity(lpparam);
@@ -198,6 +205,118 @@ public class QQ950PatchHook {
                     if ("com.tencent.qphone.base.remote.ToServiceMsg".equals(req.getClass().getName())) {
                         p.setResult(null);
                         XposedEntry.log("[MSFPatch] Defended against checkWTSig CODE_NO_LOGIN kick in k.a");
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Defend MSF Token lifecycle against spurious kicks when D2/A2 temporarily expires or desyncs.
+     * Prevents fatal token expiration kicks (-10003, -10001, -10004) from driving LoginActivity
+     * to foreground, and triggers proactive key reload via AccountCenter.reloadKeys(uin, true).
+     */
+    private static void hookMsfTokenLifecycle(XC_LoadPackage.LoadPackageParam lpparam) {
+        // 1. Hook com.tencent.mobileqq.msf.core.t.b(int i2)
+        // Original code: return i2 == -12003 || i2 == 210 || i2 == -10001 || i2 == -10003 || i2 == -10004 || ...;
+        // If it returns true, MSF immediately treats token as fatally expired and calls setAccountNoLogin.
+        // We override -10003 (SSO_CODE_INVALID_D2), -10001 (SSO_CODE_D2_EXPIRED), -10004 to return false.
+        hookSafe("com.tencent.mobileqq.msf.core.t", "b", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.args != null && p.args.length == 1 && p.args[0] instanceof Integer) {
+                    int code = (Integer) p.args[0];
+                    if (code == -10003 || code == -10001 || code == -10004) {
+                        p.setResult(Boolean.FALSE);
+                        XposedEntry.log("[MSFPatch] Suppressed fatal token expiration in t.b(" + code + ") -> false");
+                    }
+                }
+            }
+        });
+
+        // 2. Hook com.tencent.mobileqq.msf.core.t.a(FromServiceMsg, ToServiceMsg)
+        // When businessFailCode == -10003 or -10001, trigger proactive reloadKeys from NTLogin/MMKV
+        hookSafe("com.tencent.mobileqq.msf.core.t", "a", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.args != null && p.args.length == 2 && p.args[0] != null) {
+                    Object fromMsg = p.args[0];
+                    if (fromMsg.getClass().getName().contains("FromServiceMsg")) {
+                        int code = (Integer) XposedHelpers.callMethod(fromMsg, "getBusinessFailCode");
+                        if (code == -10003 || code == -10001 || code == -10004) {
+                            String uin = (String) XposedHelpers.callMethod(fromMsg, "getUin");
+                            XposedEntry.log("[MSFPatch] Transient token error " + code + " for uin=" + uin + ", scheduling proactive key sync");
+                            try {
+                                ClassLoader cl = fromMsg.getClass().getClassLoader();
+                                Class<?> msfServiceCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.service.MsfService", cl);
+                                if (msfServiceCls != null) {
+                                    Object msfCore = XposedHelpers.callStaticMethod(msfServiceCls, "getCore");
+                                    if (msfCore != null) {
+                                        Object accountCenter = XposedHelpers.callMethod(msfCore, "getAccountCenter");
+                                        if (accountCenter != null && uin != null && !uin.isEmpty()) {
+                                            XposedHelpers.callMethod(accountCenter, "a", uin, true);
+                                            XposedEntry.log("[MSFPatch] Proactively reloaded keys for uin=" + uin);
+                                        }
+                                    }
+                                }
+                            } catch (Throwable t) {
+                                XposedEntry.log("[MSFPatch] Failed proactive key reload: " + t.getMessage());
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Defend WTLogin auxiliary ticket requests (subCmd 15 / GetStWithoutPasswd).
+     * Secondary ticket failures (WTLogin 16 / 0x10) must NEVER kick the master account
+     * nor trigger ClearUserLoginData (clearFrom=101) wiping master credentials (A2/D2).
+     */
+    private static void hookWtloginTicketProtection(XC_LoadPackage.LoadPackageParam lpparam) {
+        // 1. Hook oicq.wlogin_sdk.tools.util.shouldKick(int i)
+        // Original code: return (i == -1000 || i == 257 || i == -1026) ? false : true;
+        // Suppress kick for transient/secondary ticket failure codes (16, 15, 40)
+        hookSafe("oicq.wlogin_sdk.tools.util", "shouldKick", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.args != null && p.args.length == 1 && p.args[0] instanceof Integer) {
+                    int code = (Integer) p.args[0];
+                    if (code == 16 || code == 15 || code == 40 || code == -1000) {
+                        p.setResult(Boolean.FALSE);
+                        XposedEntry.log("[WTLoginPatch] shouldKick(" + code + ") suppressed -> false");
+                    }
+                }
+            }
+        });
+
+        // 2. Hook oicq.wlogin_sdk.request.WtloginHelper.ClearUserLoginData(String uin, long appid)
+        // Intercept master credential wipe when called during GetStWithoutPasswd / OnGetStWithoutPasswd2
+        hookSafe("oicq.wlogin_sdk.request.WtloginHelper", "ClearUserLoginData", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                for (StackTraceElement elem : Thread.currentThread().getStackTrace()) {
+                    String mName = elem.getMethodName();
+                    if ("OnGetStWithoutPasswd2".equals(mName) || "GetStWithoutPasswd".equals(mName)) {
+                        XposedEntry.log("[WTLoginPatch] Suppressed master credential wipe in ClearUserLoginData from " + mName);
+                        p.setResult(Boolean.TRUE);
+                        return;
+                    }
+                }
+            }
+        });
+
+        // 3. Hook oicq.wlogin_sdk.request.WtloginHelper.reportClearSig(String uin, int clearFrom, ...)
+        // Suppress reportClearSig when clearFrom == 101 (GetStWithoutPasswd failure)
+        hookSafe("oicq.wlogin_sdk.request.WtloginHelper", "reportClearSig", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.args != null && p.args.length >= 2 && p.args[1] instanceof Integer) {
+                    int clearFrom = (Integer) p.args[1];
+                    if (clearFrom == 101) {
+                        XposedEntry.log("[WTLoginPatch] Suppressed reportClearSig (clearFrom=101, subCmd=15)");
+                        p.setResult(null);
                     }
                 }
             }

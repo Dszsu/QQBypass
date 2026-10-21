@@ -240,6 +240,16 @@ public class NativeBypass {
         }
     }
 
+    /**
+     * Trigger native inline syscall proximity trampoline patching for specified library
+     */
+    public static void patchLibrary(String libName) {
+        if (!libraryLoaded || libName == null) return;
+        try {
+            patchLibraryNative(libName);
+        } catch (Throwable ignored) {}
+    }
+
     // Native methods
     private static native void initNativeHooksNative();
     private static native boolean isHooksInstalledNative();
@@ -251,4 +261,5 @@ public class NativeBypass {
     public static native int getNativeHookSuccess();
     public static native int getNativeHookFailed();
     public static native String getNativeFailedHooks();
+    public static native void patchLibraryNative(String libName);
 }

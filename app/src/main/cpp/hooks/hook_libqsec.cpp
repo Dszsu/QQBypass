@@ -1,11 +1,17 @@
 #include <jni.h>
 #include <dlfcn.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <link.h>
+#include <atomic>
+#include <cstdlib>
+#include <algorithm>
 #include "../utils/log.h"
 #include "../utils/native_hook_tracker.h"
 #include "../utils/safe_bytehook.h"
 #include "bytehook.h"
 #include "hook_libc.h"
+#include "hook_libqsec.h"
 
 /**
  * Hook dlopen - 防止 QSec 检测 ByteHook 等 hook 框架
@@ -178,10 +184,163 @@ static int hooked_dladdr(const void* addr, Dl_info* info) {
     return ret;
 }
 
+extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long a4, long a5, long syscall_num, void* caller_pc);
+
+#if defined(__aarch64__)
+static const uint32_t QSEC_TRAMPOLINE_TEMPLATE[] = {
+    0xd10383ff, // sub sp, sp, #0xe0
+    0xa90d7bfd, // stp x29, x30, [sp, #0xd0]
+    0xa9010be1, // stp x1, x2, [sp, #0x10]
+    0xa90213e3, // stp x3, x4, [sp, #0x20]
+    0xa9031be5, // stp x5, x6, [sp, #0x30]
+    0xa90423e7, // stp x7, x8, [sp, #0x40]
+    0xa9052be9, // stp x9, x10, [sp, #0x50]
+    0xa90633eb, // stp x11, x12, [sp, #0x60]
+    0xa9073bed, // stp x13, x14, [sp, #0x70]
+    0xa90843ef, // stp x15, x16, [sp, #0x80]
+    0xa9094bf1, // stp x17, x18, [sp, #0x90]
+    0x6d0a07e0, // stp d0, d1, [sp, #0xa0]
+    0x6d0b0fe2, // stp d2, d3, [sp, #0xb0]
+    0x6d0c17e4, // stp d4, d5, [sp, #0xc0]
+    0xaa0803e6, // mov x6, x8
+    0xaa1e03e7, // mov x7, x30
+    0x58000250, // ldr x16, [pc, #72]
+    0xd63f0200, // blr x16
+    0x6d4c17e4, // ldp d4, d5, [sp, #0xc0]
+    0x6d4b0fe2, // ldp d2, d3, [sp, #0xb0]
+    0x6d4a07e0, // ldp d0, d1, [sp, #0xa0]
+    0xa9494bf1, // ldp x17, x18, [sp, #0x90]
+    0xa94843ef, // ldp x15, x16, [sp, #0x80]
+    0xa9473bed, // ldp x13, x14, [sp, #0x70]
+    0xa94633eb, // ldp x11, x12, [sp, #0x60]
+    0xa9452be9, // ldp x9, x10, [sp, #0x50]
+    0xa94423e7, // ldp x7, x8, [sp, #0x40]
+    0xa9431be5, // ldp x5, x6, [sp, #0x30]
+    0xa94213e3, // ldp x3, x4, [sp, #0x20]
+    0xa9410be1, // ldp x1, x2, [sp, #0x10]
+    0xa94d7bfd, // ldp x29, x30, [sp, #0xd0]
+    0x910383ff, // add sp, sp, #0xe0
+    0xd65f03c0, // ret
+    0xd503201f  // nop
+};
+
+struct QSecSearchInfo {
+    const char* target_name;
+    uintptr_t base;
+    uintptr_t text_vaddr;
+    size_t text_size;
+};
+
+static int find_qsec_callback(struct dl_phdr_info* info, size_t size, void* data) {
+    (void)size;
+    QSecSearchInfo* search = (QSecSearchInfo*)data;
+    if (!info || !info->dlpi_name) return 0;
+    if (strstr(info->dlpi_name, search->target_name)) {
+        search->base = info->dlpi_addr;
+        for (int i = 0; i < info->dlpi_phnum; i++) {
+            const ElfW(Phdr)& ph = info->dlpi_phdr[i];
+            if (ph.p_type == PT_LOAD && (ph.p_flags & PF_X)) {
+                search->text_vaddr = ph.p_vaddr;
+                search->text_size = ph.p_memsz;
+                break;
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
+#endif
+
+namespace hook_libqsec {
+
+static std::atomic<bool> s_qsec_patched{false};
+
+void patch_libqsec_in_memory() {
+#if defined(__aarch64__)
+    if (s_qsec_patched.load(std::memory_order_relaxed)) return;
+
+    QSecSearchInfo search{"libQSec.so", 0, 0, 0};
+    dl_iterate_phdr(find_qsec_callback, &search);
+
+    if (!search.base) {
+        FILE* fp = fopen("/proc/self/maps", "r");
+        if (fp) {
+            char line[1024];
+            while (fgets(line, sizeof(line), fp)) {
+                if (strstr(line, "libQSec.so") && strstr(line, "r-xp")) {
+                    uintptr_t start = 0, end = 0;
+                    if (sscanf(line, "%lx-%lx", &start, &end) == 2) {
+                        search.base = start;
+                        search.text_vaddr = 0;
+                        search.text_size = end - start;
+                        break;
+                    }
+                }
+            }
+            fclose(fp);
+        }
+    }
+
+    if (!search.base || !search.text_size) {
+        return;
+    }
+
+    uintptr_t text_start = search.base + search.text_vaddr;
+    uintptr_t text_end = text_start + search.text_size;
+
+    // Allocate 4KB proximity trampoline page in guard gap right after libQSec.so text
+    uintptr_t hint = search.base + ((search.text_size + 4095) & ~4095);
+    void* tramp_page = mmap((void*)hint, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+
+    if (tramp_page == MAP_FAILED) {
+        LOGE("libQSec.so: Failed to allocate proximity trampoline page at %p (errno=%d)", (void*)hint, errno);
+        return;
+    }
+
+    hook_libc::register_trampoline_range((uintptr_t)tramp_page, (uintptr_t)tramp_page + 4096);
+
+    uint8_t* tp = (uint8_t*)tramp_page;
+    memcpy(tp, QSEC_TRAMPOLINE_TEMPLATE, sizeof(QSEC_TRAMPOLINE_TEMPLATE));
+    uint64_t target_fn = (uint64_t)&c_fekit_syscall_handler;
+    memcpy(tp + 136, &target_fn, sizeof(target_fn));
+
+    mprotect(tramp_page, 4096, PROT_READ | PROT_EXEC);
+    __builtin___clear_cache((char*)tramp_page, (char*)tramp_page + 4096);
+
+    size_t patched_count = 0;
+    uint32_t* p = (uint32_t*)text_start;
+    uint32_t* pend = (uint32_t*)(text_end - 4);
+
+    for (; p <= pend; p++) {
+        if (*p == 0xd4000001) { // svc #0
+            intptr_t delta = (intptr_t)tramp_page - (intptr_t)p;
+            if (delta >= -0x8000000 && delta <= 0x7fffffc) {
+                uint32_t imm26 = (uint32_t)((delta >> 2) & 0x03ffffff);
+                uint32_t bl_inst = 0x94000000 | imm26;
+                uintptr_t page_addr = ((uintptr_t)p) & ~4095;
+                mprotect((void*)page_addr, 4096 * 2, PROT_READ | PROT_WRITE | PROT_EXEC);
+                *p = bl_inst;
+                __builtin___clear_cache((char*)p, (char*)(p + 1));
+                mprotect((void*)page_addr, 4096 * 2, PROT_READ | PROT_EXEC);
+                patched_count++;
+                LOGI("libQSec.so: Patched inline svc #0 at %p (offset 0x%lx) -> bl trampoline",
+                     p, (unsigned long)((uintptr_t)p - search.base));
+            }
+        }
+    }
+
+    s_qsec_patched.store(true, std::memory_order_relaxed);
+    (void)patched_count;
+    LOGI("libQSec.so inline syscall patching complete: %zu stubs redirected to proximity trampoline at %p",
+         patched_count, tramp_page);
+#endif
+}
+
 /**
  * 安装 libQSec 及 libfekit 的 anti-hook 防护
  */
 void install_qsec_hooks() {
+    patch_libqsec_in_memory();
     const char* targets[] = {
         "libQSec.so", "libfekit.so", "libBeaconDT.so", "libqimei.so",
         "libnativefilescan.so", "libunusedcodecheck.so", "libKcsdk-2.0.9.so",
@@ -228,4 +387,6 @@ void install_qsec_hooks() {
         );
     }
 }
+
+} // namespace hook_libqsec
 

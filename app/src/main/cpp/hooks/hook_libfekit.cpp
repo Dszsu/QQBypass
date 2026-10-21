@@ -14,6 +14,11 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <sys/mman.h>
+#include <link.h>
+#include <atomic>
+#include <cstdlib>
+#include <algorithm>
 
 namespace hook_libfekit {
 
@@ -231,7 +236,272 @@ static ssize_t fake_fekit_readlink(const char* pathname, char* buf, size_t bufsi
     return BYTEHOOK_CALL_PREV(fake_fekit_readlink, pathname, buf, bufsiz);
 }
 
+#if defined(__aarch64__)
+// Universal ARM64 Proximity Trampoline (34 instructions + 8 bytes literal pool = 144 bytes)
+static const uint32_t TRAMPOLINE_TEMPLATE[] = {
+    0xd10383ff, // sub sp, sp, #0xe0
+    0xa90d7bfd, // stp x29, x30, [sp, #0xd0]
+    0xa9010be1, // stp x1, x2, [sp, #0x10]
+    0xa90213e3, // stp x3, x4, [sp, #0x20]
+    0xa9031be5, // stp x5, x6, [sp, #0x30]
+    0xa90423e7, // stp x7, x8, [sp, #0x40]
+    0xa9052be9, // stp x9, x10, [sp, #0x50]
+    0xa90633eb, // stp x11, x12, [sp, #0x60]
+    0xa9073bed, // stp x13, x14, [sp, #0x70]
+    0xa90843ef, // stp x15, x16, [sp, #0x80]
+    0xa9094bf1, // stp x17, x18, [sp, #0x90]
+    0x6d0a07e0, // stp d0, d1, [sp, #0xa0]
+    0x6d0b0fe2, // stp d2, d3, [sp, #0xb0]
+    0x6d0c17e4, // stp d4, d5, [sp, #0xc0]
+    0xaa0803e6, // mov x6, x8
+    0xaa1e03e7, // mov x7, x30
+    0x58000250, // ldr x16, [pc, #72] (loads literal pool at offset 0x88)
+    0xd63f0200, // blr x16
+    0x6d4c17e4, // ldp d4, d5, [sp, #0xc0]
+    0x6d4b0fe2, // ldp d2, d3, [sp, #0xb0]
+    0x6d4a07e0, // ldp d0, d1, [sp, #0xa0]
+    0xa9494bf1, // ldp x17, x18, [sp, #0x90]
+    0xa94843ef, // ldp x15, x16, [sp, #0x80]
+    0xa9473bed, // ldp x13, x14, [sp, #0x70]
+    0xa94633eb, // ldp x11, x12, [sp, #0x60]
+    0xa9452be9, // ldp x9, x10, [sp, #0x50]
+    0xa94423e7, // ldp x7, x8, [sp, #0x40]
+    0xa9431be5, // ldp x5, x6, [sp, #0x30]
+    0xa94213e3, // ldp x3, x4, [sp, #0x20]
+    0xa9410be1, // ldp x1, x2, [sp, #0x10]
+    0xa94d7bfd, // ldp x29, x30, [sp, #0xd0]
+    0x910383ff, // add sp, sp, #0xe0
+    0xd65f03c0, // ret
+    0xd503201f  // nop (padding for 8-byte alignment)
+    // Followed by uint64_t target_func_ptr at offset 0x88 (136 bytes)
+};
+
+extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long a4, long a5, long syscall_num, void* caller_pc) {
+    // Syscall 56: openat(int dirfd, const char *pathname, int flags, mode_t mode)
+    if (syscall_num == 56 || syscall_num == 437) {
+        const char* path = (const char*)a1;
+        if (path) {
+            if (is_fekit_blocked_path(path)) {
+                LOGD("FEKit inline syscall openat blocked: %s (caller=%p)", path, caller_pc);
+                return -ENOENT;
+            }
+            if (strstr(path, "smaps")) {
+                FILE* fake = hook_libc::build_filtered_smaps();
+                if (fake) {
+                    int fd = dup(fileno(fake));
+                    fclose(fake);
+                    LOGI("FEKit inline syscall openat smaps redirected: %s -> fd %d", path, fd);
+                    return fd;
+                }
+            } else if (strcmp(path, "/proc/self/maps") == 0 || (strstr(path, "/proc/") && strstr(path, "/maps"))) {
+                FILE* fake = hook_libc::build_filtered_maps();
+                if (fake) {
+                    int fd = dup(fileno(fake));
+                    fclose(fake);
+                    LOGI("FEKit inline syscall openat maps redirected: %s -> fd %d", path, fd);
+                    return fd;
+                }
+            } else if (strstr(path, "mountinfo")) {
+                FILE* fake = hook_libc::build_filtered_mountinfo();
+                if (fake) {
+                    int fd = dup(fileno(fake));
+                    fclose(fake);
+                    return fd;
+                }
+            } else if (strstr(path, "mounts")) {
+                FILE* fake = hook_libc::build_filtered_mounts();
+                if (fake) {
+                    int fd = dup(fileno(fake));
+                    fclose(fake);
+                    return fd;
+                }
+            } else if (strstr(path, "/status")) {
+                FILE* fake = hook_libc::build_filtered_status();
+                if (fake) {
+                    int fd = dup(fileno(fake));
+                    fclose(fake);
+                    return fd;
+                }
+            } else if (strstr(path, "/wchan")) {
+                FILE* fake = hook_libc::build_filtered_wchan();
+                if (fake) {
+                    int fd = dup(fileno(fake));
+                    fclose(fake);
+                    return fd;
+                }
+            }
+        }
+    }
+    // Syscall 79: newfstatat(int dirfd, const char *pathname, struct stat *statbuf, int flags)
+    else if (syscall_num == 79) {
+        const char* path = (const char*)a1;
+        if (path && is_fekit_blocked_path(path)) {
+            LOGD("FEKit inline syscall newfstatat blocked: %s (caller=%p)", path, caller_pc);
+            return -ENOENT;
+        }
+    }
+    // Syscall 78: readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz)
+    else if (syscall_num == 78) {
+        const char* path = (const char*)a1;
+        if (path && is_fekit_blocked_path(path)) {
+            LOGD("FEKit inline syscall readlinkat blocked: %s (caller=%p)", path, caller_pc);
+            return -ENOENT;
+        }
+    }
+    // Syscall 48/439: faccessat
+    else if (syscall_num == 48 || syscall_num == 439) {
+        const char* path = (const char*)a1;
+        if (path && is_fekit_blocked_path(path)) {
+            LOGD("FEKit inline syscall faccessat blocked: %s (caller=%p)", path, caller_pc);
+            return -ENOENT;
+        }
+    }
+    // Syscall 43: statfs
+    else if (syscall_num == 43) {
+        const char* path = (const char*)a0;
+        if (path && is_fekit_blocked_path(path)) {
+            LOGD("FEKit inline syscall statfs blocked: %s (caller=%p)", path, caller_pc);
+            return -ENOENT;
+        }
+    }
+
+    errno = 0;
+    long ret = hook_libc::fake_syscall_ex(syscall_num, (void*)a0, (void*)a1, (void*)a2, (void*)a3, (void*)a4, (void*)a5, caller_pc);
+    if (ret < 0) {
+        int err = errno != 0 ? errno : ENOENT;
+        return (long)(-err);
+    }
+    return ret;
+}
+
+struct ElfSearchInfo {
+    const char* target_name;
+    uintptr_t base;
+    uintptr_t text_vaddr;
+    size_t text_size;
+};
+
+static int find_fekit_callback(struct dl_phdr_info* info, size_t size, void* data) {
+    (void)size;
+    ElfSearchInfo* search = (ElfSearchInfo*)data;
+    if (!info || !info->dlpi_name) return 0;
+    if (strstr(info->dlpi_name, search->target_name)) {
+        search->base = info->dlpi_addr;
+        for (int i = 0; i < info->dlpi_phnum; i++) {
+            const ElfW(Phdr)& ph = info->dlpi_phdr[i];
+            if (ph.p_type == PT_LOAD && (ph.p_flags & PF_X)) {
+                search->text_vaddr = ph.p_vaddr;
+                search->text_size = ph.p_memsz;
+                break;
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
+#endif
+
+static std::atomic<bool> s_fekit_patched{false};
+
+void patch_libfekit_in_memory() {
+#if defined(__aarch64__)
+    if (s_fekit_patched.load(std::memory_order_relaxed)) return;
+
+    ElfSearchInfo search{"libfekit.so", 0, 0, 0};
+    dl_iterate_phdr(find_fekit_callback, &search);
+
+    // Fallback: search /proc/self/maps if dl_iterate_phdr didn't find base
+    if (!search.base) {
+        FILE* fp = fopen("/proc/self/maps", "r");
+        if (fp) {
+            char line[1024];
+            while (fgets(line, sizeof(line), fp)) {
+                if (strstr(line, "libfekit.so") && strstr(line, "r-xp")) {
+                    uintptr_t start = 0, end = 0;
+                    if (sscanf(line, "%lx-%lx", &start, &end) == 2) {
+                        search.base = start;
+                        search.text_vaddr = 0;
+                        search.text_size = end - start;
+                        break;
+                    }
+                }
+            }
+            fclose(fp);
+        }
+    }
+
+    if (!search.base || !search.text_size) {
+        return;
+    }
+
+    uintptr_t text_start = search.base + search.text_vaddr;
+    uintptr_t text_end = text_start + search.text_size;
+
+    // Allocate 4KB proximity trampoline page in guard gap right after libfekit.so text
+    uintptr_t hint = search.base + ((search.text_size + 4095) & ~4095);
+    void* tramp_page = mmap((void*)hint, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+
+    if (tramp_page == MAP_FAILED) {
+        LOGE("libfekit.so: Failed to allocate proximity trampoline page at %p (errno=%d)", (void*)hint, errno);
+        return;
+    }
+
+    hook_libc::register_trampoline_range((uintptr_t)tramp_page, (uintptr_t)tramp_page + 4096);
+
+    uint8_t* tp = (uint8_t*)tramp_page;
+    memcpy(tp, TRAMPOLINE_TEMPLATE, sizeof(TRAMPOLINE_TEMPLATE));
+    uint64_t target_fn = (uint64_t)&c_fekit_syscall_handler;
+    memcpy(tp + 136, &target_fn, sizeof(target_fn));
+
+    mprotect(tramp_page, 4096, PROT_READ | PROT_EXEC);
+    __builtin___clear_cache((char*)tramp_page, (char*)tramp_page + 4096);
+
+    // Scan text segment for inline svc #0 instructions
+    size_t patched_count = 0;
+    uint32_t* p = (uint32_t*)text_start;
+    uint32_t* pend = (uint32_t*)(text_end - 4);
+
+    for (; p <= pend; p++) {
+        if (*p == 0xd4000001) { // svc #0
+            uint32_t prev = *(p - 1);
+            bool is_valid = false;
+            uint32_t sys_num = 0;
+            if ((prev & 0xffe0001f) == 0xd2800008) { // mov x8, #imm
+                sys_num = (prev >> 5) & 0xffff;
+                is_valid = true;
+            } else if ((prev & 0xffe0001f) == 0x52800008) { // mov w8, #imm
+                sys_num = (prev >> 5) & 0xffff;
+                is_valid = true;
+            }
+            if (is_valid) {
+                intptr_t delta = (intptr_t)tramp_page - (intptr_t)p;
+                if (delta >= -0x8000000 && delta <= 0x7fffffc) {
+                    uint32_t imm26 = (uint32_t)((delta >> 2) & 0x03ffffff);
+                    uint32_t bl_inst = 0x94000000 | imm26;
+                    uintptr_t page_addr = ((uintptr_t)p) & ~4095;
+                    mprotect((void*)page_addr, 4096 * 2, PROT_READ | PROT_WRITE | PROT_EXEC);
+                    *p = bl_inst;
+                    __builtin___clear_cache((char*)p, (char*)(p + 1));
+                    mprotect((void*)page_addr, 4096 * 2, PROT_READ | PROT_EXEC);
+                    patched_count++;
+                    (void)sys_num;
+                    LOGI("libfekit.so: Patched inline svc #0 (sys=%u) at %p (offset 0x%lx) -> bl trampoline",
+                         sys_num, p, (unsigned long)((uintptr_t)p - search.base));
+                }
+            }
+        }
+    }
+
+    s_fekit_patched.store(true, std::memory_order_relaxed);
+    (void)patched_count;
+    LOGI("libfekit.so inline syscall patching complete: %zu stubs redirected to proximity trampoline at %p",
+         patched_count, tramp_page);
+#endif
+}
+
 void install_hooks() {
+    patch_libfekit_in_memory();
+
     // 命令执行类：全局拦截（调用频率低，安全）
     TRACK_NATIVE_HOOK_ALL(nullptr, "system", (void*)fake_system, nullptr, nullptr);
     TRACK_NATIVE_HOOK_ALL(nullptr, "popen", (void*)fake_popen, nullptr, nullptr);

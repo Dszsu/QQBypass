@@ -94,6 +94,17 @@ static void* install_hooks_thread(void* arg) {
 
     g_bytehook_hooks_installed = true;
 
+    pthread_t patch_th;
+    pthread_create(&patch_th, nullptr, [](void*) -> void* {
+        for (int i = 0; i < 15; i++) {
+            usleep(400000); // 400ms interval for early startup DSO patching
+            hook_libfekit::patch_libfekit_in_memory();
+            hook_libqsec::patch_libqsec_in_memory();
+        }
+        return nullptr;
+    }, nullptr);
+    pthread_detach(patch_th);
+
     pthread_mutex_unlock(&g_init_mutex);
 
     return nullptr;
@@ -203,4 +214,19 @@ Java_io_github_xalsace_qqbypass_NativeBypass_isHookActiveNative(JNIEnv* env, jcl
     (void)clazz;
     (void)hook_name;
     return g_bytehook_hooks_installed;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_io_github_xalsace_qqbypass_NativeBypass_patchLibraryNative(JNIEnv* env, jclass clazz, jstring lib_name) {
+    (void)clazz;
+    if (!lib_name) return;
+    const char* name = env->GetStringUTFChars(lib_name, nullptr);
+    if (name) {
+        if (strstr(name, "fekit")) {
+            hook_libfekit::patch_libfekit_in_memory();
+        } else if (strstr(name, "QSec") || strstr(name, "qsec")) {
+            hook_libqsec::patch_libqsec_in_memory();
+        }
+        env->ReleaseStringUTFChars(lib_name, name);
+    }
 }

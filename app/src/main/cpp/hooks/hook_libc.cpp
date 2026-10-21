@@ -21,6 +21,8 @@
 #include <sys/prctl.h>
 #include <time.h>
 #include "hook_libqimei.h"
+#include "hook_libfekit.h"
+#include "hook_libqsec.h"
 
 #ifndef ST_RDONLY
 #define ST_RDONLY 1
@@ -498,6 +500,29 @@ static FILE* create_memory_file(const char* name) {
     return tmpfile();
 }
 
+struct TrampolineRange {
+    uintptr_t start;
+    uintptr_t end;
+};
+static TrampolineRange g_trampoline_ranges[8];
+static size_t g_trampoline_range_count = 0;
+
+void register_trampoline_range(uintptr_t start, uintptr_t end) {
+    if (g_trampoline_range_count < sizeof(g_trampoline_ranges) / sizeof(g_trampoline_ranges[0])) {
+        g_trampoline_ranges[g_trampoline_range_count++] = {start, end};
+        LOGI("Registered proximity trampoline range: [0x%lx, 0x%lx)", (unsigned long)start, (unsigned long)end);
+    }
+}
+
+static inline bool is_in_trampoline_ranges(uintptr_t addr) {
+    for (size_t i = 0; i < g_trampoline_range_count; i++) {
+        if (addr >= g_trampoline_ranges[i].start && addr < g_trampoline_ranges[i].end) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // 构造过滤掉 hook 特征库与 rwxp 蹦床的 maps 临时文件
 FILE* build_filtered_maps() {
     ensure_real_funcs();
@@ -541,8 +566,14 @@ FILE* build_filtered_maps() {
 
     while (real_fgets_ptr(line, sizeof(line), real)) {
         bool filter = false;
-        for (int i = 0; blacklist[i]; i++) {
-            if (strcasestr(line, blacklist[i])) { filter = true; break; }
+        uintptr_t addr = (uintptr_t)strtoull(line, nullptr, 16);
+        if (is_in_trampoline_ranges(addr)) {
+            filter = true;
+        }
+        if (!filter) {
+            for (int i = 0; blacklist[i]; i++) {
+                if (strcasestr(line, blacklist[i])) { filter = true; break; }
+            }
         }
         // 过滤非系统 Dalvik 的匿名可读写执行蹦床 (rwxp)
         if (!filter && strstr(line, "rwxp") && !strstr(line, "dalvik")) {
@@ -611,10 +642,16 @@ FILE* build_filtered_smaps() {
         char* dash = strchr(line, '-');
         if (dash && (strstr(line, " r") || strstr(line, " -"))) {
             filtering_current_block = false;
-            for (int i = 0; blacklist[i]; i++) {
-                if (strcasestr(line, blacklist[i])) {
-                    filtering_current_block = true;
-                    break;
+            uintptr_t addr = (uintptr_t)strtoull(line, nullptr, 16);
+            if (is_in_trampoline_ranges(addr)) {
+                filtering_current_block = true;
+            }
+            if (!filtering_current_block) {
+                for (int i = 0; blacklist[i]; i++) {
+                    if (strcasestr(line, blacklist[i])) {
+                        filtering_current_block = true;
+                        break;
+                    }
                 }
             }
             if (!filtering_current_block && strstr(line, "rwxp") && !strstr(line, "dalvik")) {
@@ -1734,6 +1771,31 @@ static ssize_t fake_readlink(const char* pathname, char* buf, size_t bufsiz) {
     return sanitize_readlink_buffer(buf, bufsiz, ret);
 }
 
+static ssize_t do_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsiz, void* caller_addr) {
+    if (pathname && strcmp(pathname, "/proc/self/exe") == 0) {
+        const char* fake_exe = "/system/bin/app_process64";
+        size_t len = strlen(fake_exe);
+        if (bufsiz <= len) {
+            errno = ERANGE;
+            return -1;
+        }
+        strncpy(buf, fake_exe, bufsiz);
+        LOGI("Hidden /proc/self/exe (at) -> %s", fake_exe);
+        return len;
+    }
+
+    if (is_security_hidden_path(pathname, caller_addr)) {
+        errno = ENOENT;
+        return -1;
+    }
+
+    ssize_t ret;
+    if (real_readlinkat_ptr) ret = real_readlinkat_ptr(dirfd, pathname, buf, bufsiz);
+    else ret = (ssize_t)syscall(__NR_readlinkat, dirfd, pathname, buf, bufsiz);
+
+    return sanitize_readlink_buffer(buf, bufsiz, ret);
+}
+
 static ssize_t fake_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsiz) {
     SAFE_BYTEHOOK_SCOPE();
 
@@ -2187,12 +2249,9 @@ int fake_pclose(FILE* stream) {
     return pclose(stream);
 }
 
-int fake_statfs(const char* path, struct statfs* buf) {
-    SAFE_BYTEHOOK_SCOPE();
-    ensure_real_funcs();
+static int do_statfs(const char* path, struct statfs* buf) {
     int ret = 0;
     if (real_statfs_ptr) ret = real_statfs_ptr(path, buf);
-    else if (g_bytehook_hooks_installed) ret = BYTEHOOK_CALL_PREV(fake_statfs, path, buf);
     else ret = statfs(path, buf);
     if (ret == 0 && buf) {
         if (buf->f_type == 0x794c7630) {
@@ -2203,6 +2262,21 @@ int fake_statfs(const char* path, struct statfs* buf) {
         }
     }
     return ret;
+}
+
+int fake_statfs(const char* path, struct statfs* buf) {
+    SAFE_BYTEHOOK_SCOPE();
+    ensure_real_funcs();
+    if (real_statfs_ptr) return do_statfs(path, buf);
+    if (g_bytehook_hooks_installed) {
+        int ret = BYTEHOOK_CALL_PREV(fake_statfs, path, buf);
+        if (ret == 0 && buf) {
+            if (buf->f_type == 0x794c7630) buf->f_type = 0xef53;
+            if (path && (strncmp(path, "/system", 7) == 0 || strncmp(path, "/vendor", 7) == 0)) buf->f_flags |= ST_RDONLY;
+        }
+        return ret;
+    }
+    return do_statfs(path, buf);
 }
 
 static int fake_statfs64(const char* path, struct statfs64* buf) {
@@ -2285,7 +2359,11 @@ static void* fake_dlopen(const char* filename, int flags) {
     else handle = dlopen(filename, flags);
 
     if (handle) {
-        if (filename && strstr(filename, "libqimei.so")) {
+        if (filename && strstr(filename, "libfekit.so")) {
+            hook_libfekit::patch_libfekit_in_memory();
+        } else if (filename && strstr(filename, "libQSec.so")) {
+            hook_libqsec::patch_libqsec_in_memory();
+        } else if (filename && strstr(filename, "libqimei.so")) {
             hook_libqimei::patch_libqimei_in_memory();
         } else if (filename && strstr(filename, "libqauxv-core0")) {
             s_cached_qauxv_core0 = handle;
@@ -2325,7 +2403,11 @@ static void* fake_android_dlopen_ext(const char* filename, int flags, const void
     }
 
     if (handle) {
-        if (filename && strstr(filename, "libqimei.so")) {
+        if (filename && strstr(filename, "libfekit.so")) {
+            hook_libfekit::patch_libfekit_in_memory();
+        } else if (filename && strstr(filename, "libQSec.so")) {
+            hook_libqsec::patch_libqsec_in_memory();
+        } else if (filename && strstr(filename, "libqimei.so")) {
             hook_libqimei::patch_libqimei_in_memory();
         } else if (filename && strstr(filename, "libqauxv-core0")) {
             s_cached_qauxv_core0 = handle;
@@ -2518,15 +2600,14 @@ void fake_shadowhook_dump_records(int fd, uint32_t item_flags) {
 }
 }
 
-long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5, void* a6) {
-    SAFE_BYTEHOOK_SCOPE();
+long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* a5, void* a6, void* caller_addr) {
     ensure_real_funcs();
 
     // 56: __NR_openat, 437: __NR_openat2, 322: __NR_openat on arm
     if (number == 56 || number == 437 || number == 322) {
         const char* path = (const char*)a2;
         if (path) {
-            if (is_security_hidden_path(path, __builtin_return_address(0))) {
+            if (is_security_hidden_path(path, caller_addr)) {
                 simulate_vfs_lookup_delay();
                 LOGD("fake_syscall: openat blocked sensitive: %s", path);
                 errno = ENOENT;
@@ -2584,7 +2665,7 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
                 }
             }
             if (strstr(path, "smaps")) {
-                if (should_filter_proc_maps(__builtin_return_address(0))) {
+                if (should_filter_proc_maps(caller_addr)) {
                     LOGI("fake_syscall: openat smaps redirected: %s", path);
                     FILE* fake = build_filtered_smaps();
                     if (fake) {
@@ -2596,7 +2677,7 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
             }
             if (strcmp(path, "/proc/self/maps") == 0 ||
                 (strstr(path, "/proc/") && strstr(path, "/maps"))) {
-                if (should_filter_proc_maps(__builtin_return_address(0))) {
+                if (should_filter_proc_maps(caller_addr)) {
                     LOGI("fake_syscall: openat maps redirected: %s", path);
                     FILE* fake = build_filtered_maps();
                     if (fake) {
@@ -2673,11 +2754,22 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
             }
         }
     }
+    // 43: __NR_statfs
+    else if (number == 43) {
+        const char* path = (const char*)a1;
+        if (path) {
+            if (is_security_hidden_path(path, caller_addr)) {
+                errno = ENOENT;
+                return -1;
+            }
+            return do_statfs(path, (struct statfs*)a2);
+        }
+    }
     // 79: __NR_newfstatat
     else if (number == 79) {
         const char* path = (const char*)a2;
         if (path) {
-            if (is_security_hidden_path(path, __builtin_return_address(0))) {
+            if (is_security_hidden_path(path, caller_addr)) {
                 simulate_vfs_lookup_delay();
                 LOGD("fake_syscall: newfstatat blocked sensitive: %s", path);
                 errno = ENOENT;
@@ -2697,7 +2789,7 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
     else if (number == 48 || number == 439) {
         const char* path = (const char*)a2;
         if (path) {
-            if (is_security_hidden_path(path, __builtin_return_address(0))) {
+            if (is_security_hidden_path(path, caller_addr)) {
                 simulate_vfs_lookup_delay();
                 LOGD("fake_syscall: faccessat blocked sensitive: %s", path);
                 errno = ENOENT;
@@ -2711,13 +2803,13 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
     // 78: __NR_readlinkat
     else if (number == 78) {
         const char* path = (const char*)a2;
-        if (path && is_security_hidden_path(path, __builtin_return_address(0))) {
+        if (path && is_security_hidden_path(path, caller_addr)) {
             simulate_vfs_lookup_delay();
             LOGD("fake_syscall: readlinkat blocked sensitive: %s", path);
             errno = ENOENT;
             return -1;
         }
-        return fake_readlinkat((int)(uintptr_t)a1, path, (char*)a3, (size_t)(uintptr_t)a4);
+        return do_readlinkat((int)(uintptr_t)a1, path, (char*)a3, (size_t)(uintptr_t)a4, caller_addr);
     }
 #ifdef __NR_getdents64
     // 61: __NR_getdents64
@@ -2740,7 +2832,7 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
             long pos = 0;
             char* write_ptr = buf;
             long new_ret = 0;
-            void* ret_addr = __builtin_return_address(0);
+            void* ret_addr = caller_addr;
             while (pos < ret) {
                 struct linux_dirent64* dent = (struct linux_dirent64*)(buf + pos);
                 unsigned short reclen = dent->d_reclen;
@@ -2802,7 +2894,7 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
     else if (number == __NR_kill) {
         pid_t pid = (pid_t)(uintptr_t)a1;
         int sig = (int)(uintptr_t)a2;
-        if (is_anti_tamper_kill(pid, 0, sig, __builtin_return_address(0))) {
+        if (is_anti_tamper_kill(pid, 0, sig, caller_addr)) {
             return 0;
         }
     }
@@ -2811,7 +2903,7 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
     else if (number == __NR_tkill) {
         pid_t tid = (pid_t)(uintptr_t)a1;
         int sig = (int)(uintptr_t)a2;
-        if (is_anti_tamper_kill(getpid(), tid, sig, __builtin_return_address(0))) {
+        if (is_anti_tamper_kill(getpid(), tid, sig, caller_addr)) {
             return 0;
         }
     }
@@ -2821,7 +2913,7 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
         pid_t tgid = (pid_t)(uintptr_t)a1;
         pid_t tid = (pid_t)(uintptr_t)a2;
         int sig = (int)(uintptr_t)a3;
-        if (is_anti_tamper_kill(tgid, tid, sig, __builtin_return_address(0))) {
+        if (is_anti_tamper_kill(tgid, tid, sig, caller_addr)) {
             return 0;
         }
     }
@@ -2831,6 +2923,11 @@ long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5,
         return real_syscall_ptr(number, a1, a2, a3, a4, a5, a6);
     }
     return syscall(number, a1, a2, a3, a4, a5, a6);
+}
+
+long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5, void* a6) {
+    SAFE_BYTEHOOK_SCOPE();
+    return fake_syscall_ex(number, a1, a2, a3, a4, a5, a6, __builtin_return_address(0));
 }
 
 static long fake_ptrace(int request, pid_t pid, void* addr, void* data) {

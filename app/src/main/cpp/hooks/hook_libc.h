@@ -39,6 +39,8 @@ const prop_info* fake_system_property_find(const char* name);
 int fake_system_property_read(const prop_info* pi, char* name, char* value);
 
 long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5, void* a6);
+long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* a5, void* a6, void* caller_addr);
+void register_trampoline_range(uintptr_t start, uintptr_t end);
 
 } // namespace hook_libc
 
