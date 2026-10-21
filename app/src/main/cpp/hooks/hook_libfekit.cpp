@@ -31,22 +31,7 @@ static char* (*real_fekit_strstr_ptr)(const char*, const char*) = nullptr;
 
 static bool is_fekit_blocked_path(const char* pathname) {
     if (!pathname) return false;
-    if (hook_libc::is_sensitive_path(pathname) || hook_libc::is_sensitive_name(pathname)) {
-        return true;
-    }
-    const char* root_probes[] = {
-        "su", "busybox", "sudo", "bdsu", "sutemp", "shuamesu", "ku.sud",
-        "magisk", "kernelsu", "apatch", "root", "patch", "xposed", "lsposed",
-        "cydia", "substrate", "sandhook", "topjohnwu", "kingroot", "oneclickroot",
-        "daemonsu", "permmgrd", "360sguard",
-        nullptr
-    };
-    for (int i = 0; root_probes[i]; i++) {
-        if (strcasestr(pathname, root_probes[i])) {
-            return true;
-        }
-    }
-    return false;
+    return hook_libc::is_sensitive_path(pathname) || hook_libc::is_sensitive_name(pathname);
 }
 
 // system 代理：阻止 root 检测命令

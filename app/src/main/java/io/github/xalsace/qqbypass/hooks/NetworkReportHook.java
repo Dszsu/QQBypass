@@ -526,136 +526,156 @@ public class NetworkReportHook {
         if (cl == null) return;
 
         // 1. MSF process core offline push receiver (com.tencent.mobileqq.msf.core.t.a)
-        if (sKickAuditedClasses.add("msf.core.t")) {
-            Class<?> msfTCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.t", cl);
-            if (msfTCls != null) {
-                HookUtils.hookAllMethods(msfTCls, "a", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                        if (p.args == null || p.args.length < 1) return;
-                        Object fromMsg = null;
-                        for (Object arg : p.args) {
-                            if (arg != null && "com.tencent.qphone.base.remote.FromServiceMsg".equals(arg.getClass().getName())) {
-                                fromMsg = arg;
-                                break;
-                            }
-                        }
-                        if (fromMsg != null) {
-                            String cmd = "";
-                            int failCode = 0;
-                            try {
-                                cmd = (String) XposedHelpers.callMethod(fromMsg, "getServiceCmd");
-                                failCode = ((Number) XposedHelpers.callMethod(fromMsg, "getBusinessFailCode")).intValue();
-                            } catch (Throwable ignored) {}
-
-                            boolean isKickCmd = "StatSvc.ReqMSFOffline".equals(cmd) ||
-                                                "StatSvc.ReqForceOffline".equals(cmd) ||
-                                                "MessageSvc.PushForceOffline".equals(cmd);
-                            boolean isKickFail = (failCode == 2012 || failCode == 2001 || failCode == 2011 ||
-                                                  failCode == 2013 || failCode == 2014 || failCode == -10103 ||
-                                                  failCode == -10104 || failCode == 2008 || failCode == 2009);
-
-                            if (isKickCmd || isKickFail) {
-                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
-                                    "MSF.core.t.a (Read-Only Audit)", fromMsg,
-                                    "MSF push received: cmd=" + cmd + ", failCode=" + failCode);
-                            }
+        Class<?> msfTCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.t", cl);
+        if (msfTCls != null && sKickAuditedClasses.add("msf.core.t")) {
+            HookUtils.hookAllMethods(msfTCls, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    if (p.args == null || p.args.length < 1) return;
+                    Object fromMsg = null;
+                    for (Object arg : p.args) {
+                        if (arg != null && "com.tencent.qphone.base.remote.FromServiceMsg".equals(arg.getClass().getName())) {
+                            fromMsg = arg;
+                            break;
                         }
                     }
-                });
-                XposedEntry.log("[KickAudit] Installed read-only kick audit on com.tencent.mobileqq.msf.core.t.a");
-            }
+                    if (fromMsg != null) {
+                        String cmd = "";
+                        int failCode = 0;
+                        try {
+                            cmd = (String) XposedHelpers.callMethod(fromMsg, "getServiceCmd");
+                            failCode = ((Number) XposedHelpers.callMethod(fromMsg, "getBusinessFailCode")).intValue();
+                        } catch (Throwable ignored) {}
+
+                        boolean isKickCmd = "StatSvc.ReqMSFOffline".equals(cmd) ||
+                                            "StatSvc.ReqForceOffline".equals(cmd) ||
+                                            "MessageSvc.PushForceOffline".equals(cmd);
+                        boolean isKickFail = (failCode == 2012 || failCode == 2001 || failCode == 2011 ||
+                                              failCode == 2013 || failCode == 2014 || failCode == -10103 ||
+                                              failCode == -10104 || failCode == 2008 || failCode == 2009);
+
+                        if (isKickCmd || isKickFail) {
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                                "MSF.core.t.a (Read-Only Audit)", fromMsg,
+                                "MSF push received: cmd=" + cmd + ", failCode=" + failCode);
+                        }
+                    }
+                }
+            });
+            XposedEntry.log("[KickAudit] Installed read-only kick audit on com.tencent.mobileqq.msf.core.t.a");
         }
 
         // 2. Client-side MSF SDK IPC response handler (com.tencent.mobileqq.msf.sdk.g / h)
         for (String msfClsName : new String[]{"com.tencent.mobileqq.msf.sdk.g", "com.tencent.mobileqq.msf.sdk.h"}) {
-            if (sKickAuditedClasses.add(msfClsName)) {
-                Class<?> sdkCls = XposedHelpers.findClassIfExists(msfClsName, cl);
-                if (sdkCls != null) {
-                    HookUtils.hookAllMethods(sdkCls, "e", new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            if (param.args == null || param.args.length < 1 || param.args[0] == null) return;
-                            Object fromServiceMsg = param.args[0];
-                            if (!"com.tencent.qphone.base.remote.FromServiceMsg".equals(fromServiceMsg.getClass().getName())) return;
+            Class<?> sdkCls = XposedHelpers.findClassIfExists(msfClsName, cl);
+            if (sdkCls != null && sKickAuditedClasses.add(msfClsName)) {
+                HookUtils.hookAllMethods(sdkCls, "e", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args == null || param.args.length < 1 || param.args[0] == null) return;
+                        Object fromServiceMsg = param.args[0];
+                        if (!"com.tencent.qphone.base.remote.FromServiceMsg".equals(fromServiceMsg.getClass().getName())) return;
 
-                            try {
-                                int failCode = (Integer) XposedHelpers.callMethod(fromServiceMsg, "getBusinessFailCode");
-                                String cmd = (String) XposedHelpers.callMethod(fromServiceMsg, "getServiceCmd");
-                                boolean isKickFailCode = (failCode == 2001 || failCode == 2011 || failCode == 2012 ||
-                                                          failCode == 2013 || failCode == 2014 || failCode == 2008 ||
-                                                          failCode == 2009 || failCode == 2903 || failCode == 3003);
-                                boolean isKickCmd = "StatSvc.ReqMSFOffline".equals(cmd) ||
-                                                    "StatSvc.ReqForceOffline".equals(cmd) ||
-                                                    "MessageSvc.PushForceOffline".equals(cmd);
+                        try {
+                            int failCode = (Integer) XposedHelpers.callMethod(fromServiceMsg, "getBusinessFailCode");
+                            String cmd = (String) XposedHelpers.callMethod(fromServiceMsg, "getServiceCmd");
+                            boolean isKickFailCode = (failCode == 2001 || failCode == 2011 || failCode == 2012 ||
+                                                      failCode == 2013 || failCode == 2014 || failCode == 2008 ||
+                                                      failCode == 2009 || failCode == 2903 || failCode == 3003);
+                            boolean isKickCmd = "StatSvc.ReqMSFOffline".equals(cmd) ||
+                                                "StatSvc.ReqForceOffline".equals(cmd) ||
+                                                "MessageSvc.PushForceOffline".equals(cmd);
 
-                                if (isKickFailCode || isKickCmd) {
-                                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
-                                        msfClsName + ".e (Read-Only Audit)", fromServiceMsg,
-                                        "Client kick dispatch: cmd=" + cmd + ", failCode=" + failCode);
-                                }
-                            } catch (Throwable ignored) {}
-                        }
-                    });
-                    XposedEntry.log("[KickAudit] Installed read-only kick audit on " + msfClsName + ".e");
-                }
+                            if (isKickFailCode || isKickCmd) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                                    msfClsName + ".e (Read-Only Audit)", fromServiceMsg,
+                                    "Client kick dispatch: cmd=" + cmd + ", failCode=" + failCode);
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                });
+                XposedEntry.log("[KickAudit] Installed read-only kick audit on " + msfClsName + ".e");
             }
         }
 
         // 3. Main process UI error handler (mqq.app.MainService$MyErrorHandler)
-        if (sKickAuditedClasses.add("MyErrorHandler")) {
-            Class<?> myErrorHandlerCls = XposedHelpers.findClassIfExists("mqq.app.MainService$MyErrorHandler", cl);
-            if (myErrorHandlerCls != null) {
-                String[] kickMethods = {"onKickedAndClearToken", "onInterceptKicked", "onKickedInternal", "onUserTokenExpired"};
-                for (String mName : kickMethods) {
-                    HookUtils.hookAllMethods(myErrorHandlerCls, mName, new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            Object fromServiceMsg = (param.args != null && param.args.length > 0) ? param.args[0] : null;
-                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
-                                "MyErrorHandler." + param.method.getName() + " (Read-Only Audit)",
-                                fromServiceMsg, "UI process kick handler triggered");
-                        }
-                    });
-                }
-
-                HookUtils.hookAllMethods(myErrorHandlerCls, "popupNotification", new XC_MethodHook() {
+        Class<?> myErrorHandlerCls = XposedHelpers.findClassIfExists("mqq.app.MainService$MyErrorHandler", cl);
+        if (myErrorHandlerCls != null && sKickAuditedClasses.add("MyErrorHandler")) {
+            String[] kickMethods = {"onKickedAndClearToken", "onInterceptKicked", "onKickedInternal", "onUserTokenExpired"};
+            for (String mName : kickMethods) {
+                HookUtils.hookAllMethods(myErrorHandlerCls, mName, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        Object action = (param.args != null && param.args.length > 0) ? param.args[0] : null;
+                        Object fromServiceMsg = (param.args != null && param.args.length > 0) ? param.args[0] : null;
                         io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
-                            "MyErrorHandler.popupNotification (Read-Only Audit)",
-                            null, "Action=" + action);
+                            "MyErrorHandler." + param.method.getName() + " (Read-Only Audit)",
+                            fromServiceMsg, "UI process kick handler triggered");
                     }
                 });
-                XposedEntry.log("[KickAudit] Installed read-only kick audit on MainService$MyErrorHandler");
             }
+
+            HookUtils.hookAllMethods(myErrorHandlerCls, "popupNotification", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    Object action = (param.args != null && param.args.length > 0) ? param.args[0] : null;
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                        "MyErrorHandler.popupNotification (Read-Only Audit)",
+                        null, "Action=" + action);
+                }
+            });
+            XposedEntry.log("[KickAudit] Installed read-only kick audit on MainService$MyErrorHandler");
         }
 
         // 4. WTLogin Token Clear Audit (oicq.wlogin_sdk.request.WtloginHelper)
-        if (sKickAuditedClasses.add("WtloginHelper")) {
-            Class<?> wtHelperCls = XposedHelpers.findClassIfExists("oicq.wlogin_sdk.request.WtloginHelper", cl);
-            if (wtHelperCls != null) {
-                HookUtils.hookAllMethods(wtHelperCls, "ClearUserLoginData", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        String uin = param.args != null && param.args.length > 0 ? String.valueOf(param.args[0]) : "unknown";
-                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
-                            "WtloginHelper.ClearUserLoginData (Read-Only Audit)",
-                            null, "ClearUserLoginData called for uin=" + uin);
-                    }
-                });
+        Class<?> wtHelperCls = XposedHelpers.findClassIfExists("oicq.wlogin_sdk.request.WtloginHelper", cl);
+        if (wtHelperCls != null && sKickAuditedClasses.add("WtloginHelper")) {
+            HookUtils.hookAllMethods(wtHelperCls, "ClearUserLoginData", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    String uin = param.args != null && param.args.length > 0 ? String.valueOf(param.args[0]) : "unknown";
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                        "WtloginHelper.ClearUserLoginData (Read-Only Audit)",
+                        null, "ClearUserLoginData called for uin=" + uin);
+                }
+            });
 
-                HookUtils.hookAllMethods(wtHelperCls, "reportClearSig", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        String detail = param.args != null && param.args.length > 0 ? String.valueOf(param.args[0]) : "";
-                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
-                            "WtloginHelper.reportClearSig (Read-Only Audit)",
-                            null, "reportClearSig called: " + detail);
-                    }
-                });
-                XposedEntry.log("[KickAudit] Installed read-only kick audit on WtloginHelper");
+            HookUtils.hookAllMethods(wtHelperCls, "reportClearSig", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    String uin = param.args != null && param.args.length > 0 ? String.valueOf(param.args[0]) : "";
+                    String scene = param.args != null && param.args.length > 1 ? String.valueOf(param.args[1]) : "";
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                        "WtloginHelper.reportClearSig (Read-Only Audit)",
+                        null, "reportClearSig called: uin=" + uin + ", clearFrom=" + scene);
+                }
+            });
+            XposedEntry.log("[KickAudit] Installed read-only kick audit on WtloginHelper");
+        }
+
+        // 5. Crossplatform NewSender / kickedAndCleanTokenResp Audit
+        Class<?> cpCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.service.crossplatform.c", cl);
+        if (cpCls != null && sKickAuditedClasses.add("crossplatform.c")) {
+            for (Class<?> inner : cpCls.getDeclaredClasses()) {
+                if (Runnable.class.isAssignableFrom(inner)) {
+                    HookUtils.hookAllMethods(inner, "run", new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                            try {
+                                Object toMsg = XposedHelpers.getObjectField(param.thisObject, "a");
+                                if (toMsg != null) {
+                                    Object cmd = XposedHelpers.callMethod(toMsg, "getMsfCommand");
+                                    if (cmd != null && "_msf_kickedAndCleanTokenResp".equals(cmd.toString())) {
+                                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                                            "crossplatform.c$Runnable.run (Read-Only Audit)",
+                                            null, "_msf_kickedAndCleanTokenResp executing");
+                                    }
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    });
+                    XposedEntry.log("[KickAudit] Installed read-only kick audit on crossplatform.c inner runnable");
+                    break;
+                }
             }
         }
     }
