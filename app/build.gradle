@@ -9,7 +9,7 @@ android {
     // 签名配置从 keystore.properties 读取（该文件已 gitignore，密钥不进版本库）。
     // 复制 keystore.properties.example 为 keystore.properties 并填入自己的密钥即可。
     signingConfigs {
-        mySign {
+        release {
             def ksPropsFile = rootProject.file("keystore.properties")
             if (ksPropsFile.exists()) {
                 def ksProps = new Properties()
@@ -18,9 +18,23 @@ android {
                 storePassword ksProps['storePassword']
                 keyAlias ksProps['keyAlias']
                 keyPassword ksProps['keyPassword']
-                v1SigningEnabled true
-                v2SigningEnabled true
+            } else {
+                def localDebugKs = file("${System.env.HOME}/Work/android-sdk/debug.keystore")
+                if (localDebugKs.exists()) {
+                    storeFile localDebugKs
+                    storePassword "android"
+                    keyAlias "androiddebugkey"
+                    keyPassword "android"
+                }
             }
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 
@@ -33,13 +47,14 @@ android {
 
         externalNativeBuild {
             cmake {
+                arguments "-DANDROID_STL=c++_shared"
                 cppFlags "-std=c++17"
-                abiFilters "arm64-v8a", "armeabi-v7a"
+                abiFilters "arm64-v8a"
             }
         }
 
         ndk {
-            abiFilters "arm64-v8a", "armeabi-v7a"
+            abiFilters "arm64-v8a"
         }
     }
 
@@ -60,10 +75,7 @@ android {
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            // 有 keystore.properties 才用自定义签名；缺失则回退默认，避免构建失败
-            if (rootProject.file("keystore.properties").exists()) {
-                signingConfig signingConfigs.mySign
-            }
+            signingConfig signingConfigs.release
         }
     }
 

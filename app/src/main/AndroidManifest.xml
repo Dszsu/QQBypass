@@ -1,17 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="io.github.xalsace.qqbypass"
-    android:versionCode="80"
-    android:versionName="1.0.80">
-
-    <uses-sdk
-        android:minSdkVersion="26"
-        android:targetSdkVersion="34" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
         android:label="@string/app_name"
-        android:allowBackup="false"
-        android:extractNativeLibs="true">
+        android:allowBackup="false">
 
         <meta-data
             android:name="xposedmodule"

@@ -25,6 +25,14 @@
 #define ST_RDONLY 1
 #endif
 
+#ifndef __NR_newfstatat
+#if defined(__NR_fstatat64)
+#define __NR_newfstatat __NR_fstatat64
+#elif defined(SYS_fstatat64)
+#define __NR_newfstatat SYS_fstatat64
+#endif
+#endif
+
 namespace hook_libc {
 
 typedef int (*sigaction_func_t)(int, const struct sigaction*, struct sigaction*);

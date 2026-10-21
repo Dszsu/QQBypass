@@ -65,7 +65,7 @@ void patch_libqimei_in_memory() {
             p_openat[0] = 0x58000050; // ldr x16, #8
             p_openat[1] = 0xd61f0200; // br x16
             p_openat[2] = (uint32_t)(target & 0xFFFFFFFF);
-            p_openat[3] = (uint32_t)((target >> 32) & 0xFFFFFFFF);
+            p_openat[3] = (uint32_t)(((uint64_t)target >> 32) & 0xFFFFFFFF);
             __builtin___clear_cache((char*)p_openat, (char*)p_openat + 16);
             mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_EXEC);
             LOGI("libqimei.so: Patched inline svc openat at 0x%lx -> qimei_trampoline_openat", (unsigned long)p_openat);
@@ -83,7 +83,7 @@ void patch_libqimei_in_memory() {
             p_fstatat[0] = 0x58000050; // ldr x16, #8
             p_fstatat[1] = 0xd61f0200; // br x16
             p_fstatat[2] = (uint32_t)(target & 0xFFFFFFFF);
-            p_fstatat[3] = (uint32_t)((target >> 32) & 0xFFFFFFFF);
+            p_fstatat[3] = (uint32_t)(((uint64_t)target >> 32) & 0xFFFFFFFF);
             __builtin___clear_cache((char*)p_fstatat, (char*)p_fstatat + 16);
             mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_EXEC);
             LOGI("libqimei.so: Patched inline svc fstatat at 0x%lx -> qimei_trampoline_fstatat", (unsigned long)p_fstatat);
