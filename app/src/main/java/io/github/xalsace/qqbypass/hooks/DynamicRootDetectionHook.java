@@ -542,7 +542,7 @@ public class DynamicRootDetectionHook {
                 });
             }
         } catch (Throwable t) {
-            XposedEntry.log("[BeaconRoot] hookLateStage error: " + t.getMessage());
+            XposedEntry.logError("[BeaconRoot] hookLateStage error: " + t.getMessage(), t);
         }
     }
 

@@ -37,9 +37,14 @@ public class HookTracker {
         String name = (hookName != null && !hookName.isEmpty()) ? hookName : "unknown";
         sJavaFailedHooks.add(name);
 
-        // Hook 失败必须立即输出日志
+        // Hook 失败必须立即输出错误级别日志 (Log.e)
         String errorMsg = (t != null) ? (t.getClass().getSimpleName() + ": " + t.getMessage()) : "unknown error";
-        XposedBridge.log("[" + TAG + "] [ERROR] Java Hook 失败: " + name + " (" + errorMsg + ")");
+        String logMsg = "[" + TAG + "] [ERROR] Java Hook 失败: " + name + " (" + errorMsg + ")";
+        android.util.Log.e(TAG, logMsg, t);
+        XposedBridge.log(logMsg);
+        if (t != null) {
+            XposedBridge.log(t);
+        }
     }
 
     public static int getJavaTotal() {
@@ -108,6 +113,10 @@ public class HookTracker {
 
         String summary = sb.toString();
         XposedBridge.log(summary);
-        android.util.Log.i(TAG, summary);
+        if (jFailed > 0 || nFailed > 0) {
+            android.util.Log.e(TAG, summary);
+        } else {
+            android.util.Log.i(TAG, summary);
+        }
     }
 }

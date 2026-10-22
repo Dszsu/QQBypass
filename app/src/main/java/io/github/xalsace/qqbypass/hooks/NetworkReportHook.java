@@ -161,7 +161,7 @@ public class NetworkReportHook {
                     command, new byte[0], callbackId);
             } catch (Throwable ignored) { }
         } catch (Throwable t) {
-            XposedEntry.log("[NetworkReport] injectNativeReceive error: " + t.getMessage());
+            XposedEntry.logError("[NetworkReport] injectNativeReceive error: " + t.getMessage(), t);
         }
     }
 
@@ -241,9 +241,20 @@ public class NetworkReportHook {
                         }
                     }
 
+                    byte[] data = null;
+                    if (param.args.length >= 2 && param.args[1] instanceof byte[]) {
+                        data = (byte[]) param.args[1];
+                    }
+
                     // Always audit if report recording is enabled
                     if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("ChannelProxyExt", command, null, "callbackId=" + callbackId, 0);
+                        if (data != null && data.length > 0) {
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                "ChannelProxyExt", command, data, "callbackId=" + callbackId, 6);
+                        } else {
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport(
+                                "ChannelProxyExt", command, null, "callbackId=" + callbackId, 0);
+                        }
                     }
 
                     if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(command)) {
@@ -335,6 +346,17 @@ public class NetworkReportHook {
                         needResp = (boolean) XposedHelpers.callMethod(toServiceMsg, "isNeedResp");
                         attrs = (java.util.Map<?, ?>) XposedHelpers.callMethod(toServiceMsg, "getAttributes");
                         wup = (byte[]) XposedHelpers.callMethod(toServiceMsg, "getWupBuffer");
+                        if ((wup == null || wup.length == 0) && attrs != null) {
+                            for (Object v : attrs.values()) {
+                                if (v instanceof byte[]) {
+                                    byte[] b = (byte[]) v;
+                                    if (b.length > 0) {
+                                        wup = b;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                     } catch (Throwable ignored) {}
 
                     // Always audit outgoing SSO messages if enabled (excluding Heartbeat.Alive to prevent log flood)

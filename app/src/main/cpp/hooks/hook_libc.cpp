@@ -705,6 +705,7 @@ FILE* build_filtered_mounts() {
         "overlay", "lsposed", "lspatch",
         "moe.ono", "ono_mmkv", "lzlnb", "libcnm", "cnm0",
         "mountify", "tricky_store", "metamodule", "zygisksu",
+        "hosts", "data_mirror",
         nullptr
     };
 
@@ -742,6 +743,7 @@ FILE* build_filtered_mountinfo() {
         "overlay", "lsposed", "lspatch",
         "moe.ono", "ono_mmkv", "lzlnb", "libcnm", "cnm0",
         "mountify", "tricky_store", "metamodule", "zygisksu",
+        "hosts", "data_mirror",
         nullptr
     };
 

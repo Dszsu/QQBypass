@@ -63,7 +63,7 @@ public class QAuxvCompatHook {
             }
             hookUftwrapperBD(cl);
         } catch (Throwable t) {
-            XposedEntry.log("[" + TAG + "] hookLateStage error: " + t.getMessage());
+            XposedEntry.logError("[" + TAG + "] hookLateStage error: " + t.getMessage(), t);
         }
     }
 
@@ -239,7 +239,7 @@ public class QAuxvCompatHook {
                 }
             }
         } catch (Throwable t) {
-            XposedEntry.log("[" + TAG + "] safeRenameApkItem error: " + t.getMessage());
+            XposedEntry.logError("[" + TAG + "] safeRenameApkItem error: " + t.getMessage(), t);
         }
     }
 

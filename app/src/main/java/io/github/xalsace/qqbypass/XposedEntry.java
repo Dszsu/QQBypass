@@ -178,7 +178,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                 }
             );
         } catch (Throwable t) {
-            log("Failed to hook Application.attachBaseContext: " + t.getMessage());
+            logError("Failed to hook Application.attachBaseContext: " + t.getMessage(), t);
         }
 
         try {
@@ -197,7 +197,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                 }
             );
         } catch (Throwable t) {
-            log("Failed to hook Application.onCreate: " + t.getMessage());
+            logError("Failed to hook Application.onCreate: " + t.getMessage(), t);
         }
 
         try {
@@ -216,7 +216,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                 }
             );
         } catch (Throwable t) {
-            log("Failed to hook Service.onCreate: " + t.getMessage());
+            logError("Failed to hook Service.onCreate: " + t.getMessage(), t);
         }
 
         try {
@@ -242,7 +242,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                 }
             );
         } catch (Throwable t) {
-            log("Failed to hook BaseDexClassLoader constructors: " + t.getMessage());
+            logError("Failed to hook BaseDexClassLoader constructors: " + t.getMessage(), t);
         }
     }
 
@@ -255,11 +255,14 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         }
     }
 
+    public static void logError(String message) {
+        logError(message, null);
+    }
+
     public static void logError(String message, Throwable t) {
-        if (!HookConfig.VERBOSE_LOGGING) return;
         try {
             android.util.Log.e(TAG, message, t);
-            de.robv.android.xposed.XposedBridge.log("[" + TAG + "] " + message);
+            de.robv.android.xposed.XposedBridge.log("[" + TAG + "] [ERROR] " + message);
             if (t != null) {
                 de.robv.android.xposed.XposedBridge.log(t);
             }

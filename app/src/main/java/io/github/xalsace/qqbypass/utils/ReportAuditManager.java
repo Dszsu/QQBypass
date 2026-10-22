@@ -358,11 +358,28 @@ public class ReportAuditManager {
         return sb.length() > 0 ? sb.toString() : "root";
     }
 
+    public static boolean isBusinessOrUiEvent(String eventCode) {
+        if (eventCode == null) return false;
+        String c = eventCode.toLowerCase(Locale.ROOT);
+        return c.startsWith("qq_") || c.startsWith("dt_") || c.startsWith("ev_") ||
+               c.startsWith("em_") || c.startsWith("msg_") || c.startsWith("new_msg_") ||
+               c.startsWith("cost_tracer") || c.startsWith("apm_") ||
+               c.startsWith("markdown_") || c.startsWith("vip") || c.startsWith("fav") ||
+               c.startsWith("relation_") || c.startsWith("gm_") || c.startsWith("notification_") ||
+               c.equals("qqin") || c.equals("qqout") || c.startsWith("rqd_tfm");
+    }
+
     /**
      * Intelligent Classifier: Distinguishes critical security & environment detection telemetry
      * from high-frequency UI interaction noise (dt_clck, qq_imp, dt_pgin, etc.).
      */
     public static boolean isSecurityOrEnvironmentEvent(String channel, String eventOrCmd, Map<String, ?> params, String extraDetail) {
+        if (channel != null && channel.equals("BeaconReport")) {
+            if (isBusinessOrUiEvent(eventOrCmd) && (extraDetail == null || !extraDetail.contains("sanitized"))) {
+                return false;
+            }
+        }
+
         if (channel != null) {
             String cLower = channel.toLowerCase(Locale.ROOT);
             if (cLower.contains("kick") ||
@@ -422,10 +439,9 @@ public class ReportAuditManager {
                 eLower.contains("xposed") ||
                 eLower.contains("magisk") ||
                 eLower.contains("turing") ||
-                eLower.contains("device") ||
+                eLower.contains("device_report") ||
                 eLower.contains("qimei") ||
                 eLower.contains("oaid") ||
-                eLower.contains("guid") ||
                 eLower.contains("antitrace") ||
                 eLower.contains("verify") ||
                 eLower.contains("check") ||
@@ -470,16 +486,13 @@ public class ReportAuditManager {
                     kLower.contains("strike") ||
                     kLower.contains("check") ||
                     kLower.contains("sec_") ||
-                    kLower.contains("sig") ||
+                    kLower.equals("sig") ||
+                    kLower.contains("sig_") ||
+                    kLower.contains("_sig") ||
                     kLower.contains("clearfrom") ||
                     kLower.contains("clear_from") ||
                     kLower.contains("clearsig") ||
                     kLower.contains("qimei") ||
-                    kLower.contains("imei") ||
-                    kLower.contains("android_id") ||
-                    kLower.contains("fingerprint") ||
-                    kLower.contains("oaid") ||
-                    kLower.contains("guid") ||
                     kLower.contains("sysprop") ||
                     kLower.contains("token") ||
                     kLower.contains("probe") ||

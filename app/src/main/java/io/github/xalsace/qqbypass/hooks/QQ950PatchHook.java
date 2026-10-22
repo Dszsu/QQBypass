@@ -1166,7 +1166,7 @@ public class QQ950PatchHook {
             hookTuringBerryAndThisWithClassLoader(cl);
             hookTuringOutboundRiskMapWithClassLoader(cl);
         } catch (Throwable t) {
-            XposedEntry.log("[LateStage] hookLateStage error: " + t.getMessage());
+            XposedEntry.logError("[LateStage] hookLateStage error: " + t.getMessage(), t);
         }
     }
 
@@ -1191,7 +1191,7 @@ public class QQ950PatchHook {
                 }
             }
         } catch (Throwable t) {
-            XposedEntry.log("[FEKitCensor] Error hooking fe.utils.a in LateStage: " + t.getMessage());
+            XposedEntry.logError("[FEKitCensor] Error hooking fe.utils.a in LateStage: " + t.getMessage(), t);
         }
     }
 
@@ -2011,10 +2011,16 @@ public class QQ950PatchHook {
                         if ("est".equals(arg0)) {
                             // Do NOT wipe p.args[1] to empty! Let authentic clean estimation token pass through!
                             XposedEntry.log("[O3Patch] Preserved authentic O3Report.d ('est') token payload");
+                            if (p.args.length >= 2 && p.args[1] != null) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                    "O3Report", "est_token", String.valueOf(p.args[1]).getBytes(java.nio.charset.StandardCharsets.UTF_8), "Authentic estimation token", 4);
+                            }
                         } else {
                             final IVersionProfile profile = HostVersionManager.getCurrentProfile();
                             p.args[0] = profile.getOfficialSignatureHashUpper();
                             XposedEntry.log("[O3Patch] Normalized O3Report.d (sign_report official MD5: " + p.args[0] + ")");
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                "O3Report", "sign_report(0df00071646)", String.valueOf(p.args[0]).getBytes(java.nio.charset.StandardCharsets.UTF_8), "Normalized sign_report", 4);
                         }
                     }
                 }
@@ -2030,6 +2036,8 @@ public class QQ950PatchHook {
                         for (int i = 0; i < list.size(); i++) {
                             list.set(i, "0");
                         }
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                            "O3Report", "env_detect(00e00075618)", list.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), "Normalized env_detect", 4);
                     }
                     XposedEntry.log("[O3Patch] Normalized O3Report.b (env_detect clean values)");
                 }
@@ -2045,6 +2053,8 @@ public class QQ950PatchHook {
                         if (!list.isEmpty()) {
                             list.set(0, "0");
                         }
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                            "O3Report", "fakeLocationReport", list.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), "Normalized fakeReason=0", 4);
                     }
                     XposedEntry.log("[O3Patch] Normalized O3Report.c (fakeReason=0)");
                 }
@@ -2069,6 +2079,8 @@ public class QQ950PatchHook {
                             json.put("32", "[]");
                             json.put("14", "CK_N");
                             p.setResult(json.toString());
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                "QSec.DeviceProfile", "qsec.a.e", json.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), "Sanitized 33-item device profile JSON", 4);
                             XposedEntry.log("[O3Patch] Sanitized qqprotect.qsec.a.e device profile JSON");
                         } catch (Throwable ignored) { }
                     }
@@ -4259,7 +4271,7 @@ public class QQ950PatchHook {
                         p.setResult(certBytes);
                         XposedEntry.log("[SecUtilPatch] SecUtil.getSign -> returned official DER signature byte array");
                     } catch (Throwable t) {
-                        XposedEntry.log("[SecUtilPatch] SecUtil.getSign error: " + t.getMessage());
+                        XposedEntry.logError("[SecUtilPatch] SecUtil.getSign error: " + t.getMessage(), t);
                     }
                 }
             });
@@ -4469,21 +4481,20 @@ public class QQ950PatchHook {
         if (cl == null) return;
 
         String[] berryClasses = {
-            "com.tencent.turingfd.sdk.xq.Berry",
-            "com.tencent.tfd.sdk.wxa.Berry"
+            "com.tencent.turingfd.sdk.xq.Berry"
         };
         for (String bClsName : berryClasses) {
             Class<?> bCls = XposedHelpers.findClassIfExists(bClsName, cl);
             if (bCls != null && sHookedTuringBerryClasses.add(bClsName)) {
                 // Berry.b() -> listens to open ports/tcp -> return standard non-root "v4;-1_v6;-1"
-                HookUtils.hookAllMethods(bCls, "b", new XC_MethodHook() {
+                HookUtils.hookIfMethodExists(bCls, "b", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         param.setResult("v4;-1_v6;-1");
                     }
                 });
                 // Berry.a() -> scans /proc for suspicious non-system process names -> return empty list
-                HookUtils.hookAllMethods(bCls, "a", new XC_MethodHook() {
+                HookUtils.hookIfMethodExists(bCls, "a", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.method instanceof java.lang.reflect.Method &&
@@ -4497,14 +4508,13 @@ public class QQ950PatchHook {
         }
 
         String[] thisClasses = {
-            "com.tencent.turingfd.sdk.xq.this",
-            "com.tencent.tfd.sdk.wxa.this"
+            "com.tencent.turingfd.sdk.xq.this"
         };
         for (String tClsName : thisClasses) {
             Class<?> tCls = XposedHelpers.findClassIfExists(tClsName, cl);
             if (tCls != null && sHookedTuringBerryClasses.add(tClsName)) {
                 // this.a(Context) -> returns accessibility inspection string -> clean baseline "0,0,,0,,"
-                HookUtils.hookAllMethods(tCls, "a", new XC_MethodHook() {
+                HookUtils.hookIfMethodExists(tCls, "a", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args != null && param.args.length == 1 &&
@@ -4518,7 +4528,7 @@ public class QQ950PatchHook {
                     }
                 });
                 // this.b(Context) -> returns enabled accessibility component list -> empty list
-                HookUtils.hookAllMethods(tCls, "b", new XC_MethodHook() {
+                HookUtils.hookIfMethodExists(tCls, "b", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         param.setResult(new java.util.ArrayList<>());
