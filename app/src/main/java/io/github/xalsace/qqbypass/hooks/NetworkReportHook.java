@@ -79,33 +79,53 @@ public class NetworkReportHook {
         "trpc.atta."
     };
 
+    private static final java.util.Set<String> sHookedNetworkClasses =
+        java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
+        ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
         // Layer 0 - 3: Channel / MSF report auditing & optional interception
         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT || HookConfig.ENABLE_NETWORK_INTERCEPT) {
-            hookChannelManager(lpparam);
-            hookChannelProxyExt(lpparam);
-            hookMSFKernelBridge(lpparam);
-            hookMsfCore(lpparam);
+            hookChannelManager(cl);
+            hookChannelProxyExt(cl);
+            hookMSFKernelBridge(cl);
+            hookMsfCore(cl);
         }
 
         // Layer 4 & 5: StatisticCollector & ReportController telemetry auditing
         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-            hookStatisticCollector(lpparam);
-            hookReportController(lpparam);
+            hookStatisticCollector(cl);
+            hookReportController(cl);
             hookKickAudit(lpparam);
+            hookWlogin(cl);
+            hookTuringD1Network(cl);
         }
 
         // Inspection checks (TuringFD /proc scanner neutralization)
         hookTuringFD(lpparam);
-        hookTuringEridanus(lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader());
+        hookTuringEridanus(cl);
     }
 
     public static void hookLateStage(ClassLoader cl) {
         if (cl == null) return;
         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
             hookKickAuditInternal(cl);
+            hookWlogin(cl);
+            hookTuringD1Network(cl);
         }
         hookTuringEridanus(cl);
+
+        if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT || HookConfig.ENABLE_NETWORK_INTERCEPT) {
+            hookChannelManager(cl);
+            hookChannelProxyExt(cl);
+            hookMSFKernelBridge(cl);
+            hookMsfCore(cl);
+        }
+
+        if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
+            hookStatisticCollector(cl);
+            hookReportController(cl);
+        }
     }
 
     /**
@@ -150,8 +170,12 @@ public class NetworkReportHook {
      * Audits all outgoing FEKit / C++ security messages, and selectively neutralizes
      * when ENABLE_NETWORK_INTERCEPT is enabled.
      */
-    private static void hookChannelManager(XC_LoadPackage.LoadPackageParam lpparam) {
-        HookUtils.hookAllMethods("com.tencent.mobileqq.channel.ChannelManager", "sendMessage",
+    private static void hookChannelManager(ClassLoader cl) {
+        if (cl == null) return;
+        Class<?> clazz = XposedHelpers.findClassIfExists("com.tencent.mobileqq.channel.ChannelManager", cl);
+        if (clazz == null || !sHookedNetworkClasses.add(cl.hashCode() + "_ChannelManager")) return;
+
+        HookUtils.hookAllMethods(clazz, "sendMessage",
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -179,22 +203,25 @@ public class NetworkReportHook {
                     }
 
                     if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(command)) {
-                        injectNativeReceiveSuccess(lpparam.classLoader, command, callbackId);
+                        injectNativeReceiveSuccess(cl, command, callbackId);
                         param.setResult(null);
                         XposedEntry.log("Intercepted & fulfilled ChannelManager.sendMessage: "
                             + command + " (callbackId=" + callbackId + ")");
                     }
                 }
             });
+        XposedEntry.log("[NetworkReport] Installed ChannelManager.sendMessage hook on loader " + cl);
     }
 
     /**
      * Layer 1: ChannelProxyExt.sendMessage fallback.
      */
-    private static void hookChannelProxyExt(XC_LoadPackage.LoadPackageParam lpparam) {
-        String[] methodNames = {"sendMessageInner", "sendMessage", "send"};
-        ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
+    private static void hookChannelProxyExt(ClassLoader cl) {
+        if (cl == null) return;
+        Class<?> clazz = XposedHelpers.findClassIfExists("com.tencent.mobileqq.channel.ChannelProxyExt", cl);
+        if (clazz == null || !sHookedNetworkClasses.add(cl.hashCode() + "_ChannelProxyExt")) return;
 
+        String[] methodNames = {"sendMessageInner", "sendMessage", "send"};
         HookUtils.hookCandidateMethods("com.tencent.mobileqq.channel.ChannelProxyExt", methodNames, cl,
             new XC_MethodHook() {
                 @Override
@@ -225,21 +252,26 @@ public class NetworkReportHook {
                             return;
                         }
 
-                        injectNativeReceiveSuccess(lpparam.classLoader, command, callbackId);
+                        injectNativeReceiveSuccess(cl, command, callbackId);
                         param.setResult(null);
                         XposedEntry.log("Intercepted & fulfilled ChannelProxyExt: "
                             + command + " (callbackId=" + callbackId + ")");
                     }
                 }
             });
+        XposedEntry.log("[NetworkReport] Installed ChannelProxyExt hook on loader " + cl);
     }
 
     /**
      * Layer 2: MSFKernelBridge$CppProxy.sendPacket.
      * Low-level choke point where packets are submitted to libMSFKernel.so native engine.
      */
-    private static void hookMSFKernelBridge(XC_LoadPackage.LoadPackageParam lpparam) {
-        HookUtils.hookAllMethods("com.tencent.mobileqq.msfcore.MSFKernelBridge$CppProxy", "sendPacket",
+    private static void hookMSFKernelBridge(ClassLoader cl) {
+        if (cl == null) return;
+        Class<?> clazz = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msfcore.MSFKernelBridge$CppProxy", cl);
+        if (clazz == null || !sHookedNetworkClasses.add(cl.hashCode() + "_MSFKernelBridge")) return;
+
+        HookUtils.hookAllMethods(clazz, "sendPacket",
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -267,14 +299,19 @@ public class NetworkReportHook {
                     } catch (Throwable ignored) { }
                 }
             });
+        XposedEntry.log("[NetworkReport] Installed MSFKernelBridge hook on loader " + cl);
     }
 
     /**
      * Layer 3: MsfCore.sendSsoMsg.
      * Service layer SSO dispatcher. Audits all SSO outgoing traffic and optional interception.
      */
-    private static void hookMsfCore(XC_LoadPackage.LoadPackageParam lpparam) {
-        HookUtils.hookAllMethods("com.tencent.mobileqq.msf.core.MsfCore", "sendSsoMsg",
+    private static void hookMsfCore(ClassLoader cl) {
+        if (cl == null) return;
+        Class<?> clazz = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.MsfCore", cl);
+        if (clazz == null || !sHookedNetworkClasses.add(cl.hashCode() + "_MsfCore")) return;
+
+        HookUtils.hookAllMethods(clazz, "sendSsoMsg",
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -291,19 +328,18 @@ public class NetworkReportHook {
                     int ssoSeq = 0;
                     boolean needResp = false;
                     java.util.Map<?, ?> attrs = null;
-                    int bufLen = 0;
+                    byte[] wup = null;
                     try {
                         uin = (String) XposedHelpers.callMethod(toServiceMsg, "getUin");
                         ssoSeq = (int) XposedHelpers.callMethod(toServiceMsg, "getRequestSsoSeq");
                         needResp = (boolean) XposedHelpers.callMethod(toServiceMsg, "isNeedResp");
                         attrs = (java.util.Map<?, ?>) XposedHelpers.callMethod(toServiceMsg, "getAttributes");
-                        byte[] wup = (byte[]) XposedHelpers.callMethod(toServiceMsg, "getWupBuffer");
-                        if (wup != null) bufLen = wup.length;
+                        wup = (byte[]) XposedHelpers.callMethod(toServiceMsg, "getWupBuffer");
                     } catch (Throwable ignored) {}
 
                     // Always audit outgoing SSO messages if enabled (excluding Heartbeat.Alive to prevent log flood)
                     if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT && command != null && !command.startsWith("Heartbeat.")) {
-                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordMsfSso(command, uin, ssoSeq, needResp, attrs, bufLen);
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordMsfSso(command, uin, ssoSeq, needResp, attrs, wup);
                     }
 
                     if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(command)) {
@@ -312,7 +348,7 @@ public class NetworkReportHook {
                             Object cbObj = XposedHelpers.callMethod(toServiceMsg, "getAttribute", "attr_key_security_callback_id");
                             if (cbObj instanceof Number) {
                                 long cbId = ((Number) cbObj).longValue();
-                                injectNativeReceiveSuccess(lpparam.classLoader, command, cbId);
+                                injectNativeReceiveSuccess(cl, command, cbId);
                             }
                         } catch (Throwable ignored) { }
 
@@ -324,7 +360,7 @@ public class NetworkReportHook {
                                 Object msfCmd = XposedHelpers.callMethod(toServiceMsg, "getMsfCommand");
 
                                 Class<?> fromMsgClass = XposedHelpers.findClassIfExists(
-                                    "com.tencent.qphone.base.remote.FromServiceMsg", lpparam.classLoader);
+                                    "com.tencent.qphone.base.remote.FromServiceMsg", cl);
                                 if (fromMsgClass != null) {
                                     Object fromMsg = XposedHelpers.newInstance(fromMsgClass, uin != null ? uin : "0", command);
                                     XposedHelpers.callMethod(fromMsg, "setMsgSuccess");
@@ -356,14 +392,18 @@ public class NetworkReportHook {
                     }
                 }
             });
+        XposedEntry.log("[NetworkReport] Installed MsfCore.sendSsoMsg hook on loader " + cl);
     }
 
     /**
      * Layer 4: StatisticCollector performance & error report auditing.
      */
-    private static void hookStatisticCollector(XC_LoadPackage.LoadPackageParam lpparam) {
-        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
-        HookUtils.hookAllMethods("com.tencent.mobileqq.statistics.StatisticCollector", "collectPerformance",
+    private static void hookStatisticCollector(ClassLoader cl) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT || cl == null) return;
+        Class<?> clazz = XposedHelpers.findClassIfExists("com.tencent.mobileqq.statistics.StatisticCollector", cl);
+        if (clazz == null || !sHookedNetworkClasses.add(cl.hashCode() + "_StatisticCollector")) return;
+
+        HookUtils.hookAllMethods(clazz, "collectPerformance",
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -379,14 +419,18 @@ public class NetworkReportHook {
                     io.github.xalsace.qqbypass.utils.ReportAuditManager.recordStatisticCollector(uin, tagName, success, duration, size, params, res);
                 }
             });
+        XposedEntry.log("[NetworkReport] Installed StatisticCollector hook on loader " + cl);
     }
 
     /**
      * Layer 5: ReportController business & security reporting auditing.
      */
-    private static void hookReportController(XC_LoadPackage.LoadPackageParam lpparam) {
-        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
-        HookUtils.hookAllMethods("com.tencent.mobileqq.statistics.ReportController", "b",
+    private static void hookReportController(ClassLoader cl) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT || cl == null) return;
+        Class<?> clazz = XposedHelpers.findClassIfExists("com.tencent.mobileqq.statistics.ReportController", cl);
+        if (clazz == null || !sHookedNetworkClasses.add(cl.hashCode() + "_ReportController")) return;
+
+        HookUtils.hookAllMethods(clazz, "b",
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -403,6 +447,40 @@ public class NetworkReportHook {
                     io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReportController(tag, subTag, opType, opName, res, r2, r3, r4, r5);
                 }
             });
+        XposedEntry.log("[NetworkReport] Installed ReportController hook on loader " + cl);
+    }
+
+    /**
+     * Layer 6: Outbound TuringFD Network Dispatcher (d1.a).
+     * Audits raw packed Turing packets dispatched over network sockets.
+     */
+    private static void hookTuringD1Network(ClassLoader cl) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT || cl == null) return;
+        String[] d1Classes = {
+            "com.tencent.turingfd.sdk.xq.d1",
+            "com.tencent.tfd.sdk.wxa.d1"
+        };
+        for (String d1ClsName : d1Classes) {
+            Class<?> d1Cls = XposedHelpers.findClassIfExists(d1ClsName, cl);
+            if (d1Cls != null && sHookedNetworkClasses.add(cl.hashCode() + "_" + d1ClsName)) {
+                HookUtils.hookAllMethods(d1Cls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length >= 4 && param.args[3] instanceof byte[]) {
+                            int cmd1 = param.args[0] instanceof Number ? ((Number) param.args[0]).intValue() : 0;
+                            int cmd2 = param.args[1] instanceof Number ? ((Number) param.args[1]).intValue() : 0;
+                            int cmd3 = param.args[2] instanceof Number ? ((Number) param.args[2]).intValue() : 0;
+                            byte[] bArr = (byte[]) param.args[3];
+                            long timeout = param.args.length >= 5 && param.args[4] instanceof Number ? ((Number) param.args[4]).longValue() : 0L;
+                            String extra = "cmd=" + cmd1 + "/" + cmd2 + "/" + cmd3 + ", timeout=" + timeout + "ms";
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                "TuringFD.Network", "d1.a", bArr, extra, 6);
+                        }
+                    }
+                });
+                XposedEntry.log("[NetworkReport] Hooked TuringFD outbound network dispatcher on " + d1ClsName);
+            }
+        }
     }
 
     /**
@@ -545,14 +623,18 @@ public class NetworkReportHook {
         }
     }
 
-    private static void hookWlogin(XC_LoadPackage.LoadPackageParam lpparam) {
-        HookUtils.hookAllMethods("oicq.wlogin_sdk.request.w", "h",
-            new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    XposedEntry.log("Intercepted Wlogin device fingerprint");
-                }
-            });
+    private static void hookWlogin(ClassLoader cl) {
+        if (cl == null) return;
+        Class<?> wCls = XposedHelpers.findClassIfExists("oicq.wlogin_sdk.request.w", cl);
+        if (wCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_wlogin_w")) {
+            HookUtils.hookAllMethods(wCls, "h",
+                new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        XposedEntry.log("[Wlogin] Intercepted Wlogin device fingerprint on " + wCls.getName());
+                    }
+                });
+        }
     }
 
     private static final java.util.Set<String> sKickAuditedClasses =

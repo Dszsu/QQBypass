@@ -19,6 +19,7 @@ import java.io.RandomAccessFile;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import io.github.xalsace.qqbypass.XposedEntry;
 import io.github.xalsace.qqbypass.config.HookConfig;
@@ -171,6 +172,9 @@ public class QQ950PatchHook {
 
         // Tier 18: TuringFD Port / Process & Accessibility Neutralization (Berry & this)
         hookTuringBerryAndThis(lpparam, cl);
+
+        // Tier 19: Outbound TuringFD Risk Dictionary (map2) Deep-Audit
+        hookTuringOutboundRiskMap(lpparam, cl);
     }
 
     // ==================== Tier 1: void-return, crash-safe ====================
@@ -1160,6 +1164,7 @@ public class QQ950PatchHook {
             hookFeUtilsAWithClassLoader(cl);
             hookQQ9375DefensesWithClassLoader(cl);
             hookTuringBerryAndThisWithClassLoader(cl);
+            hookTuringOutboundRiskMapWithClassLoader(cl);
         } catch (Throwable t) {
             XposedEntry.log("[LateStage] hookLateStage error: " + t.getMessage());
         }
@@ -4520,6 +4525,100 @@ public class QQ950PatchHook {
                     }
                 });
                 XposedEntry.log("[TuringPatch] Sanitized accessibility inspectors on " + tClsName);
+            }
+        }
+    }
+
+    private static final java.util.Set<String> sHookedTuringMapClasses =
+        java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * Tier 19: Intercept and Deep-Audit Outbound TuringFD Risk Dictionary (map2).
+     * Intercepts the entire compiled risk telemetry map (keys: 272 ports, 268/256 proc scan,
+     * 2021 accessibility, 2019 mPM, 289 classloader, 291 USB, 271 HarmonyOS, 285 adb/debug,
+     * 282 SIM, 284 device, 4 timing benchmarks, etc.) right before native packaging in TNative$aa!
+     */
+    public static void hookTuringOutboundRiskMap(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
+        if (cl == null) cl = HookConfig.getClassLoader();
+        hookTuringOutboundRiskMapWithClassLoader(cl);
+    }
+
+    public static void hookTuringOutboundRiskMapWithClassLoader(ClassLoader cl) {
+        if (cl == null) return;
+
+        String[] tnativeClasses = {
+            "com.tencent.turingfd.sdk.xq.TNative$aa",
+            "com.tencent.tfd.sdk.wxa.TNative$aa",
+            "com.tencent.turingfd.sdk.xq.TNative",
+            "com.tencent.tfd.sdk.wxa.TNative"
+        };
+
+        for (String clsName : tnativeClasses) {
+            Class<?> clazz = XposedHelpers.findClassIfExists(clsName, cl);
+            if (clazz != null && sHookedTuringMapClasses.add(cl.hashCode() + "_" + clsName)) {
+                for (Method method : clazz.getDeclaredMethods()) {
+                    Class<?>[] pTypes = method.getParameterTypes();
+                    boolean hasMap = false;
+                    for (Class<?> pt : pTypes) {
+                        if (Map.class.isAssignableFrom(pt)) {
+                            hasMap = true;
+                            break;
+                        }
+                    }
+
+                    if (hasMap) {
+                        try {
+                            HookUtils.hookMethod(method, new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    if (param.args == null) return;
+                                    for (Object arg : param.args) {
+                                        if (arg instanceof Map) {
+                                            Map<?, ?> map = (Map<?, ?>) arg;
+                                            if (!map.isEmpty()) {
+                                                String target = (param.thisObject != null ?
+                                                    param.thisObject.getClass().getSimpleName() :
+                                                    param.method.getDeclaringClass().getSimpleName())
+                                                    + "." + param.method.getName();
+                                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskMap(
+                                                    "TuringFD", target, map, 6);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                @Override
+                                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                                    Object result = param.getResult();
+                                    if (result instanceof android.util.SparseArray) {
+                                        android.util.SparseArray<?> sa = (android.util.SparseArray<?>) result;
+                                        byte[] packedBytes = null;
+                                        int retCode = 0;
+                                        for (int i = 0; i < sa.size(); i++) {
+                                            int k = sa.keyAt(i);
+                                            Object v = sa.valueAt(i);
+                                            if (k == 0 && v instanceof Number) {
+                                                retCode = ((Number) v).intValue();
+                                            } else if (v instanceof byte[]) {
+                                                packedBytes = (byte[]) v;
+                                            }
+                                        }
+                                        if (packedBytes != null && packedBytes.length > 0) {
+                                            String detail = "retCode=" + retCode + ", sparseArrayEntries=" + sa.size();
+                                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                                "TuringFD.NativePack",
+                                                param.method.getName() + " -> retCode=" + retCode,
+                                                packedBytes, detail, 4);
+                                        }
+                                    }
+                                }
+                            });
+                        } catch (Throwable t) {
+                            XposedEntry.log("[TuringPatch] Failed to hook " + clsName + "." + method.getName() + ": " + t.getMessage());
+                        }
+                    }
+                }
+                XposedEntry.log("[TuringPatch] Installed outbound risk map hooks on " + clsName);
             }
         }
     }

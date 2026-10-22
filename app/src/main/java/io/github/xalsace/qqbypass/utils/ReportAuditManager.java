@@ -373,7 +373,14 @@ public class ReportAuditManager {
                 cLower.contains("protobuf") ||
                 cLower.contains("exception") ||
                 cLower.contains("dtc") ||
-                cLower.contains("turing")) {
+                cLower.contains("turing") ||
+                cLower.contains("channelmanager") ||
+                cLower.contains("channelproxy") ||
+                cLower.contains("outbound") ||
+                cLower.contains("fekit") ||
+                cLower.contains("wlogin") ||
+                cLower.contains("safecenter") ||
+                cLower.contains("risk")) {
                 return true;
             }
         }
@@ -386,7 +393,10 @@ public class ReportAuditManager {
                 edLower.contains("kick") ||
                 edLower.contains("strike") ||
                 edLower.contains("failcode") ||
-                edLower.contains("intercepted")) {
+                edLower.contains("intercepted") ||
+                edLower.contains("risk") ||
+                edLower.contains("outbound") ||
+                edLower.contains("payload")) {
                 return true;
             }
         }
@@ -423,7 +433,23 @@ public class ReportAuditManager {
                 eLower.contains("patch") ||
                 eLower.contains("intchk") ||
                 eLower.contains("oidbsvc.0xd79") ||
-                eLower.contains("0ac00056535")) {
+                eLower.contains("0ac00056535") ||
+                eLower.contains("0df00071646") ||
+                eLower.contains("trpc.login.") ||
+                eLower.contains("trpc.o3.") ||
+                eLower.contains("trpc.qq_security.") ||
+                eLower.contains("trpc.qsec.") ||
+                eLower.contains("trpc.device.") ||
+                eLower.contains("trpc.safe.") ||
+                eLower.contains("trpc.atta.") ||
+                eLower.contains("seccheck.") ||
+                eLower.contains("devlockauth.") ||
+                eLower.contains("qqprotect.") ||
+                eLower.contains("load_result_patch_loader_fail") ||
+                eLower.contains("safecenter") ||
+                eLower.contains("clientinfo") ||
+                eLower.contains("secverifyapk") ||
+                eLower.contains("mobileqqdetect")) {
                 return true;
             }
         }
@@ -447,7 +473,17 @@ public class ReportAuditManager {
                     kLower.contains("sig") ||
                     kLower.contains("clearfrom") ||
                     kLower.contains("clear_from") ||
-                    kLower.contains("clearsig")) {
+                    kLower.contains("clearsig") ||
+                    kLower.contains("qimei") ||
+                    kLower.contains("imei") ||
+                    kLower.contains("android_id") ||
+                    kLower.contains("fingerprint") ||
+                    kLower.contains("oaid") ||
+                    kLower.contains("guid") ||
+                    kLower.contains("sysprop") ||
+                    kLower.contains("token") ||
+                    kLower.contains("probe") ||
+                    kLower.contains("turing")) {
                     return true;
                 }
             }
@@ -593,23 +629,313 @@ public class ReportAuditManager {
     }
 
     /**
+     * Comprehensive Turing / Device Risk Check Key Definitions.
+     * Maps internal numeric / string keys to precise security diagnostic descriptions.
+     */
+    public static String getTuringKeyDescription(String key) {
+        if (key == null) return "Unknown Key";
+        switch (key) {
+            case "1": return "SDK Version / Type";
+            case "4": return "Crux Execution Timing Benchmarks";
+            case "205": return "Caelum Hardware Specs";
+            case "207": return "T1 Client Information";
+            case "210": return "Timing Profiler (C/T/LT Timestamps)";
+            case "240": return "N1 Network / Device Fingerprint";
+            case "250": return "Core Device Architecture ID";
+            case "251": return "Dual App / Multi-User Flag (Binary)";
+            case "252": return "Virtual Environment / Container Check";
+            case "253": return "Device Hardware Spec D (Kiwifruit.d)";
+            case "254": return "Device Hardware Spec B (Kiwifruit.b)";
+            case "255": return "Device Spec Public (Screen/DPI)";
+            case "256": return "Proc Scanner Detailed Process Name";
+            case "257": return "E-Tag Environment Info";
+            case "259": return "ZA Environment Integrity Flag";
+            case "264": return "CPU Info & Native Architecture (Auriga)";
+            case "266": return "Persistent Device Storage Cache 901";
+            case "267": return "Sensor & Motion Hardware Scan";
+            case "268": return "Proc Scanner Suspicious Process List";
+            case "269": return "A7 Sensor Hardware Flag";
+            case "270": return "OS Flavor & HarmonyOS Detection (Kiwifruit.a)";
+            case "272": return "Open Ports Scanner (/proc/net/tcp)";
+            case "273": return "Tough Hardware Integrity Key";
+            case "274": return "IMEI Telephony Fingerprint";
+            case "275": return "Android ID Device Identifier";
+            case "276": return "IMSI Subscriber Identifier";
+            case "279": return "Mounts & Virtual Filesystem Scan";
+            case "280": return "SELinux & Root Detection State";
+            case "281": return "Device Uptime & Boot Offset";
+            case "282": return "SIM Card Status (Kiwifruit.c)";
+            case "283": return "B Info Hardware String";
+            case "284": return "Device Model & Brand Fingerprint";
+            case "285": return "ADB / USB Debugging Status";
+            case "286": return "System Timezone ID";
+            case "287": return "Telephony SIM Operator Code";
+            case "288": return "Multi-User / Dual App User ID Value";
+            case "289": return "ClassLoader Hierarchy & Dynamic Hook Scan";
+            case "290": return "Audio Mode Status";
+            case "291": return "USB Configuration State (adb/mtp)";
+            case "292": return "Android 15 API Compatibility Check";
+            case "293": return "Android 14 API Compatibility Check";
+            case "297": return "A11 System Properties Flag";
+            case "303": return "Persistent Device Cache Tag 703";
+            case "308": return "Marc Sensor State Flag";
+            case "309": return "Peanut Device Fingerprint";
+            case "402": return "Turing SDK Client ID";
+            case "406": return "Core Device Hash Signature";
+            case "2001": return "E2 Package Context Integrity Hash";
+            case "2005": return "UIN State Flag";
+            case "2013": return "Context Signature & APK Cert Verification";
+            case "2016": return "System Properties & Prop Scan";
+            case "2017": return "A2 Prop Fingerprint";
+            case "2018": return "Process UID (Process.myUid())";
+            case "2019": return "PackageManager & Installed Apps Scan (mPM)";
+            case "2021": return "Accessibility Services & TalkBack List";
+            case "2022": return "A10 Prop Fingerprint";
+            case "2024": return "A13 System Flag";
+            case "2029": return "String Signature Flag";
+            default: return "Risk Item " + key;
+        }
+    }
+
+    /**
+     * Standard 16-bytes per line hex dump with byte offsets and printable ASCII sidebar.
+     */
+    public static String formatHexDump(byte[] data, int maxLen) {
+        if (data == null || data.length == 0) return "    (empty payload)\n";
+        int len = Math.min(data.length, maxLen);
+        StringBuilder sb = new StringBuilder(len * 5);
+        for (int i = 0; i < len; i += 16) {
+            sb.append(String.format(Locale.US, "    %08x: ", i));
+            for (int j = 0; j < 16; j++) {
+                if (i + j < len) {
+                    sb.append(String.format(Locale.US, "%02x ", data[i + j]));
+                } else {
+                    sb.append("   ");
+                }
+                if (j == 7) sb.append(" ");
+            }
+            sb.append(" |");
+            for (int j = 0; j < 16 && (i + j) < len; j++) {
+                byte b = data[i + j];
+                if (b >= 32 && b <= 126) {
+                    sb.append((char) b);
+                } else {
+                    sb.append('.');
+                }
+            }
+            sb.append("|\n");
+        }
+        if (data.length > maxLen) {
+            sb.append("    ... (truncated, total ").append(data.length).append(" bytes)\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Extracts printable strings with exact byte offsets.
+     */
+    public static List<String> extractPrintableStringsWithOffsets(byte[] data, int minLen, int maxCount) {
+        List<String> list = new ArrayList<>();
+        if (data == null || data.length == 0) return list;
+
+        int start = -1;
+        for (int i = 0; i < data.length && list.size() < maxCount; i++) {
+            byte b = data[i];
+            boolean isPrintable = (b >= 32 && b <= 126);
+            if (isPrintable) {
+                if (start == -1) start = i;
+            } else {
+                if (start != -1) {
+                    int len = i - start;
+                    if (len >= minLen) {
+                        try {
+                            String s = new String(data, start, len, "UTF-8").trim();
+                            if (s.length() >= minLen) {
+                                list.add(String.format(Locale.US, "[0x%04x] \"%s\"", start, s));
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                    start = -1;
+                }
+            }
+        }
+        if (start != -1 && (data.length - start) >= minLen && list.size() < maxCount) {
+            try {
+                String s = new String(data, start, data.length - start, "UTF-8").trim();
+                if (s.length() >= minLen) {
+                    list.add(String.format(Locale.US, "[0x%04x] \"%s\"", start, s));
+                }
+            } catch (Throwable ignored) {}
+        }
+        return list;
+    }
+
+    /**
+     * Extracts JSON block if embedded in printable strings.
+     */
+    public static String tryExtractJson(List<String> printableWithOffsets) {
+        if (printableWithOffsets == null) return null;
+        for (String item : printableWithOffsets) {
+            int quoteIdx = item.indexOf('"');
+            if (quoteIdx != -1 && item.endsWith("\"")) {
+                String content = item.substring(quoteIdx + 1, item.length() - 1);
+                if (content.startsWith("{") && content.endsWith("}") && content.length() > 5) {
+                    return content;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Dedicated High-Visibility Outbound Risk Payload Auditor.
+     * Prominently audits all environment telemetry, device fingerprints, and security payloads
+     * dispatched by QQ to Tencent servers (ChannelManager, MsfCore SSO, TuringFD, Dtc, Beacon).
+     */
+    public static void recordOutboundRiskPayload(String channel, String cmd, byte[] payload, String extraInfo, int stackDepth) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
+        try {
+            String time = getCurrentTimestamp();
+            int pid = Process.myPid();
+            int tid = Process.myTid();
+            String threadName = Thread.currentThread().getName();
+
+            int payloadLen = payload != null ? payload.length : 0;
+            StringBuilder sb = new StringBuilder(1024);
+            sb.append("\n==================== [OUTBOUND RISK TELEMETRY SENT TO SERVER] ====================\n")
+              .append("Time: ").append(time).append("\n")
+              .append("Process: ").append(sProcessName).append(" (pid:").append(pid).append(", tid:").append(tid).append(", thread:").append(threadName).append(")\n")
+              .append("Channel: ").append(channel).append("\n")
+              .append("Target Command / Event: ").append(cmd != null ? cmd : "unknown").append("\n")
+              .append("Payload Size: ").append(payloadLen).append(" bytes\n");
+
+            if (extraInfo != null && !extraInfo.isEmpty()) {
+                sb.append("Extra Information: ").append(extraInfo).append("\n");
+            }
+
+            if (payload != null && payloadLen > 0) {
+                List<String> printable = extractPrintableStringsWithOffsets(payload, 3, 50);
+                if (!printable.isEmpty()) {
+                    sb.append("Extracted Printable Strings (").append(printable.size()).append(" entries):\n");
+                    for (String str : printable) {
+                        sb.append("    ").append(str).append("\n");
+                    }
+                }
+
+                String jsonStr = tryExtractJson(printable);
+                if (jsonStr != null) {
+                    sb.append("Decoded JSON Data:\n    ").append(jsonStr).append("\n");
+                }
+
+                sb.append("Hex Dump Preview (up to 256 bytes):\n");
+                sb.append(formatHexDump(payload, 256));
+            }
+
+            if (stackDepth > 0) {
+                sb.append("Caller Stack Trace:\n");
+                StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+                if (stack != null) {
+                    int count = 0;
+                    for (StackTraceElement ste : stack) {
+                        String cn = ste.getClassName();
+                        if (cn.contains("ReportAuditManager") || cn.contains("java.lang.Thread")) continue;
+                        sb.append("    at ").append(ste.toString()).append("\n");
+                        count++;
+                        if (count >= stackDepth) break;
+                    }
+                }
+            }
+            sb.append("==================================================================================\n");
+
+            String fullLog = sb.toString();
+            sLogQueue.offer(new AuditEntry(fullLog, true, false));
+            Log.w(TAG, fullLog);
+            XposedBridge.log(fullLog);
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in recordOutboundRiskPayload: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Dedicated High-Visibility Outbound Turing / Device Risk Dictionary Auditor.
+     * Formats and logs the complete key-value inspection map compiled by TuringFD / QSec
+     * before native packaging and transmission to Tencent risk servers.
+     */
+    public static void recordOutboundRiskMap(String channel, String operation, Map<?, ?> riskMap, int stackDepth) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
+        try {
+            String time = getCurrentTimestamp();
+            int pid = Process.myPid();
+            int tid = Process.myTid();
+            String threadName = Thread.currentThread().getName();
+
+            StringBuilder sb = new StringBuilder(1024);
+            sb.append("\n==================== [OUTBOUND RISK TELEMETRY SENT TO SERVER] ====================\n")
+              .append("Time: ").append(time).append("\n")
+              .append("Process: ").append(sProcessName).append(" (pid:").append(pid).append(", tid:").append(tid).append(", thread:").append(threadName).append(")\n")
+              .append("Channel: ").append(channel).append("\n")
+              .append("Target Operation: ").append(operation).append("\n");
+
+            if (riskMap != null) {
+                sb.append("Payload Dictionary: ").append(riskMap.size()).append(" risk-control inspection items\n")
+                  .append("----------------------------------------------------------------------------------\n");
+                for (Map.Entry<?, ?> entry : riskMap.entrySet()) {
+                    String k = String.valueOf(entry.getKey());
+                    Object v = entry.getValue();
+                    String desc = getTuringKeyDescription(k);
+                    sb.append(String.format(Locale.US, "  [Key %-5s] [%-42s] = ", k, desc));
+                    if (v == null) {
+                        sb.append("null\n");
+                    } else if (v instanceof String) {
+                        String s = (String) v;
+                        if (s.length() > 300) {
+                            sb.append("\"").append(s.substring(0, 300)).append("...\" (len=").append(s.length()).append(")\n");
+                        } else {
+                            sb.append("\"").append(s).append("\"\n");
+                        }
+                    } else {
+                        sb.append(v.toString()).append("\n");
+                    }
+                }
+            } else {
+                sb.append("Payload Dictionary: null\n");
+            }
+
+            if (stackDepth > 0) {
+                sb.append("Caller Stack Trace:\n");
+                StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+                if (stack != null) {
+                    int count = 0;
+                    for (StackTraceElement ste : stack) {
+                        String cn = ste.getClassName();
+                        if (cn.contains("ReportAuditManager") || cn.contains("java.lang.Thread")) continue;
+                        sb.append("    at ").append(ste.toString()).append("\n");
+                        count++;
+                        if (count >= stackDepth) break;
+                    }
+                }
+            }
+            sb.append("==================================================================================\n");
+
+            String fullLog = sb.toString();
+            sLogQueue.offer(new AuditEntry(fullLog, true, false));
+            Log.w(TAG, fullLog);
+            XposedBridge.log(fullLog);
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in recordOutboundRiskMap: " + t.getMessage());
+        }
+    }
+
+    /**
      * Specific audit for ChannelManager / SSO.
      */
     public static void recordChannelManager(String cmd, long callbackId, int dataLen, byte[] data) {
-        StringBuilder detail = new StringBuilder();
-        detail.append("callbackId=").append(callbackId).append(", dataLen=").append(dataLen);
-        if (data != null && data.length > 0 && data.length <= 2048) {
-            List<String> printable = extractPrintableStrings(data, 4);
-            if (!printable.isEmpty()) {
-                detail.append(", strings=[");
-                for (int i = 0; i < Math.min(printable.size(), 4); i++) {
-                    if (i > 0) detail.append(", ");
-                    detail.append("\"").append(printable.get(i)).append("\"");
-                }
-                detail.append("]");
-            }
+        if (data != null && data.length > 0) {
+            recordOutboundRiskPayload("ChannelManager", cmd, data, "callbackId=" + callbackId + ", dataLen=" + dataLen, 6);
+        } else {
+            String detail = "callbackId=" + callbackId + ", dataLen=" + dataLen;
+            recordReport("ChannelManager", cmd, null, detail, 4);
         }
-        recordReport("ChannelManager", cmd, null, detail.toString(), 0);
     }
 
     public static void recordChannelManager(String cmd, long callbackId, int dataLen) {
@@ -619,27 +945,42 @@ public class ReportAuditManager {
     /**
      * Specific audit for MsfCore SSO.
      */
-    public static void recordMsfSso(String cmd, String uin, int ssoSeq, boolean needResp, Map<?, ?> attributes, int bufLen) {
-        StringBuilder detail = new StringBuilder();
-        detail.append("uin=").append(uin).append(", seq=").append(ssoSeq).append(", needResp=").append(needResp).append(", len=").append(bufLen);
-        if (attributes != null && !attributes.isEmpty()) {
-            detail.append(", attrs={");
-            boolean first = true;
-            for (Map.Entry<?, ?> entry : attributes.entrySet()) {
-                String k = String.valueOf(entry.getKey());
-                if (k.contains("security") || k.contains("retry") || k.contains("cmd") || k.contains("seq") || k.contains("token")) {
-                    if (!first) detail.append(", ");
-                    first = false;
-                    detail.append(k).append("=").append(entry.getValue());
-                }
+    public static void recordMsfSso(String cmd, String uin, int ssoSeq, boolean needResp, Map<?, ?> attributes, byte[] wupBuf) {
+        int bufLen = wupBuf != null ? wupBuf.length : 0;
+        boolean isSecurity = isSecurityOrEnvironmentEvent("MsfCore", cmd, null, null);
+        if (isSecurity && wupBuf != null && bufLen > 0) {
+            StringBuilder extra = new StringBuilder();
+            extra.append("uin=").append(uin).append(", seq=").append(ssoSeq).append(", needResp=").append(needResp);
+            if (attributes != null && !attributes.isEmpty()) {
+                extra.append(", attrs=").append(attributes.toString());
             }
-            detail.append("}");
+            recordOutboundRiskPayload("MsfCore", cmd, wupBuf, extra.toString(), 6);
+        } else {
+            StringBuilder detail = new StringBuilder();
+            detail.append("uin=").append(uin).append(", seq=").append(ssoSeq).append(", needResp=").append(needResp).append(", len=").append(bufLen);
+            if (attributes != null && !attributes.isEmpty()) {
+                detail.append(", attrs={");
+                boolean first = true;
+                for (Map.Entry<?, ?> entry : attributes.entrySet()) {
+                    String k = String.valueOf(entry.getKey());
+                    if (k.contains("security") || k.contains("retry") || k.contains("cmd") || k.contains("seq") || k.contains("token")) {
+                        if (!first) detail.append(", ");
+                        first = false;
+                        detail.append(k).append("=").append(entry.getValue());
+                    }
+                }
+                detail.append("}");
+            }
+            recordReport("MsfCore", cmd, null, detail.toString(), isSecurity ? 4 : 0);
         }
-        recordReport("MsfCore", cmd, null, detail.toString(), 0);
+    }
+
+    public static void recordMsfSso(String cmd, String uin, int ssoSeq, boolean needResp, Map<?, ?> attributes, int bufLen) {
+        recordMsfSso(cmd, uin, ssoSeq, needResp, attributes, (byte[]) null);
     }
 
     public static void recordMsfSso(String cmd, String uin, int ssoSeq, boolean needResp) {
-        recordMsfSso(cmd, uin, ssoSeq, needResp, null, 0);
+        recordMsfSso(cmd, uin, ssoSeq, needResp, null, (byte[]) null);
     }
 
     /**
