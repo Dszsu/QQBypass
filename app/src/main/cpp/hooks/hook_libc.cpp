@@ -285,12 +285,12 @@ bool is_sensitive_path(const char* path) {
         "/system/bin/install-recovery.sh", "/system/etc/install-recovery.sh",
         "/system/bin/debuggerd", "/system/bin/debuggerd64", "/system/bin/ddexe",
         "/sys/fs/selinux/enforce",
-        "dexkit", "libdexkit", "flatbuffers", "sandhook", "yahfa",
+        "dexkit", "libdexkit", "sandhook", "yahfa",
         "libepic", "libpine", "taichi", "liblspd", "lsposed", "edxposed",
         "qqbypass", "libnative-bypass", "libbytehook", "xalsace",
         "zygisk_lsposed", "zygisksu",
         "top.nkbe.npatch", "npatch", "org.lsposed.manager", "lspilot",
-        "bytehook", "native-bypass", "apatch", "fusehide", "simplehook",
+        "bytehook", "native-bypass", "libapatch", "/apatch/", "apatchd", "fusehide", "simplehook",
         "libchecker", "shizuku", "vtools", "bin.mt", "bin.mt.plus", "bin.mt.termex",
         "thanos", "termux", "duckusb",
         "me.weishu.kernelsu", "me.bmax.apatch", "eu.chainfire.supersu",
@@ -298,9 +298,9 @@ bool is_sensitive_path(const char* path) {
         "com.kingo.root", "com.smedialink.oneclickroot", "com.zhiqupk.root.global",
         "com.shuame.rootgenius", "com.applisto.appcloner", ".android_system_config.prop",
         "ku.sud", "shuamesu", "libbugly_shadowhook", "libshadowhook_nothing",
-        "busybox", "sudo", "bdsu", "sutemp", "/.su", "com.topjohnwu.magisk", "topjohnwu",
+        "busybox", "sudo", "bdsu", "sutemp", "/.su/", "com.topjohnwu.magisk", "topjohnwu",
         "libqqPerfNativeTool", "libandroid_desensitization", "libshadowhook",
-        "init.svc.microvirtd", "config.prop", "/.android",
+        "init.svc.microvirtd",
         "/data/data/io.github.qauxv", "/data/user/0/io.github.qauxv",
         "mountify", "tricky_store", "metamodule", "ksud", "zygisksu",
         "cydia", "substrate", "sukisu", "ksunext", "de.robv.android.xposed.installer",
@@ -401,7 +401,7 @@ static bool is_sensitive_name_for_caller(const char* name, void* return_address)
         "magisk", "lsposed", "xposed", "edxposed", "dexkit",
         "sandhook", "yahfa", "libepic", "libpine", "taichi",
         "liblspd", "qqbypass", "native-bypass", "bytehook",
-        "shamiko", "apatch", "npatch", "lspilot", "fusehide",
+        "shamiko", "libapatch", "apatchd", "npatch", "lspilot", "fusehide",
         "simplehook", "libchecker", "shizuku", "vtools",
         "bin.mt", "mt2", "singleneuron", "bytebuddy",
         "thanos", "termux", "duckusb", "lspatch",
@@ -411,9 +411,9 @@ static bool is_sensitive_name_for_caller(const char* name, void* return_address)
         "sesearchcache", "kc.dat", ".sys_cache",
         "qauxv_global_config", "oat_inline_deopt_cache", "last_use_emoticon_time",
         "sDumpTG_", "qauxv", "qa_mmkv", "tmp_qa_", "qnotified",
-        "kernelsu", "apatch", "supersu", "superuser", "kingroot", "kinguser",
+        "kernelsu", "supersu", "superuser", "kingroot", "kinguser",
         "oneclickroot", "rootgenius", "shuamesu", "appcloner", "microvirtd",
-        "bdsu", "sutemp", "sudo", "config.prop", "init.svc.microvirtd",
+        "bdsu", "sutemp", "sudo", "init.svc.microvirtd",
         nullptr
     };
     if (strcmp(name, ".se") == 0) return true;
@@ -550,14 +550,14 @@ FILE* build_filtered_maps() {
     const char* blacklist[] = {
         "lsposed", "xposed", "riru", "zygisk", "edxposed",
         "frida", "substrate", "libDalvikLoader", "libAndroidCydia",
-        "magisk", "ksu", "kernelsu", "supersu", "superuser",
+        "magisk", "kernelsu", "ksud", "/ksu/", "supersu", "superuser",
         "libnative-bypass", "libbytehook", "xalsace", "qq_hook",
-        "dexkit", "libdexkit", "flatbuffers", "sandhook", "yahfa",
-        "epic", "pine", "taichi", "top.canyie", "liblspd", "qqbypass",
+        "dexkit", "libdexkit", "sandhook", "yahfa",
+        "taichi", "top.canyie", "liblspd", "qqbypass",
         "zygisk_lsposed", "zygisksu", "/data/adb",
         "bin.mt.", "bin.mt.plus", "bin.mt.manager", "bin.mt.termex", "MT2",
         "top.nkbe.npatch", "npatch", "org.lsposed.manager", "lspilot",
-        "bytehook", "trampoline", "native-bypass", "apatch", "libxposed",
+        "bytehook", "trampoline", "native-bypass", "libapatch", "me.bmax.apatch", "/apatch/", "libxposed",
         "fusehide", "simplehook", "libchecker", "shizuku", "vtools", "thanos", "termux",
         "qauxv", "io.github.qauxv", "libqauxv", "libqauxv-core0", "libqauxv-core1",
         "cc.ioctl", "qnotified", "bytebuddy", "net.bytebuddy", "singleneuron", "timeline",
@@ -568,7 +568,6 @@ FILE* build_filtered_maps() {
         "sesearchcache", "kc.dat", ".se",
         "cydia", "sukisu", "ksunext", "libpine", "libsandhook", "libepic", "libyahfa",
         "shadowhook", "libshadowhook", "libbugly_shadowhook",
-        "rmonitor", "librmonitor", "librmonitor_base", "librmonitor_memory",
         "dobby", "libdobby", "frida-gadget", "frida-agent",
         nullptr
     };
@@ -623,14 +622,14 @@ FILE* build_filtered_smaps() {
     const char* blacklist[] = {
         "lsposed", "xposed", "riru", "zygisk", "edxposed",
         "frida", "substrate", "libDalvikLoader", "libAndroidCydia",
-        "magisk", "ksu", "kernelsu", "supersu", "superuser",
+        "magisk", "kernelsu", "ksud", "/ksu/", "supersu", "superuser",
         "libnative-bypass", "libbytehook", "xalsace", "qq_hook",
-        "dexkit", "libdexkit", "flatbuffers", "sandhook", "yahfa",
-        "epic", "pine", "taichi", "top.canyie", "liblspd", "qqbypass",
+        "dexkit", "libdexkit", "sandhook", "yahfa",
+        "taichi", "top.canyie", "liblspd", "qqbypass",
         "zygisk_lsposed", "zygisksu", "/data/adb",
         "bin.mt.", "bin.mt.plus", "bin.mt.manager", "bin.mt.termex", "MT2",
         "top.nkbe.npatch", "npatch", "org.lsposed.manager", "lspilot",
-        "bytehook", "trampoline", "native-bypass", "apatch", "libxposed",
+        "bytehook", "trampoline", "native-bypass", "libapatch", "me.bmax.apatch", "/apatch/", "libxposed",
         "fusehide", "simplehook", "libchecker", "shizuku", "vtools", "thanos", "termux",
         "qauxv", "io.github.qauxv", "libqauxv", "libqauxv-core0", "libqauxv-core1",
         "cc.ioctl", "qnotified", "bytebuddy", "net.bytebuddy", "singleneuron", "timeline",
@@ -641,7 +640,6 @@ FILE* build_filtered_smaps() {
         "sesearchcache", "kc.dat", ".se",
         "cydia", "sukisu", "ksunext", "libpine", "libsandhook", "libepic", "libyahfa",
         "shadowhook", "libshadowhook", "libbugly_shadowhook",
-        "rmonitor", "librmonitor", "librmonitor_base", "librmonitor_memory",
         "dobby", "libdobby", "frida-gadget", "frida-agent",
         nullptr
     };
@@ -703,9 +701,10 @@ FILE* build_filtered_mounts() {
     char line[2048];
     const char* blacklist[] = {
         "/dev/block/loop", "magisk", "core/mirror", "core/img", "/data/adb",
-        "modules", "ksu", "apatch", "overlay", "lsposed", "lspatch",
+        "/data/adb/modules", "kernelsu", "ksud", "/ksu", "/apatch", "libapatch", "me.bmax.apatch",
+        "overlay", "lsposed", "lspatch",
         "moe.ono", "ono_mmkv", "lzlnb", "libcnm", "cnm0",
-        "mountify", "tricky_store", "metamodule", "ksud", "zygisksu",
+        "mountify", "tricky_store", "metamodule", "zygisksu",
         nullptr
     };
 
@@ -739,9 +738,10 @@ FILE* build_filtered_mountinfo() {
     char line[2048];
     const char* blacklist[] = {
         "/dev/block/loop", "magisk", "core/mirror", "core/img", "/data/adb",
-        "modules", "ksu", "apatch", "overlay", "lsposed", "lspatch",
+        "/data/adb/modules", "kernelsu", "ksud", "/ksu", "/apatch", "libapatch", "me.bmax.apatch",
+        "overlay", "lsposed", "lspatch",
         "moe.ono", "ono_mmkv", "lzlnb", "libcnm", "cnm0",
-        "mountify", "tricky_store", "metamodule", "ksud", "zygisksu",
+        "mountify", "tricky_store", "metamodule", "zygisksu",
         nullptr
     };
 
@@ -774,7 +774,7 @@ FILE* build_filtered_net_unix() {
     char line[1024];
     const char* blacklist[] = {
         "lsp", "lspbridge", "lsp_dex2oat", "lsposed", "xposed",
-        "zn_", "zygisk", "magisk", "ksu", "ksud", "apatch", "daemonsu",
+        "zn_", "zygisk", "magisk", "kernelsu", "ksud", "/ksu", "/apatch", "apatchd", "daemonsu",
         "qauxv", "moe.ono", "ono_", "lzlnb", "libcnm", "cnm0", "frida", "mountify", "tricky_store",
         nullptr
     };
@@ -840,7 +840,7 @@ static bool is_proc_cgroup_path(const char* path) {
 static bool is_sensitive_prop_name(const char* name) {
     if (!name) return false;
     const char* props[] = {
-        "magisk", "ksu", "apatch", "microvirtd",
+        "magisk", "kernelsu", "ksud", "ro.boot.ksu", "ro.apatch", "apatchd", "microvirtd",
         ".android_system_config.prop",
         "vbox", "qemu", "goldfish", "nox",
         "genymotion", "bluestacks", "bignox",
@@ -1931,8 +1931,6 @@ static int dl_iterate_callback_wrapper(struct dl_phdr_info* info, size_t size, v
                 "lspatch", "liblspatch", "libriru", "libzygisk",
                 "libapatch", "liball-jni", "moe.ono", "libcnm",
                 "substrate", "cydia", "xposed",
-                "shadowhook", "libshadowhook", "libbugly_shadowhook",
-                "rmonitor", "librmonitor", "librmonitor_base", "librmonitor_memory",
                 "dobby", "libdobby", nullptr
             };
             for (int i = 0; hidden[i]; i++) {

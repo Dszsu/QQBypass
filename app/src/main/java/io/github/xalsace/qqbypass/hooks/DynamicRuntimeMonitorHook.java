@@ -155,8 +155,8 @@ public class DynamicRuntimeMonitorHook {
         String s = joined.toLowerCase();
 
         if (s.contains("magisk") || s.contains("supersu") || s.contains("superuser")
-                || s.contains("busybox") || s.contains("ksud") || s.contains("ksu")
-                || s.contains("apatch") || s.contains("shamiko")
+                || s.contains("busybox") || s.contains("kernelsu") || s.contains("ksud") || s.contains("/ksu")
+                || s.contains("libapatch") || s.contains("/apatch") || s.contains("apatchd") || s.contains("shamiko")
                 || s.contains("which su") || s.contains("type su") || s.contains("command -v su")
                 || s.contains("/system/bin/su") || s.contains("/system/xbin/su")
                 || s.contains("/sbin/su") || s.contains("/su/bin")

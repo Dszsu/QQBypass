@@ -76,7 +76,7 @@ public class SecurityLibrariesEnhanceHook {
         if ("persist.sys.adb.engineermode".equals(key)) return "0";
         if ("sys.usb.config".equals(key) || "sys.usb.state".equals(key) || "persist.sys.usb.config".equals(key)) return "none";
         if ("init.svc.adbd".equals(key)) return "stopped";
-        if (key.contains("magisk") || key.contains("ksu") || key.contains("apatch") || key.contains("root") || key.contains("xposed")) {
+        if (key.contains("magisk") || key.contains("kernelsu") || key.contains("ksud") || key.contains("apatchd") || key.contains("ro.apatch") || key.contains("xposed") || "service.adb.root".equals(key)) {
             return "-1";
         }
         return null;

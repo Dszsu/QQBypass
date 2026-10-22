@@ -241,14 +241,15 @@ public class DynamicXposedDetectionHook {
             || lower.contains("frida") || lower.contains("substrate")
             || lower.contains("/data/adb") || lower.contains("shamiko")
             || lower.contains("dexkit") || lower.contains("libdexkit")
-            || lower.contains("flatbuffers") || lower.contains("sandhook")
-            || lower.contains("yahfa") || lower.contains("epic")
-            || lower.contains("pine") || lower.contains("taichi")
+            || lower.contains("sandhook") || lower.contains("yahfa")
+            || lower.contains("libepic") || lower.contains("me.ele.epic")
+            || lower.contains("libpine") || lower.contains("top.canyie.pine")
+            || lower.contains("taichi")
             || lower.contains("top.canyie") || lower.contains("liblspd")
             || lower.contains("lspatch") || lower.contains("liblspatch")
             // Filter our own module and native dependencies
             || lower.contains("xalsace") || lower.contains("qqbypass")
-            || lower.contains("bypass") || lower.contains("libnative-bypass")
+            || lower.contains("libnative-bypass")
             || lower.contains("bytehook") || lower.contains("libbytehook")
             // Filter QAuxv and related
             || lower.contains("qauxv") || lower.contains("io.github.qauxv")
@@ -300,15 +301,14 @@ public class DynamicXposedDetectionHook {
                 lower.contains("io.github.xalsace") ||
                 lower.contains("edxposed") ||
                 lower.contains("sandhook") ||
-                lower.contains("epic") ||
-                lower.contains("pine") ||
+                lower.contains("me.ele.epic") || lower.contains("libepic") ||
+                lower.contains("top.canyie.pine") || lower.contains("libpine") ||
                 lower.contains("yahfa") ||
                 lower.contains("taichi") ||
                 lower.contains("top.canyie") ||
                 lower.contains("me.weishu") ||
                 lower.contains("me.bmax") ||
                 lower.contains("org.luckypray.dexkit") ||
-                lower.contains("com.google.flatbuffers") ||
                 lower.contains("com.elderdrivers.riru") ||
                 lower.contains("bytehook") ||
                 lower.contains("bin.mt") ||
@@ -394,8 +394,8 @@ public class DynamicXposedDetectionHook {
                                      String nameLower = name.toLowerCase();
                                     if (nameLower.contains("dexkit") || nameLower.contains("qqbypass") || nameLower.contains("xalsace")
                                             || nameLower.contains("qauxv") || nameLower.contains("qnotified") || nameLower.contains("cc.ioctl")
-                                            || nameLower.contains("se-dexkit") || nameLower.contains("ono") || nameLower.contains("lzlnb")
-                                            || nameLower.contains("cnm") || nameLower.contains("lspatch")) {
+                                            || nameLower.contains("se-dexkit") || nameLower.contains("moe.ono") || nameLower.contains("ono_") || nameLower.contains("ono-") || nameLower.contains("lzlnb")
+                                            || nameLower.contains("libcnm") || nameLower.contains("cnm0") || nameLower.contains("lspatch")) {
                                         continue;
                                     }
                                 }
@@ -479,7 +479,7 @@ public class DynamicXposedDetectionHook {
             || lower.startsWith("com.elderdrivers.riru.")
             || lower.startsWith("com.topjohnwu.magisk.")
             || lower.contains("zygisk")
-            || lower.contains("apatch")
+            || lower.startsWith("me.bmax.apatch.") || lower.contains("libapatch") || lower.startsWith("apatch.")
             || lower.contains("kernelsu")
             || lower.contains("saurik.substrate")
             || lower.contains("frida")
@@ -508,7 +508,7 @@ public class DynamicXposedDetectionHook {
     private static boolean isModuleClassLoader(Object obj) {
         if (obj == null) return false;
         String clStr = obj.toString().toLowerCase();
-        return clStr.contains("moe.ono") || clStr.contains("lzlnb") || clStr.contains("cnm")
+        return clStr.contains("moe.ono") || clStr.contains("lzlnb") || clStr.contains("libcnm") || clStr.contains("cnm0")
             || clStr.contains("qauxv") || clStr.contains("lsposed") || clStr.contains("lspatch")
             || clStr.contains("dexkit") || clStr.contains("luckypray") || clStr.contains("cn.jesse");
     }
@@ -521,7 +521,7 @@ public class DynamicXposedDetectionHook {
                 String lt = tName.toLowerCase();
                 if (lt.contains("qauxv") || lt.contains("ioctl") || lt.contains("singleneuron")
                         || lt.contains("lspatch") || lt.contains("lsposed") || lt.contains("xposed")
-                        || lt.contains("ono") || lt.contains("lzlnb") || lt.contains("cnm")
+                        || lt.contains("moe.ono") || lt.contains("ono_") || lt.contains("ono-") || lt.contains("lzlnb") || lt.contains("libcnm") || lt.contains("cnm0")
                         || lt.contains("se-dexkit") || lt.contains("luckypray")) {
                     return true;
                 }
@@ -530,7 +530,7 @@ public class DynamicXposedDetectionHook {
             if (contextCl != null) {
                 String clStr = contextCl.toString().toLowerCase();
                 if (clStr.contains("qauxv") || clStr.contains("lspatch") || clStr.contains("lsposed")
-                        || clStr.contains("ono") || clStr.contains("lzlnb") || clStr.contains("cnm")
+                        || clStr.contains("moe.ono") || clStr.contains("ono_") || clStr.contains("ono-") || clStr.contains("lzlnb") || clStr.contains("libcnm") || clStr.contains("cnm0")
                         || clStr.contains("dexkit") || clStr.contains("luckypray")) {
                     return true;
                 }
@@ -827,7 +827,8 @@ public class DynamicXposedDetectionHook {
             || lower.contains("qqbypass") || lower.contains("nativebypass") || lower.contains("native-bypass")
             || lower.contains("dexkit") || lower.contains("bin.mt") || lower.contains("npatch")
             || lower.contains("bytebuddy") || lower.contains("singleneuron") || lower.contains("magisk")
-            || lower.contains("shamiko") || lower.contains("kernel_su") || lower.contains("apatch");
+            || lower.contains("shamiko") || lower.contains("kernel_su") || lower.contains("kernelsu") || lower.contains("ksud")
+            || lower.contains("libapatch") || lower.contains("me.bmax.apatch") || lower.contains("apatchd");
     }
 
     private static void hookBuglyCrashReporter(XC_LoadPackage.LoadPackageParam lpparam) {

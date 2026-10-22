@@ -678,14 +678,14 @@ public class ReportAuditManager {
                lower.contains("qqbypass") ||
                lower.contains("xalsace") ||
                lower.contains("sandhook") ||
-               lower.contains("epic") ||
-               lower.contains("pine") ||
+               lower.contains("libepic") || lower.contains("me.ele.epic") ||
+               lower.contains("libpine") || lower.contains("top.canyie.pine") ||
                lower.contains("dexkit") ||
                lower.contains("bytehook") ||
                lower.contains("frida") ||
                lower.contains("magisk") ||
-               lower.contains("kernelsu") ||
-               lower.contains("apatch") ||
+               lower.contains("kernelsu") || lower.contains("ksud") ||
+               lower.contains("libapatch") || lower.contains("me.bmax.apatch") || lower.contains("apatchd") ||
                lower.contains("substrate") ||
                lower.contains("cydia");
     }

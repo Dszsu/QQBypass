@@ -417,7 +417,9 @@ public class DynamicRootDetectionHook {
                                                 sanitizedDetails.add(entry.getKey() + ": " + v + " -> 0");
                                             }
                                             entry.setValue("0");
-                                        } else if (vLower.contains("xposed") || vLower.contains("magisk") || vLower.contains("lsposed") || vLower.contains("su")) {
+                                        } else if (vLower.contains("xposed") || vLower.contains("magisk") || vLower.contains("lsposed") ||
+                                                   vLower.contains("kernelsu") || vLower.contains("supersu") || vLower.contains("/su") ||
+                                                   vLower.equals("su") || vLower.startsWith("su ") || vLower.endsWith(" su")) {
                                             if (!"none".equals(v)) {
                                                 if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
                                                 sanitizedDetails.add(entry.getKey() + ": " + v + " -> none");
@@ -1091,7 +1093,7 @@ public class DynamicRootDetectionHook {
                     Object res = param.getResult();
                     if (res instanceof android.content.pm.ProviderInfo) {
                         android.content.pm.ProviderInfo pi = (android.content.pm.ProviderInfo) res;
-                        if (isSuspiciousPackage(pi.packageName) || (pi.authority != null && (pi.authority.contains("qauxv") || pi.authority.contains("lsposed") || pi.authority.contains("lspatch") || pi.authority.contains("moe.ono") || pi.authority.contains("lzlnb") || pi.authority.contains("cnm")))) {
+                        if (isSuspiciousPackage(pi.packageName) || (pi.authority != null && (pi.authority.contains("qauxv") || pi.authority.contains("lsposed") || pi.authority.contains("lspatch") || pi.authority.contains("moe.ono") || pi.authority.contains("lzlnb") || pi.authority.contains("libcnm") || pi.authority.contains("cnm0")))) {
                             if (isCallerQAuxv()) return;
                             param.setResult(null);
                         }
@@ -1196,7 +1198,7 @@ public class DynamicRootDetectionHook {
                         param.setResult("none");
                     } else if ("init.svc.adbd".equals(key)) {
                         param.setResult("stopped");
-                    } else if (key.contains("magisk") || key.contains("ksu") || key.contains("apatch")) {
+                    } else if (key.contains("magisk") || key.contains("kernelsu") || key.contains("ksud") || key.contains("ro.boot.ksu") || key.contains("ro.apatch") || key.contains("apatchd")) {
                         String def = param.args.length > 1 && param.args[1] instanceof String ? (String) param.args[1] : "";
                         param.setResult(def);
                     }
@@ -1305,7 +1307,7 @@ public class DynamicRootDetectionHook {
         if (key == null) return false;
         String lower = key.toLowerCase();
         return lower.contains("moe.ono") || lower.contains("lzlnb")
-            || lower.contains("cnm") || lower.contains("xposed")
+            || lower.contains("libcnm") || lower.contains("cnm0") || lower.contains("xposed")
             || lower.contains("lspatch") || lower.contains("qauxv")
             || lower.contains("qqbypass") || lower.contains("dexkit");
     }
@@ -1824,7 +1826,7 @@ public class DynamicRootDetectionHook {
                 String lt = tName.toLowerCase();
                 if (lt.contains("qauxv") || lt.contains("ioctl") || lt.contains("singleneuron")
                         || lt.contains("lspatch") || lt.contains("lsposed") || lt.contains("xposed")
-                        || lt.contains("ono") || lt.contains("lzlnb") || lt.contains("cnm")
+                        || lt.contains("moe.ono") || lt.contains("ono_") || lt.contains("ono-") || lt.contains("lzlnb") || lt.contains("libcnm") || lt.contains("cnm0")
                         || lt.contains("se-dexkit")) {
                     return true;
                 }
@@ -1833,7 +1835,7 @@ public class DynamicRootDetectionHook {
             if (cl != null) {
                 String clStr = cl.toString().toLowerCase();
                 if (clStr.contains("qauxv") || clStr.contains("lspatch") || clStr.contains("lsposed")
-                        || clStr.contains("ono") || clStr.contains("lzlnb") || clStr.contains("cnm")) {
+                        || clStr.contains("moe.ono") || clStr.contains("ono_") || clStr.contains("ono-") || clStr.contains("lzlnb") || clStr.contains("libcnm") || clStr.contains("cnm0")) {
                     return true;
                 }
             }
@@ -2026,8 +2028,11 @@ public class DynamicRootDetectionHook {
         }
 
         return lower.contains("magisk") || lower.contains("supersu")
-            || lower.contains("superuser") || lower.contains("ksu")
-            || lower.contains("apatch") || lower.contains("shamiko")
+            || lower.contains("superuser") || lower.contains("kernelsu")
+            || lower.contains("ksud") || lower.contains("/ksu/")
+            || lower.contains("libapatch") || lower.contains("/apatch/")
+            || lower.contains("me.bmax.apatch") || lower.contains("apatchd")
+            || lower.contains("shamiko")
             || lower.contains("mountify") || lower.contains("tricky_store")
             || lower.contains("zygisksu") || lower.contains("metamodule")
             || lower.contains("xposed") || lower.contains("lsposed")
@@ -2041,7 +2046,7 @@ public class DynamicRootDetectionHook {
             || lower.contains("vtools") || lower.contains("thanos")
             || lower.contains("puredupan") || lower.contains("developertools")
             || lower.contains("moe.ono") || lower.contains("lzlnb")
-            || lower.contains("cnm") || lower.contains("libcnm")
+            || lower.contains("libcnm") || lower.contains("cnm0")
             || lower.contains("liball-jni")
             || lower.contains("duckusb") || lower.contains("termux")
             || lower.contains(".android_system_config.prop") || lower.contains("microvirtd")
@@ -2065,7 +2070,7 @@ public class DynamicRootDetectionHook {
             || lower.contains("superuser") || lower.contains("xposed")
             || lower.contains("lsposed") || lower.contains("edxposed")
             || lower.contains("lspatch") || lower.contains("top.canyie") || lower.contains("canyie")
-            || lower.contains("kernelsu") || lower.contains("apatch")
+            || lower.contains("kernelsu") || lower.contains(".apatch") || lower.startsWith("apatch")
             || lower.contains("shamiko") || lower.contains("frida")
             || lower.contains("me.weishu") || lower.contains("me.bmax")
             || lower.contains("sandhook") || lower.contains("taichi")
@@ -2093,7 +2098,7 @@ public class DynamicRootDetectionHook {
             || lower.contains("libchecker") || lower.contains("luckytool")
             || lower.contains("duckusb") || lower.contains("droidvnc")
             || lower.contains("moe.ono") || lower.contains("lzlnb")
-            || lower.contains("cnm")
+            || lower.contains("libcnm") || lower.contains("cnm0")
             || lower.contains("applisto") || lower.contains("kingroot")
             || lower.contains("kinguser") || lower.contains("oneclickroot")
             || lower.contains("rootgenius") || lower.contains("shuame")

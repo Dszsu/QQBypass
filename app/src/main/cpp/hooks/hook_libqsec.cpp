@@ -29,8 +29,8 @@ static void* hooked_dlopen(const char* filename, int flag) {
             strcasestr(filename, "libdexkit") ||
             strcasestr(filename, "sandhook") ||
             strcasestr(filename, "yahfa") ||
-            strcasestr(filename, "epic") ||
-            strcasestr(filename, "pine") ||
+            strcasestr(filename, "libepic") ||
+            strcasestr(filename, "libpine") ||
             strcasestr(filename, "taichi") ||
             strcasestr(filename, "qqbypass") ||
             strcasestr(filename, "xalsace") ||
@@ -83,9 +83,11 @@ static void* hooked_dlsym(void* handle, const char* symbol) {
             strcasestr(symbol, "lsposed") ||
             strcasestr(symbol, "sandhook") ||
             strcasestr(symbol, "yahfa") ||
-            strcasestr(symbol, "pine") ||
+            strcasestr(symbol, "libpine") ||
+            strcasestr(symbol, "pine_") ||
             strcasestr(symbol, "dexkit") ||
-            strcasestr(symbol, "epic") ||
+            strcasestr(symbol, "libepic") ||
+            strcasestr(symbol, "epic_") ||
             strcasestr(symbol, "dobby") ||
             strcasestr(symbol, "riru") ||
             strcasestr(symbol, "zygisk") ||
@@ -137,8 +139,8 @@ static int hooked_dladdr(const void* addr, Dl_info* info) {
             strcasestr(fname, "libdexkit") ||
             strcasestr(fname, "sandhook") ||
             strcasestr(fname, "yahfa") ||
-            strcasestr(fname, "epic") ||
-            strcasestr(fname, "pine") ||
+            strcasestr(fname, "libepic") ||
+            strcasestr(fname, "libpine") ||
             strcasestr(fname, "taichi") ||
             strcasestr(fname, "qqbypass") ||
             strcasestr(fname, "xalsace") ||
@@ -161,10 +163,13 @@ static int hooked_dladdr(const void* addr, Dl_info* info) {
             strcasestr(fname, "libriru") ||
             strcasestr(fname, "zygisk") ||
             strcasestr(fname, "libzygisk") ||
-            strcasestr(fname, "apatch") ||
             strcasestr(fname, "libapatch") ||
+            strcasestr(fname, "me.bmax.apatch") ||
+            strstr(fname, "/apatch/") ||
+            strstr(fname, "apatchd") ||
             strcasestr(fname, "kernelsu") ||
-            strcasestr(fname, "ksu") ||
+            strcasestr(fname, "ksud") ||
+            strstr(fname, "/ksu/") ||
             strcasestr(fname, "magisk") ||
             strcasestr(fname, "shamiko") ||
             strcasestr(fname, "lspatch") ||

@@ -223,9 +223,9 @@ public class RootDetectionHook {
                         String command = param.args[0].toString();
 
                         // Block root-detection commands
-                        if (command.contains("su") ||
+                        if (command.equals("su") || command.startsWith("su ") || command.contains("/su") || command.contains(" su") ||
                             command.contains("magisk") ||
-                            command.contains("which") ||
+                            command.contains("which su") || command.contains("which ksu") || command.contains("which magisk") || command.contains("which apatch") ||
                             (command.contains("mount") && command.contains("grep"))) {
 
                             XposedEntry.log("Blocked Runtime.exec: " + command);

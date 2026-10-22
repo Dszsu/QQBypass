@@ -458,7 +458,8 @@ public class NetworkReportHook {
         return lower.contains("/system/bin/su") || lower.contains("/system/xbin/su") ||
                lower.contains("/sbin/su") || lower.contains("/data/local/su") ||
                lower.contains("/data/adb") || lower.contains("magisk") ||
-               lower.contains("kernelsu") || lower.contains("apatch") ||
+               lower.contains("kernelsu") || lower.contains("ksud") ||
+               lower.contains("libapatch") || lower.contains("/apatch/") || lower.contains("me.bmax.apatch") || lower.contains("apatchd") ||
                lower.contains("xposed") || lower.contains("lsposed") ||
                lower.contains("qauxv") || lower.contains("busybox") ||
                lower.contains("mountify") || lower.contains("tricky_store") ||

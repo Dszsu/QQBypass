@@ -3653,7 +3653,7 @@ public class QQ950PatchHook {
                     String mtd = (String) p.args[1];
                     if (cls != null && (cls.contains("xposed") || cls.contains("lsposed") ||
                                        cls.contains("canyie") || cls.contains("sandhook") ||
-                                       cls.contains("epic") || cls.contains("pine") ||
+                                       cls.contains("libepic") || cls.contains("epic.") || cls.contains("libpine") || cls.contains("pine.") ||
                                        cls.contains("yahfa") || cls.contains("qqbypass") ||
                                        cls.contains("native-bypass") || cls.contains("bytehook"))) {
                         p.setResult(false);

@@ -31,8 +31,8 @@ static char* fake_xq_strstr(const char* haystack, const char* needle) {
     char* result = real_xq_strstr_ptr ? real_xq_strstr_ptr(haystack, needle) : BYTEHOOK_CALL_PREV(fake_xq_strstr, haystack, needle);
     if (result && needle) {
         const char* sensitive[] = {
-            "lsposed", "xposed", "riru", "zygisk", "magisk", "frida", "KSU", "ksu", "apatch", "shamiko",
-            "dexkit", "libdexkit", "flatbuffers", "sandhook", "yahfa", "epic", "pine", "taichi", "liblspd",
+            "lsposed", "xposed", "riru", "zygisk", "magisk", "frida", "kernelsu", "ksud", "/ksu/", "libapatch", "me.bmax.apatch", "/apatch/", "shamiko",
+            "dexkit", "libdexkit", "sandhook", "yahfa", "libepic", "libpine", "taichi", "liblspd",
             "qqbypass", "xalsace", "libnative-bypass", "libbytehook", "bytehook", "trampoline",
             "qauxv", "io.github.qauxv", "libqauxv", "cc.ioctl", "qnotified",
             "lspatch", "org.lsposed.lspatch", "moe.ono", "ono_", "lzlnb", "libcnm", "cnm0", "liball-jni",

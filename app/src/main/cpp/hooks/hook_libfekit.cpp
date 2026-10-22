@@ -42,10 +42,11 @@ static int fake_system(const char* command) {
                     strstr(command, "mt.plus") || strstr(command, "io.github.qauxv") ||
                     strstr(command, "lspatch") || strstr(command, "moe.ono") ||
                     strstr(command, "ono_") || strstr(command, "lzlnb") || strstr(command, "libcnm") || strstr(command, "cnm0") ||
-                    strstr(command, "magisk") || strstr(command, "su") ||
+                    strstr(command, "magisk") || (strstr(command, "/su") || strstr(command, "su ") || strcmp(command, "su") == 0) ||
                     strstr(command, "mount") || strstr(command, "/proc/mounts") ||
                     strstr(command, "which") || strstr(command, "getprop") ||
-                    strstr(command, "ksu") || strstr(command, "apatch") ||
+                    (strstr(command, "kernelsu") || strstr(command, "ksud") || strstr(command, "/ksu") || strstr(command, "ksu ")) ||
+                    (strstr(command, "libapatch") || strstr(command, "/apatch") || strstr(command, "apatch ") || strstr(command, "me.bmax.apatch")) ||
                     strstr(command, "daemonsu") || strstr(command, "permmgrd") ||
                     strstr(command, "360sguard") || strstr(command, "ps") ||
                     strstr(command, "ls /") || strstr(command, "ls -") ||
@@ -73,9 +74,10 @@ static FILE* fake_popen(const char* command, const char* type) {
             strstr(command, "mt.plus") || strstr(command, "io.github.qauxv") ||
             strstr(command, "lspatch") || strstr(command, "moe.ono") ||
             strstr(command, "ono_") || strstr(command, "lzlnb") || strstr(command, "libcnm") || strstr(command, "cnm0") ||
-            strstr(command, "magisk") || strstr(command, "su") ||
+            strstr(command, "magisk") || (strstr(command, "/su") || strstr(command, "su ") || strcmp(command, "su") == 0) ||
             strstr(command, "which") || strstr(command, "getprop") ||
-            strstr(command, "ksu") || strstr(command, "apatch") ||
+            (strstr(command, "kernelsu") || strstr(command, "ksud") || strstr(command, "/ksu") || strstr(command, "ksu ")) ||
+            (strstr(command, "libapatch") || strstr(command, "/apatch") || strstr(command, "apatch ") || strstr(command, "me.bmax.apatch")) ||
             strstr(command, "/data/adb") || strstr(command, "daemonsu") ||
             strstr(command, "permmgrd") || strstr(command, "360sguard") ||
             strstr(command, "grep") || strstr(command, "ps") ||
@@ -95,8 +97,8 @@ static char* fake_strstr(const char* haystack, const char* needle) {
     char* result = real_fekit_strstr_ptr ? real_fekit_strstr_ptr(haystack, needle) : BYTEHOOK_CALL_PREV(fake_strstr, haystack, needle);
     if (result && needle) {
         const char* sensitive[] = {
-            "lsposed", "xposed", "riru", "zygisk", "magisk", "frida", "KSU", "ksu", "apatch", "shamiko",
-            "dexkit", "libdexkit", "flatbuffers", "sandhook", "yahfa", "epic", "pine", "taichi", "liblspd",
+            "lsposed", "xposed", "riru", "zygisk", "magisk", "frida", "kernelsu", "ksud", "/ksu/", "libapatch", "me.bmax.apatch", "/apatch/", "shamiko",
+            "dexkit", "libdexkit", "sandhook", "yahfa", "libepic", "libpine", "taichi", "liblspd",
             "qqbypass", "xalsace", "libnative-bypass", "libbytehook", "bytehook", "trampoline",
             "qauxv", "io.github.qauxv", "libqauxv", "cc.ioctl", "qnotified",
             "bin.mt", "mt.plus", "top.nkbe.npatch", "npatch", "singleneuron", "bytebuddy",

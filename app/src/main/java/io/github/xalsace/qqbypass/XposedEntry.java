@@ -192,7 +192,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                         ClassLoader cl = (ClassLoader) param.thisObject;
                         if (cl != null) {
                             String clStr = cl.toString().toLowerCase();
-                            if (clStr.contains("moe.ono") || clStr.contains("lzlnb") || clStr.contains("cnm") ||
+                            if (clStr.contains("moe.ono") || clStr.contains("lzlnb") || clStr.contains("libcnm") || clStr.contains("cnm0") ||
                                 clStr.contains("qauxv") || clStr.contains("org.lsposed") || clStr.contains("dexkit") ||
                                 clStr.contains("cn.jesse") || clStr.contains("lspatch")) {
                                 return;
