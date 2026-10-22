@@ -743,13 +743,17 @@ public class ReportAuditManager {
      * Strictly READ-ONLY observational diagnosis:
      * Extracts:
      * - UIN, Cmd, FailCode, FailMsg, ResultCode
-     * - Attributes Map
+     * - Attributes Map (both request and response)
      * - Decodes RequestMSFForceOffline / RequestPushForceOffline fields (strTitle, strInfo, bSigKick)
      * - Printable text strings in raw WUP buffer
-     * - Full 15-frame caller stack trace
+     * - Full 20-frame caller stack trace
      * Synchronously flushed to disk immediately!
      */
     public static void recordKickEvent(String sourceMethod, Object fromServiceMsg, Object extraInfo) {
+        recordKickEvent(sourceMethod, fromServiceMsg, null, extraInfo);
+    }
+
+    public static void recordKickEvent(String sourceMethod, Object msg1, Object msg2, Object extraInfo) {
         try {
             String time = getCurrentTimestamp();
             int pid = Process.myPid();
@@ -766,6 +770,55 @@ public class ReportAuditManager {
                 sb.append("ExtraInfo: ").append(extraInfo.toString()).append("\n");
             }
 
+            // Distinguish FromServiceMsg and ToServiceMsg dynamically regardless of argument order
+            Object fromServiceMsg = null;
+            Object toServiceMsg = null;
+            for (Object candidate : new Object[]{msg1, msg2}) {
+                if (candidate != null) {
+                    String cls = candidate.getClass().getName();
+                    if (cls.contains("FromServiceMsg")) {
+                        fromServiceMsg = candidate;
+                    } else if (cls.contains("ToServiceMsg")) {
+                        toServiceMsg = candidate;
+                    }
+                }
+            }
+
+            // 1. If ToServiceMsg present, log originating request command, seq, msfCommand, and attributes
+            if (toServiceMsg != null) {
+                try {
+                    String reqCmd = (String) XposedHelpers.callMethod(toServiceMsg, "getServiceCmd");
+                    Object msfCmd = XposedHelpers.callMethod(toServiceMsg, "getMsfCommand");
+                    int reqSeq = ((Number) XposedHelpers.callMethod(toServiceMsg, "getRequestSsoSeq")).intValue();
+                    int appId = ((Number) XposedHelpers.callMethod(toServiceMsg, "getAppId")).intValue();
+                    sb.append("[Originating Request ToServiceMsg]\n")
+                      .append("    RequestCommand: ").append(reqCmd).append("\n")
+                      .append("    MsfCommand: ").append(msfCmd).append("\n")
+                      .append("    RequestSsoSeq: ").append(reqSeq).append("\n")
+                      .append("    AppId: ").append(appId).append("\n");
+
+                    Map<?, ?> attrs = (Map<?, ?>) XposedHelpers.callMethod(toServiceMsg, "getAttributes");
+                    if (attrs != null && !attrs.isEmpty()) {
+                        sb.append("    RequestAttributes (").append(attrs.size()).append(" entries):\n");
+                        for (Map.Entry<?, ?> entry : attrs.entrySet()) {
+                            Object k = entry.getKey();
+                            Object v = entry.getValue();
+                            sb.append("        [").append(k).append("] = ");
+                            if (v != null) {
+                                sb.append(v.getClass().getSimpleName()).append(": ");
+                                dumpObjectFields(v, sb);
+                            } else {
+                                sb.append("null");
+                            }
+                            sb.append("\n");
+                        }
+                    }
+                } catch (Throwable t) {
+                    sb.append("Error inspecting ToServiceMsg: ").append(t.getMessage()).append("\n");
+                }
+            }
+
+            // 2. If FromServiceMsg present, log failCode, failMsg, resultCode, attributes, and WUP
             if (fromServiceMsg != null) {
                 try {
                     String uin = (String) XposedHelpers.callMethod(fromServiceMsg, "getUin");
@@ -774,20 +827,21 @@ public class ReportAuditManager {
                     String failMsg = (String) XposedHelpers.callMethod(fromServiceMsg, "getBusinessFailMsg");
                     int resCode = (Integer) XposedHelpers.callMethod(fromServiceMsg, "getResultCode");
 
-                    sb.append("UIN: ").append(uin).append("\n")
-                      .append("Command: ").append(cmd).append("\n")
-                      .append("BusinessFailCode: ").append(failCode).append("\n")
-                      .append("BusinessFailMsg: ").append(failMsg).append("\n")
-                      .append("ResultCode: ").append(resCode).append("\n");
+                    sb.append("[Response FromServiceMsg]\n")
+                      .append("    UIN: ").append(uin).append("\n")
+                      .append("    ResponseCommand: ").append(cmd).append("\n")
+                      .append("    BusinessFailCode: ").append(failCode).append("\n")
+                      .append("    BusinessFailMsg: ").append(failMsg).append("\n")
+                      .append("    ResultCode: ").append(resCode).append("\n");
 
                     // 1. Dump attributes
                     Map<?, ?> attrs = (Map<?, ?>) XposedHelpers.callMethod(fromServiceMsg, "getAttributes");
                     if (attrs != null && !attrs.isEmpty()) {
-                        sb.append("Attributes (").append(attrs.size()).append(" entries):\n");
+                        sb.append("    ResponseAttributes (").append(attrs.size()).append(" entries):\n");
                         for (Map.Entry<?, ?> entry : attrs.entrySet()) {
                             Object k = entry.getKey();
                             Object v = entry.getValue();
-                            sb.append("    [").append(k).append("] = ");
+                            sb.append("        [").append(k).append("] = ");
                             if (v != null) {
                                 sb.append(v.getClass().getSimpleName()).append(": ");
                                 dumpObjectFields(v, sb);
@@ -801,21 +855,28 @@ public class ReportAuditManager {
                     // 2. Decode WUP buffer
                     byte[] wupBuf = (byte[]) XposedHelpers.callMethod(fromServiceMsg, "getWupBuffer");
                     if (wupBuf != null && wupBuf.length > 0) {
-                        sb.append("WupBuffer Length: ").append(wupBuf.length).append(" bytes\n");
+                        sb.append("    WupBuffer Length: ").append(wupBuf.length).append(" bytes\n");
                         List<String> printableStrings = extractPrintableStrings(wupBuf, 3);
                         if (!printableStrings.isEmpty()) {
-                            sb.append("WupBuffer Extracted Strings:\n");
+                            sb.append("    WupBuffer Extracted Strings:\n");
                             for (String str : printableStrings) {
-                                sb.append("    \"").append(str).append("\"\n");
+                                sb.append("        \"").append(str).append("\"\n");
                             }
                         }
                     }
                 } catch (Throwable t) {
                     sb.append("Error inspecting FromServiceMsg: ").append(t.getMessage()).append("\n");
                 }
+            } else if (toServiceMsg == null && msg1 != null) {
+                // If neither msg1 nor msg2 was FromServiceMsg / ToServiceMsg, dump msg1 generic fields
+                try {
+                    sb.append("RawMessageDump: ");
+                    dumpObjectFields(msg1, sb);
+                    sb.append("\n");
+                } catch (Throwable ignored) {}
             }
 
-            // 3. Dump Stack Trace (15 frames)
+            // 3. Dump Stack Trace (20 frames)
             sb.append("Caller Stack Trace:\n");
             StackTraceElement[] stack = Thread.currentThread().getStackTrace();
             if (stack != null) {
@@ -825,7 +886,7 @@ public class ReportAuditManager {
                     if (cn.contains("ReportAuditManager") || cn.contains("java.lang.Thread")) continue;
                     sb.append("    at ").append(ste.toString()).append("\n");
                     frameCount++;
-                    if (frameCount >= 15) break;
+                    if (frameCount >= 20) break;
                 }
             }
 
