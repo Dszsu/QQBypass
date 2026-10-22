@@ -18,6 +18,7 @@ import java.util.Enumeration;
 import java.lang.reflect.Member;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import io.github.xalsace.qqbypass.XposedEntry;
 import io.github.xalsace.qqbypass.config.HookConfig;
@@ -389,6 +390,59 @@ public class DynamicRootDetectionHook {
         }
     }
 
+    private static boolean isBusinessOrUiEvent(String eventCode) {
+        if (eventCode == null) return false;
+        String c = eventCode.toLowerCase(Locale.ROOT);
+        return c.startsWith("qq_") || c.startsWith("dt_") || c.startsWith("ev_") ||
+               c.startsWith("act") || c.startsWith("em_") || c.startsWith("push_") ||
+               c.startsWith("msg_") || c.startsWith("new_msg_") || c.startsWith("rqd_") ||
+               c.startsWith("dim_") || c.startsWith("cost_tracer") || c.startsWith("apm_") ||
+               c.startsWith("wt_") || c.startsWith("login_") || c.startsWith("markdown_") ||
+               c.startsWith("vip") || c.startsWith("chat") || c.startsWith("fav") ||
+               c.startsWith("relation_") || c.startsWith("report_process_") ||
+               c.startsWith("gm_") || c.startsWith("notification_");
+    }
+
+    private static boolean isBusinessOrUiKey(String key) {
+        if (key == null || key.isEmpty()) return true;
+        String k = key.toLowerCase(Locale.ROOT);
+        return k.equals("udf_kv") || k.equals("message_box") ||
+               k.startsWith("dt_") || k.startsWith("qq_") || k.startsWith("aio_") ||
+               k.startsWith("pg_") || k.startsWith("cur_") || k.startsWith("ref_") ||
+               k.startsWith("cre_") || k.startsWith("session_") || k.startsWith("msg") ||
+               k.startsWith("chat_") || k.startsWith("channel_") || k.startsWith("red_") ||
+               k.startsWith("uin") || k.startsWith("uid") || k.startsWith("app_") ||
+               k.startsWith("param_") || k.startsWith("client_") ||
+               k.equals("client_page_name") || k.equals("tianshu_id") || k.equals("page_id") ||
+               k.equals("eid") || k.equals("target_url") || k.equals("url") ||
+               k.equals("jump_url") || k.equals("web_url") || k.equals("schema") ||
+               k.equals("content") || k.equals("title") || k.equals("text") ||
+               k.equals("summary") || k.equals("process") || k.equals("os_vrsn") ||
+               k.equals("ui_vrsn") || k.equals("app_vr") || k.equals("user_id") ||
+               k.equals("happen_time") || k.equals("account_uin");
+    }
+
+    private static boolean isSecurityStatusKey(String key) {
+        if (key == null || key.isEmpty()) return false;
+        String k = key.toLowerCase(Locale.ROOT);
+        return k.equals("is_root") || k.equals("isroot") || k.equals("has_root") ||
+               k.equals("root_status") || k.equals("is_rooted") || k.equals("root_detected") ||
+               k.equals("device_rooted") || k.equals("is_jailbreak") || k.equals("jailbreak") ||
+               k.equals("fake_gps") || k.equals("mock_location") || k.equals("is_mock") ||
+               k.equals("xposed_status") || k.equals("xposed_installed") || k.equals("has_xposed") ||
+               k.equals("magisk_status") || k.equals("magisk_installed") || k.equals("has_magisk") ||
+               k.equals("risk_level") || k.equals("device_risk") || k.equals("sec_risk") ||
+               k.equals("risk_status") || k.equals("tamper_status");
+    }
+
+    private static boolean isSecurityDetailKey(String key) {
+        if (key == null || key.isEmpty()) return false;
+        String k = key.toLowerCase(Locale.ROOT);
+        return k.equals("su_path") || k.equals("root_path") || k.equals("xposed_path") ||
+               k.equals("magisk_path") || k.equals("hook_path") || k.equals("risk_detail") ||
+               k.equals("detect_detail") || k.equals("tamper_detail");
+    }
+
     private static void hookBeaconReport(Class<?> beaconReportCls) {
         if (beaconReportCls == null || sHookedBeaconClasses.contains(beaconReportCls)) return;
         sHookedBeaconClasses.add(beaconReportCls);
@@ -399,38 +453,6 @@ public class DynamicRootDetectionHook {
                     if (param.args != null && param.args.length > 0 && param.args[0] != null) {
                         Object event = param.args[0];
                         try {
-                            // Transparent data normalization: sanitize root/xposed/risk flags in event params
-                            // NEVER drop the event itself, so telemetry and heartbeats are fully uploaded!
-                            @SuppressWarnings("unchecked")
-                            java.util.Map<String, String> params = (java.util.Map<String, String>)
-                                de.robv.android.xposed.XposedHelpers.callMethod(event, "getParams");
-                            java.util.List<String> sanitizedDetails = null;
-                            if (params != null) {
-                                for (java.util.Map.Entry<String, String> entry : params.entrySet()) {
-                                    String k = entry.getKey() != null ? entry.getKey().toLowerCase() : "";
-                                    String v = entry.getValue();
-                                    if (v != null) {
-                                        String vLower = v.toLowerCase();
-                                        if (k.contains("root") || k.contains("jailbreak") || k.contains("risk") || k.contains("fake")) {
-                                            if (!"0".equals(v) && !"false".equalsIgnoreCase(v)) {
-                                                if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
-                                                sanitizedDetails.add(entry.getKey() + ": " + v + " -> 0");
-                                            }
-                                            entry.setValue("0");
-                                        } else if (vLower.contains("xposed") || vLower.contains("magisk") || vLower.contains("lsposed") ||
-                                                   vLower.contains("kernelsu") || vLower.contains("supersu") || vLower.contains("/su") ||
-                                                   vLower.equals("su") || vLower.startsWith("su ") || vLower.endsWith(" su")) {
-                                            if (!"none".equals(v)) {
-                                                if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
-                                                sanitizedDetails.add(entry.getKey() + ": " + v + " -> none");
-                                            }
-                                            entry.setValue("none");
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Audit normalized Beacon report
                             String eventCode = null;
                             try {
                                 eventCode = (String) de.robv.android.xposed.XposedHelpers.callMethod(event, "getCode");
@@ -443,6 +465,37 @@ public class DynamicRootDetectionHook {
                             try {
                                 appKey = (String) de.robv.android.xposed.XposedHelpers.callMethod(event, "getAppKey");
                             } catch (Throwable ignored) {}
+
+                            @SuppressWarnings("unchecked")
+                            java.util.Map<String, String> params = (java.util.Map<String, String>)
+                                de.robv.android.xposed.XposedHelpers.callMethod(event, "getParams");
+                            java.util.List<String> sanitizedDetails = null;
+
+                            // Transparent data normalization: ONLY sanitize when event is not pure business/UI
+                            // and the key is an explicit security/risk check key. NEVER touch business/UI analytics!
+                            if (params != null && !isBusinessOrUiEvent(eventCode)) {
+                                for (java.util.Map.Entry<String, String> entry : params.entrySet()) {
+                                    String rawKey = entry.getKey();
+                                    if (rawKey == null || isBusinessOrUiKey(rawKey)) continue;
+
+                                    String v = entry.getValue();
+                                    if (v == null) continue;
+
+                                    if (isSecurityStatusKey(rawKey)) {
+                                        if (!"0".equals(v) && !"false".equalsIgnoreCase(v)) {
+                                            if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
+                                            sanitizedDetails.add(rawKey + ": " + v + " -> 0");
+                                            entry.setValue("0");
+                                        }
+                                    } else if (isSecurityDetailKey(rawKey)) {
+                                        if (!"none".equalsIgnoreCase(v) && !v.isEmpty()) {
+                                            if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
+                                            sanitizedDetails.add(rawKey + ": " + v + " -> none");
+                                            entry.setValue("none");
+                                        }
+                                    }
+                                }
+                            }
 
                             if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
                                 io.github.xalsace.qqbypass.utils.ReportAuditManager.recordBeacon(eventCode, isSuccess, params, appKey, sanitizedDetails);

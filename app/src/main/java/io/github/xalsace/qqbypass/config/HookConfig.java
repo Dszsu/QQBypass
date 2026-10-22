@@ -11,8 +11,8 @@ public class HookConfig {
     public static ClassLoader classLoader;
 
     // 模块版本信息与缓存版本
-    public static final int MODULE_VERSION_CODE = 91;
-    public static final String MODULE_VERSION_NAME = "1.0.91";
+    public static final int MODULE_VERSION_CODE = 92;
+    public static final String MODULE_VERSION_NAME = "1.0.92";
     public static final int CACHE_SCHEMA_VERSION = 3;
 
     // =========================================================================
