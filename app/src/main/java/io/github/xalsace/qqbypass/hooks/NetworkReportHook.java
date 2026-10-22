@@ -31,6 +31,7 @@ public class NetworkReportHook {
 
     // Strict Whitelist: never block or intercept critical protocol, session, and key-exchange commands
     private static final String[] SAFE_WHITELIST = {
+        "trpc.msg.",
         "trpc.o3.ecdh_access.",
         "trpc.o3.full_social_lock_punish.",
         "trpc.o3.mobile_security.",
@@ -39,6 +40,27 @@ public class NetworkReportHook {
         "MessageSvc.",
         "RegPrxySvc."
     };
+
+    /**
+     * Fast-path identification of core messaging, sync, and session keepalives.
+     * Core functional messages MUST pass through instantly with ZERO reflection,
+     * ZERO audit logging, and ZERO thread latency to eliminate sync stalls ("接收中...").
+     */
+    public static boolean isCoreProtocolCommand(String command) {
+        if (command == null || command.isEmpty()) return false;
+        return command.startsWith("trpc.msg.") ||
+               command.startsWith("MessageSvc.") ||
+               command.startsWith("RegPrxySvc.") ||
+               command.startsWith("Heartbeat.") ||
+               command.startsWith("OnlinePush.") ||
+               command.startsWith("ConfigPushSvc.") ||
+               command.startsWith("ProfileService.") ||
+               command.startsWith("Friendlist.") ||
+               command.startsWith("trpc.login.ecdh.access") ||
+               command.startsWith("trpc.group_mall.") ||
+               (command.startsWith("StatSvc.") && !command.contains("Offline")) ||
+               (command.startsWith("OidbSvc.") && !command.contains("0xd79"));
+    }
 
     // Targeted block: only pure telemetry and security report commands
     // Note: trpc.o3.report.Report.SsoReport and SsoEventReport are NOT blocked here because
@@ -135,6 +157,10 @@ public class NetworkReportHook {
                     if (param.args == null || param.args.length < 1 || !(param.args[0] instanceof String)) return;
 
                     String command = (String) param.args[0];
+                    if (isCoreProtocolCommand(command)) {
+                        return; // Zero overhead fast-path: core messaging & sync pass through immediately
+                    }
+
                     long callbackId = 0L;
                     if (param.args.length >= 3 && param.args[2] instanceof Number) {
                         callbackId = ((Number) param.args[2]).longValue();
@@ -175,6 +201,10 @@ public class NetworkReportHook {
                     if (param.args == null || param.args.length < 1 || !(param.args[0] instanceof String)) return;
 
                     String command = (String) param.args[0];
+                    if (isCoreProtocolCommand(command)) {
+                        return; // Zero overhead fast-path
+                    }
+
                     long callbackId = 0L;
                     for (int i = param.args.length - 1; i >= 1; i--) {
                         if (param.args[i] instanceof Number) {
@@ -185,7 +215,7 @@ public class NetworkReportHook {
 
                     // Always audit if report recording is enabled
                     if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("ChannelProxyExt", command, null, "callbackId=" + callbackId, 3);
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("ChannelProxyExt", command, null, "callbackId=" + callbackId, 0);
                     }
 
                     if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(command)) {
@@ -216,6 +246,9 @@ public class NetworkReportHook {
                     Object adapter = param.args[0];
                     try {
                         String cmd = (String) XposedHelpers.callMethod(adapter, "getCmd");
+                        if (cmd == null || isCoreProtocolCommand(cmd)) {
+                            return; // Fast path: zero reflection / audit overhead for message sync
+                        }
                         int seq = 0;
                         try {
                             seq = ((Number) XposedHelpers.callMethod(adapter, "getSeq")).intValue();
@@ -223,7 +256,7 @@ public class NetworkReportHook {
 
                         // Always audit if report recording is enabled
                         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("MSFKernelBridge", cmd, null, "seq=" + seq, 3);
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("MSFKernelBridge", cmd, null, "seq=" + seq, 0);
                         }
 
                         if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(cmd)) {
@@ -249,6 +282,10 @@ public class NetworkReportHook {
                     Object toServiceMsg = param.args[0];
                     Object cmdObj = XposedHelpers.callMethod(toServiceMsg, "getServiceCmd");
                     String command = cmdObj == null ? null : cmdObj.toString();
+                    if (command == null || isCoreProtocolCommand(command)) {
+                        return; // Zero overhead fast-path: never delay or touch message sync
+                    }
+
                     String uin = "";
                     int ssoSeq = 0;
                     boolean needResp = false;

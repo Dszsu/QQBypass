@@ -138,8 +138,10 @@ public class QQ950PatchHook {
 
         // Tier 9: NT Kick & MSF Offline Interception managed authoritatively by KickInterceptHook
 
-        // Tier 10: Message Sync & Loading State Stabilization (prevents prolonged "Receiving..." stall)
-        hookMessageSyncAndLoadingState(lpparam);
+        // Tier 10: Official UI Display Integrity Preserved (DO NOT TOUCH)
+        // Strictly adheres to the rule: "不要乱动官方显示，只需要排除模块干扰".
+        // Never tamper with MsgRefreshTipMgr, Conversation, or QQAppInterface loading display.
+        // Smooth message sync without stalls is achieved purely by eliminating module packet reflection & lock latency.
 
         // Tier 11: Real Device Emulator Detection Adaptation (Safe boolean guards without device identity spoofing)
         hookEmulatorDetectionForRealDevice(lpparam);
@@ -1153,7 +1155,6 @@ public class QQ950PatchHook {
             hookTuringDIDWithClassLoader(cl);
             hookO3SecurityAndTelemetryWithClassLoader(cl);
             hookFeUtilsAWithClassLoader(cl);
-            hookMessageSyncAndLoadingStateWithClassLoader(cl);
             hookQQ9375DefensesWithClassLoader(cl);
         } catch (Throwable t) {
             XposedEntry.log("[LateStage] hookLateStage error: " + t.getMessage());
@@ -3871,98 +3872,6 @@ public class QQ950PatchHook {
         Class<?> clazz = XposedHelpers.findClassIfExists(className, cl);
         if (clazz != null) {
             HookUtils.hookIfMethodExists(clazz, methodName, callback);
-        }
-    }
-
-    // ============ Tier 10: Message Sync & Loading State Stabilization ============
-
-    private static final java.util.Set<Class<?>> sHookedSyncClasses =
-        java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
-
-    private static void hookMessageSyncAndLoadingState(XC_LoadPackage.LoadPackageParam lpparam) {
-        ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
-        hookMessageSyncAndLoadingStateWithClassLoader(cl);
-    }
-
-    public static void hookMessageSyncAndLoadingStateWithClassLoader(ClassLoader cl) {
-        if (cl == null) return;
-
-        // 1. LoadingStateManager (com.tencent.mobileqq.managers.d)
-        // When state changes to 1 (connecting) or 2 (syncing), schedule auto-dismiss if sync stalls
-        Class<?> dClazz = XposedHelpers.findClassIfExists("com.tencent.mobileqq.managers.d", cl);
-        if (dClazz != null && sHookedSyncClasses.add(dClazz)) {
-            HookUtils.hookAllMethods(dClazz, "c", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length > 0 && param.args[0] instanceof Number) {
-                        int state = ((Number) param.args[0]).intValue();
-                        if (state == 1 || state == 2) {
-                            final Object manager = param.thisObject;
-                            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                                try {
-                                    int cur = (int) XposedHelpers.callMethod(manager, "f");
-                                    if (cur == 1 || cur == 2) {
-                                        XposedHelpers.callMethod(manager, "c", 3, "autoDismissSyncStall");
-                                        XposedEntry.log("[SyncPatch] Auto-cleared prolonged loading state: " + cur + " -> 3");
-                                    }
-                                } catch (Throwable ignored) {}
-                            }, 2500L);
-                        }
-                    }
-                }
-            });
-            XposedEntry.log("[SyncPatch] Hooked LoadingStateManager.c with 2.5s auto-dismiss safeguard");
-        }
-
-        // 2. Conversation loading state handler: clamp 180s delay down to 2.5s
-        Class<?> convClazz = XposedHelpers.findClassIfExists("com.tencent.mobileqq.activity.home.Conversation", cl);
-        if (convClazz != null && sHookedSyncClasses.add(convClazz)) {
-            HookUtils.hookAllMethods(convClazz, "changeConversationLoadingState", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    try {
-                        Object handler = XposedHelpers.getObjectField(param.thisObject, "mLoadingStateHandler");
-                        if (handler instanceof android.os.Handler) {
-                            android.os.Handler h = (android.os.Handler) handler;
-                            if (h.hasMessages(3)) {
-                                h.removeMessages(3);
-                                h.sendEmptyMessageDelayed(3, 2500L);
-                            }
-                            if (h.hasMessages(4)) {
-                                h.removeMessages(4);
-                                h.sendEmptyMessageDelayed(4, 2500L);
-                            }
-                        }
-                    } catch (Throwable ignored) {}
-                }
-            });
-            XposedEntry.log("[SyncPatch] Hooked Conversation.changeConversationLoadingState to clamp 180s timeout");
-        }
-
-        // 3. QQAppInterface.setLoadingState: prevent reconnect from sticking in loading state
-        Class<?> appClazz = XposedHelpers.findClassIfExists("com.tencent.mobileqq.app.QQAppInterface", cl);
-        if (appClazz != null && sHookedSyncClasses.add(appClazz)) {
-            HookUtils.hookAllMethods(appClazz, "setLoadingState", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                        try {
-                            Class<?> dCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.managers.d", cl);
-                            if (dCls != null) {
-                                Object dInst = XposedHelpers.callStaticMethod(dCls, "e");
-                                if (dInst != null) {
-                                    int cur = (int) XposedHelpers.callMethod(dInst, "f");
-                                    if (cur == 1 || cur == 2) {
-                                        XposedHelpers.callMethod(dInst, "c", 3, "reconnectDismiss");
-                                        XposedEntry.log("[SyncPatch] Cleared reconnect loadingState -> 3");
-                                    }
-                                }
-                            }
-                        } catch (Throwable ignored) {}
-                    }, 2000L);
-                }
-            });
-            XposedEntry.log("[SyncPatch] Hooked QQAppInterface.setLoadingState for instant reconnect recovery");
         }
     }
 

@@ -85,7 +85,9 @@ public class ReportAuditManager {
 
     private static final BlockingQueue<AuditEntry> sLogQueue = new LinkedBlockingQueue<>(4096);
     private static final AtomicBoolean sWorkerStarted = new AtomicBoolean(false);
-    private static final SimpleDateFormat sDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
+    private static final ThreadLocal<SimpleDateFormat> sDateFormat = ThreadLocal.withInitial(
+        () -> new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+    );
 
     private static String sProcessName = "unknown";
 
@@ -325,9 +327,7 @@ public class ReportAuditManager {
     }
 
     private static String getCurrentTimestamp() {
-        synchronized (sDateFormat) {
-            return sDateFormat.format(new Date());
-        }
+        return sDateFormat.get().format(new Date());
     }
 
     private static String getCallerSummary(int maxFrames) {
@@ -476,7 +476,7 @@ public class ReportAuditManager {
                 sb.append("\n    Params: ").append(params.toString());
             }
 
-            if (stackDepth > 0) {
+            if (isSecurity && stackDepth > 0) {
                 sb.append("\n    Caller: ").append(getCallerSummary(stackDepth));
             }
 
@@ -486,8 +486,6 @@ public class ReportAuditManager {
             if (isSecurity) {
                 Log.w(TAG, "[ENV_AUDIT] " + fullLog);
                 XposedBridge.log("[EnvAudit] " + fullLog);
-            } else {
-                Log.i(TAG, fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordReport: " + t.getMessage());
@@ -568,7 +566,7 @@ public class ReportAuditManager {
      */
     public static void recordStatisticCollector(String uin, String tagName, boolean success, long duration, long size, Map<String, String> params, String reserved) {
         String detail = "uin=" + uin + ", success=" + success + ", duration=" + duration + "ms, size=" + size + (reserved != null ? ", res=" + reserved : "");
-        recordReport("StatisticCollector", tagName, params, detail, 4);
+        recordReport("StatisticCollector", tagName, params, detail, 0);
     }
 
     /**
@@ -576,7 +574,7 @@ public class ReportAuditManager {
      */
     public static void recordReportController(String tag, String subTag, String opType, String opName, int result, String r2, String r3, String r4, String r5) {
         String detail = "subTag=" + subTag + ", opType=" + opType + ", opName=" + opName + ", res=" + result + ", r2=" + r2 + ", r3=" + r3 + ", r4=" + r4 + ", r5=" + r5;
-        recordReport("ReportController", tag, null, detail, 3);
+        recordReport("ReportController", tag, null, detail, 0);
     }
 
     /**
@@ -585,18 +583,18 @@ public class ReportAuditManager {
     public static void recordChannelManager(String cmd, long callbackId, int dataLen, byte[] data) {
         StringBuilder detail = new StringBuilder();
         detail.append("callbackId=").append(callbackId).append(", dataLen=").append(dataLen);
-        if (data != null && data.length > 0) {
-            List<String> printable = extractPrintableStrings(data, 3);
+        if (data != null && data.length > 0 && data.length <= 2048) {
+            List<String> printable = extractPrintableStrings(data, 4);
             if (!printable.isEmpty()) {
                 detail.append(", strings=[");
-                for (int i = 0; i < Math.min(printable.size(), 6); i++) {
+                for (int i = 0; i < Math.min(printable.size(), 4); i++) {
                     if (i > 0) detail.append(", ");
                     detail.append("\"").append(printable.get(i)).append("\"");
                 }
                 detail.append("]");
             }
         }
-        recordReport("ChannelManager", cmd, null, detail.toString(), 4);
+        recordReport("ChannelManager", cmd, null, detail.toString(), 0);
     }
 
     public static void recordChannelManager(String cmd, long callbackId, int dataLen) {
@@ -622,7 +620,7 @@ public class ReportAuditManager {
             }
             detail.append("}");
         }
-        recordReport("MsfCore", cmd, null, detail.toString(), 3);
+        recordReport("MsfCore", cmd, null, detail.toString(), 0);
     }
 
     public static void recordMsfSso(String cmd, String uin, int ssoSeq, boolean needResp) {
