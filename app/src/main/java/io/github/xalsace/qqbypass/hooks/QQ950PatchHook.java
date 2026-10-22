@@ -178,6 +178,9 @@ public class QQ950PatchHook {
 
         // Tier 20: TVK Player CKey & CKeyGuard Security Neutralization
         hookCKeyAndTVKSecurity(cl);
+
+        // Tier 21: ROMUtil & Device Brand/Version Normalization Defense
+        hookROMUtilAndDeviceNormalization(cl);
     }
 
     // ==================== Tier 1: void-return, crash-safe ====================
@@ -1169,6 +1172,7 @@ public class QQ950PatchHook {
             hookTuringBerryAndThisWithClassLoader(cl);
             hookTuringOutboundRiskMapWithClassLoader(cl);
             hookCKeyAndTVKSecurity(cl);
+            hookROMUtilAndDeviceNormalization(cl);
         } catch (Throwable t) {
             XposedEntry.logError("[LateStage] hookLateStage error: " + t.getMessage(), t);
         }
@@ -4723,6 +4727,16 @@ public class QQ950PatchHook {
                                                     }
                                                 }
 
+                                                // Key 2016: System Properties & Prop Scan (contains XposedHelpers/Xpatch references)
+                                                if (map.containsKey("2016")) {
+                                                    Object v = map.get("2016");
+                                                    if (v != null && !v.toString().isEmpty()) {
+                                                        map.put("2016", "");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("2016(PropScan)");
+                                                    }
+                                                }
+
                                                 if (sanitized) {
                                                     io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSanitizationEvent(
                                                         "TuringFD", target, sanitizedDetails);
@@ -4977,7 +4991,8 @@ public class QQ950PatchHook {
     public static boolean scrubPackedRiskPayload(byte[] data) {
         if (data == null || data.length < 8) return false;
         String[] riskSignatures = {
-            "fclnicsd", "jshenoea", "mountify", "debugfs:/dev", "/system/etc/hosts"
+            "fclnicsd", "jshenoea", "mountify", "debugfs:/dev", "/system/etc/hosts",
+            "XpatchProxyApplication", "XposedHelpers", "XposedModuleEntry"
         };
         boolean modified = false;
         for (String sig : riskSignatures) {
@@ -5008,6 +5023,103 @@ public class QQ950PatchHook {
             if (match) return i;
         }
         return -1;
+    }
+
+    /**
+     * Tier 21: ROMUtil & Device Normalization Defense
+     *
+     * In com.tencent.qphone.base.util.ROMUtil, if Build.MANUFACTURER is not in QQ's ancient
+     * hardcoded vendor list (MIUI, EMUI, ColorOS, etc.), QQ prepends "[u]" to manufacturer
+     * (producing "[u]realme") and prepends "?" to display version (producing "?RMX6688...").
+     * These anomalous prefixes are sent in StatusService.Register/UnRegister, FEKit token
+     * payloads, and Beacon reports, marking the client as an unrecognized/modified device to
+     * Tencent server-side risk control.
+     *
+     * We hook ROMUtil methods to normalize the brand/ROM as legitimate "ColorOS" (or clean
+     * "realme" without "[u]" prefix) and version as "ColorOS V16.0.0" (without "?" prefix).
+     * Also resets ROMUtil's static cached fields to ensure all subsequent callers get clean values.
+     */
+    public static void hookROMUtilAndDeviceNormalization(ClassLoader cl) {
+        if (cl == null) cl = HookConfig.getClassLoader();
+        if (cl == null) return;
+
+        Class<?> romUtilCls = XposedHelpers.findClassIfExists("com.tencent.qphone.base.util.ROMUtil", cl);
+        if (romUtilCls == null || !sHookedTuringMapClasses.add(cl.hashCode() + "_ROMUtil")) return;
+
+        try {
+            // Reset cached static fields
+            XposedHelpers.setStaticObjectField(romUtilCls, "romName", null);
+            XposedHelpers.setStaticObjectField(romUtilCls, "romVersion", null);
+            XposedHelpers.setStaticObjectField(romUtilCls, "deviceInfo", null);
+            XposedHelpers.setStaticObjectField(romUtilCls, "romDescription", null);
+            XposedHelpers.setStaticObjectField(romUtilCls, "romDetailInfo", null);
+        } catch (Throwable ignored) {}
+
+        XC_MethodHook romNameHook = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                Object res = param.getResult();
+                if (res instanceof String) {
+                    String s = (String) res;
+                    if (s.startsWith("[u]")) {
+                        param.setResult("ColorOS");
+                    }
+                } else if (res == null) {
+                    param.setResult("ColorOS");
+                }
+            }
+        };
+        HookUtils.hookAllMethods(romUtilCls, "getRomName", romNameHook);
+
+        XC_MethodHook romVersionHook = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                Object res = param.getResult();
+                if (res instanceof String) {
+                    String s = (String) res;
+                    if (s.startsWith("?")) {
+                        param.setResult("ColorOS V16.0.0");
+                    }
+                } else if (res == null) {
+                    param.setResult("ColorOS V16.0.0");
+                }
+            }
+        };
+        HookUtils.hookAllMethods(romUtilCls, "getRomVersion", romVersionHook);
+
+        XC_MethodHook romDescHook = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                Object res = param.getResult();
+                if (res instanceof String) {
+                    String s = (String) res;
+                    if (s.startsWith("?")) {
+                        param.setResult(s.substring(1));
+                    }
+                }
+            }
+        };
+        HookUtils.hookAllMethods(romUtilCls, "getRomDescription", romDescHook);
+        HookUtils.hookAllMethods(romUtilCls, "getRomDetailInfo", romDescHook);
+
+        HookUtils.hookAllMethods(romUtilCls, "getRomNameAndVersion", new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                Object res = param.getResult();
+                if (res instanceof String[]) {
+                    String[] arr = (String[]) res;
+                    if (arr.length >= 4) {
+                        String name = arr[0] != null && arr[0].startsWith("[u]") ? "ColorOS" : arr[0];
+                        String ver = arr[1] != null && arr[1].startsWith("?") ? "ColorOS V16.0.0" : arr[1];
+                        String desc = arr[2] != null && arr[2].startsWith("?") ? arr[2].substring(1) : arr[2];
+                        String detail = arr[3] != null && arr[3].startsWith("?") ? arr[3].substring(1) : arr[3];
+                        param.setResult(new String[]{name, ver, desc, detail});
+                    }
+                }
+            }
+        });
+
+        XposedEntry.log("[DeviceNormalization] Installed ROMUtil normalization hook on loader " + cl);
     }
 }
 

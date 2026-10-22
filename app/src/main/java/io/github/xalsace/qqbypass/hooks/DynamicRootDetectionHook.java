@@ -1283,6 +1283,10 @@ public class DynamicRootDetectionHook {
                         param.setResult("none");
                     } else if ("init.svc.adbd".equals(key)) {
                         param.setResult("stopped");
+                    } else if ("ro.build.version.opporom".equals(key)) {
+                        param.setResult("V16.0.0");
+                    } else if ("ro.rom.different.version".equals(key)) {
+                        param.setResult("ColorOS V16.0.0");
                     } else if (key.contains("magisk") || key.contains("kernelsu") || key.contains("ksud") || key.contains("ro.boot.ksu") || key.contains("ro.apatch") || key.contains("apatchd")) {
                         String def = param.args.length > 1 && param.args[1] instanceof String ? (String) param.args[1] : "";
                         param.setResult(def);
