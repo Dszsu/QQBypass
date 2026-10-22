@@ -41,7 +41,7 @@ static int fake_system(const char* command) {
     if (command && (strstr(command, "logcat") || strstr(command, "bin.mt") ||
                     strstr(command, "mt.plus") || strstr(command, "io.github.qauxv") ||
                     strstr(command, "lspatch") || strstr(command, "moe.ono") ||
-                    strstr(command, "ono") || strstr(command, "lzlnb") || strstr(command, "cnm") ||
+                    strstr(command, "ono_") || strstr(command, "lzlnb") || strstr(command, "libcnm") || strstr(command, "cnm0") ||
                     strstr(command, "magisk") || strstr(command, "su") ||
                     strstr(command, "mount") || strstr(command, "/proc/mounts") ||
                     strstr(command, "which") || strstr(command, "getprop") ||
@@ -72,7 +72,7 @@ static FILE* fake_popen(const char* command, const char* type) {
         if (strstr(command, "logcat") || strstr(command, "bin.mt") ||
             strstr(command, "mt.plus") || strstr(command, "io.github.qauxv") ||
             strstr(command, "lspatch") || strstr(command, "moe.ono") ||
-            strstr(command, "ono") || strstr(command, "lzlnb") || strstr(command, "cnm") ||
+            strstr(command, "ono_") || strstr(command, "lzlnb") || strstr(command, "libcnm") || strstr(command, "cnm0") ||
             strstr(command, "magisk") || strstr(command, "su") ||
             strstr(command, "which") || strstr(command, "getprop") ||
             strstr(command, "ksu") || strstr(command, "apatch") ||
@@ -101,7 +101,7 @@ static char* fake_strstr(const char* haystack, const char* needle) {
             "qauxv", "io.github.qauxv", "libqauxv", "cc.ioctl", "qnotified",
             "bin.mt", "mt.plus", "top.nkbe.npatch", "npatch", "singleneuron", "bytebuddy",
             "nep.timeline", "me.ketal", "me.hd", "xyz.nextalone", "top.linl",
-            "lspatch", "org.lsposed.lspatch", "moe.ono", "ono", "lzlnb", "cnm", "libcnm", "liball-jni",
+            "lspatch", "org.lsposed.lspatch", "moe.ono", "ono_", "lzlnb", "libcnm", "cnm0", "liball-jni",
             "sesearchcache",
             "me.weishu.kernelsu", "me.bmax.apatch", "eu.chainfire.supersu",
             "com.koushikdutta.superuser", "com.noshufou.android.su", "com.kingroot.kinguser",

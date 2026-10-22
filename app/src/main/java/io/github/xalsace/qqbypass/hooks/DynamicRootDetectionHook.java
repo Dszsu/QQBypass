@@ -1950,7 +1950,7 @@ public class DynamicRootDetectionHook {
                lower.contains("moe.ono") ||
                lower.contains("lzlnb") ||
                lower.contains("qauxv") ||
-               lower.contains("global_config") ||
+               (lower.equals("global_config") || lower.startsWith("qauxv_global_config")) ||
                lower.contains("xposed") ||
                lower.contains("lsposed");
     }
@@ -1969,7 +1969,7 @@ public class DynamicRootDetectionHook {
         if (lower.contains("qa_mmkv") || lower.contains("tmp_qa_")
                 || lower.contains("qa_dyn_lib") || lower.contains("qa_misc")
                 || lower.contains("io.github.qauxv") || lower.contains("libqauxv")
-                || lower.contains("qnotified") || lower.contains("global_config")
+                || lower.contains("qnotified") || (lower.contains("global_config") && !lower.contains("ar_global_config") && (lower.contains("qa_mmkv/global_config") || lower.endsWith("/global_config.xml") || lower.endsWith("/global_config") || lower.contains("qauxv_global_config")))
                 || lower.contains("oat_inline_deopt_cache") || lower.contains("last_use_emoticon_time")
                 || lower.contains("sdumptg_") || lower.contains("qauxv_")) {
             if (isCallerQAuxv()) {

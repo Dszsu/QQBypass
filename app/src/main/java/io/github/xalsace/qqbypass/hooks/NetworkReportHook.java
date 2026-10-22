@@ -9,6 +9,7 @@ import io.github.xalsace.qqbypass.detector.DexMethodData;
 
 import java.lang.reflect.Member;
 import java.util.List;
+import java.util.Map;
 
 import io.github.xalsace.qqbypass.XposedEntry;
 import io.github.xalsace.qqbypass.config.CompileHookConfig;
@@ -689,7 +690,30 @@ public class NetworkReportHook {
             XposedEntry.log("[KickAudit] Installed read-only kick audit on WtloginHelper");
         }
 
-        // 5. Crossplatform NewSender / kickedAndCleanTokenResp Audit
+        // 5. Crossplatform NewSender / kickedAndCleanTokenResp Audit (Direct c$a & reflective inner class)
+        Class<?> cpInnerCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.service.crossplatform.c$a", cl);
+        if (cpInnerCls != null && sKickAuditedClasses.add("crossplatform.c$a")) {
+            HookUtils.hookAllMethods(cpInnerCls, "run", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    try {
+                        Object toMsg = XposedHelpers.getObjectField(param.thisObject, "a");
+                        if (toMsg != null) {
+                            Object cmd = XposedHelpers.callMethod(toMsg, "getMsfCommand");
+                            if (cmd != null && "_msf_kickedAndCleanTokenResp".equals(cmd.toString())) {
+                                String serviceCmd = (String) XposedHelpers.callMethod(toMsg, "getServiceCmd");
+                                Object fromServiceMsg = serviceCmd != null ? XposedHelpers.callMethod(toMsg, "getAttribute", serviceCmd) : null;
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                                    "crossplatform.c$a.run (Read-Only Audit)",
+                                    fromServiceMsg, "_msf_kickedAndCleanTokenResp executing");
+                            }
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            });
+            XposedEntry.log("[KickAudit] Installed read-only kick audit on crossplatform.c$a.run");
+        }
+
         Class<?> cpCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.service.crossplatform.c", cl);
         if (cpCls != null && sKickAuditedClasses.add("crossplatform.c")) {
             for (Class<?> inner : cpCls.getDeclaredClasses()) {
@@ -702,9 +726,11 @@ public class NetworkReportHook {
                                 if (toMsg != null) {
                                     Object cmd = XposedHelpers.callMethod(toMsg, "getMsfCommand");
                                     if (cmd != null && "_msf_kickedAndCleanTokenResp".equals(cmd.toString())) {
+                                        String serviceCmd = (String) XposedHelpers.callMethod(toMsg, "getServiceCmd");
+                                        Object fromServiceMsg = serviceCmd != null ? XposedHelpers.callMethod(toMsg, "getAttribute", serviceCmd) : null;
                                         io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
                                             "crossplatform.c$Runnable.run (Read-Only Audit)",
-                                            null, "_msf_kickedAndCleanTokenResp executing");
+                                            fromServiceMsg, "_msf_kickedAndCleanTokenResp executing");
                                     }
                                 }
                             } catch (Throwable ignored) {}
@@ -714,6 +740,46 @@ public class NetworkReportHook {
                     break;
                 }
             }
+        }
+
+        // 6. WTLogin Beacon Report Funnel Audit (oicq.wlogin_sdk.report.c.b.a)
+        Class<?> oicqReportCls = XposedHelpers.findClassIfExists("oicq.wlogin_sdk.report.c.b", cl);
+        if (oicqReportCls != null && sKickAuditedClasses.add("oicq.wlogin_sdk.report.c.b")) {
+            HookUtils.hookAllMethods(oicqReportCls, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length == 0 || param.args[0] == null) return;
+                    if (param.args.length > 1) return; // a(a, int) delegates to a(a)
+                    try {
+                        Object aVar = param.args[0];
+                        String event = (String) XposedHelpers.getObjectField(aVar, "a");
+                        String uin = (String) XposedHelpers.getObjectField(aVar, "f");
+                        Map<?, ?> map = (Map<?, ?>) XposedHelpers.getObjectField(aVar, "g");
+                        if ("wt_all_sig_clear".equals(event) || (map != null && map.containsKey("clearFrom"))) {
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                                "oicq.wlogin_sdk.report.c.b.a (Read-Only Audit)",
+                                null, "wt_all_sig_clear: uin=" + uin + ", params=" + map);
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            });
+            XposedEntry.log("[KickAudit] Installed read-only kick audit on oicq.wlogin_sdk.report.c.b.a");
+        }
+
+        // 7. LoginReporterImpl Clear Login Data Audit
+        Class<?> loginReporterCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.login.api.impl.LoginReporterImpl", cl);
+        if (loginReporterCls != null && sKickAuditedClasses.add("LoginReporterImpl")) {
+            HookUtils.hookAllMethods(loginReporterCls, "reportClearLoginData", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    String uin = param.args != null && param.args.length > 0 ? String.valueOf(param.args[0]) : "";
+                    String from = param.args != null && param.args.length > 1 ? String.valueOf(param.args[1]) : "";
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                        "LoginReporterImpl.reportClearLoginData (Read-Only Audit)",
+                        null, "reportClearLoginData called: uin=" + uin + ", from=" + from);
+                }
+            });
+            XposedEntry.log("[KickAudit] Installed read-only kick audit on LoginReporterImpl.reportClearLoginData");
         }
     }
 

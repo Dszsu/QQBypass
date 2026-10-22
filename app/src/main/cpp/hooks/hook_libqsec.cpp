@@ -41,9 +41,9 @@ static void* hooked_dlopen(const char* filename, int flag) {
             strcasestr(filename, "lspatch") ||
             strcasestr(filename, "liblspatch") ||
             strcasestr(filename, "moe.ono") ||
-            strcasestr(filename, "ono") ||
+            strcasestr(filename, "ono_") ||
             strcasestr(filename, "lzlnb") ||
-            strcasestr(filename, "cnm") ||
+            strcasestr(filename, "cnm0") ||
             strcasestr(filename, "libcnm") ||
             strcasestr(filename, "liball-jni")) {
             LOGI("QSec dlopen blocked: %s", filename);
@@ -96,9 +96,9 @@ static void* hooked_dlsym(void* handle, const char* symbol) {
             strcasestr(symbol, "bytebuddy") ||
             strcasestr(symbol, "lspatch") ||
             strcasestr(symbol, "moe.ono") ||
-            strcasestr(symbol, "ono") ||
+            strcasestr(symbol, "ono_") ||
             strcasestr(symbol, "lzlnb") ||
-            strcasestr(symbol, "cnm") ||
+            strcasestr(symbol, "cnm0") ||
             strcasestr(symbol, "libcnm") ||
             strcasestr(symbol, "liball-jni")) {
             LOGI("QSec dlsym blocked: %s", symbol);
@@ -152,9 +152,9 @@ static int hooked_dladdr(const void* addr, Dl_info* info) {
             strcasestr(fname, "cc.ioctl") ||
             strcasestr(fname, "qnotified") ||
             strcasestr(fname, "moe.ono") ||
-            strcasestr(fname, "ono") ||
+            strcasestr(fname, "ono_") ||
             strcasestr(fname, "lzlnb") ||
-            strcasestr(fname, "cnm") ||
+            strcasestr(fname, "cnm0") ||
             strcasestr(fname, "libcnm") ||
             strcasestr(fname, "liball-jni") ||
             strcasestr(fname, "riru") ||

@@ -399,6 +399,11 @@ public class ReportAuditManager {
                 eLower.contains("wtlogin") ||
                 eLower.contains("offline") ||
                 eLower.contains("kick") ||
+                eLower.contains("sig_clear") ||
+                eLower.contains("wt_all_sig_clear") ||
+                eLower.contains("clearsig") ||
+                eLower.contains("clearlogin") ||
+                eLower.contains("forceoffline") ||
                 eLower.contains("sec_") ||
                 eLower.contains("security") ||
                 eLower.contains("detect") ||
@@ -439,7 +444,10 @@ public class ReportAuditManager {
                     kLower.contains("strike") ||
                     kLower.contains("check") ||
                     kLower.contains("sec_") ||
-                    kLower.contains("sig")) {
+                    kLower.contains("sig") ||
+                    kLower.contains("clearfrom") ||
+                    kLower.contains("clear_from") ||
+                    kLower.contains("clearsig")) {
                     return true;
                 }
             }
@@ -457,6 +465,13 @@ public class ReportAuditManager {
         }
         try {
             boolean isSecurity = isSecurityOrEnvironmentEvent(channel, eventOrCmd, params, extraDetail);
+            if (eventOrCmd != null && (eventOrCmd.contains("sig_clear") || eventOrCmd.contains("wt_all_sig_clear") || eventOrCmd.contains("clearFrom"))) {
+                stackDepth = Math.max(stackDepth, 15);
+                isSecurity = true;
+            } else if (params != null && (params.containsKey("clearFrom") || params.containsKey("clear_from"))) {
+                stackDepth = Math.max(stackDepth, 15);
+                isSecurity = true;
+            }
             String time = getCurrentTimestamp();
             int pid = Process.myPid();
             int tid = Process.myTid();

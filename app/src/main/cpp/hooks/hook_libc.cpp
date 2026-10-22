@@ -211,7 +211,7 @@ static bool is_caller_qa(void* return_address) {
             strstr(f, "liblspd") || strstr(f, "libxposed") ||
             strstr(f, "qqbypass") || strstr(f, "libnative-bypass") || strstr(f, "dexkit") ||
             strstr(f, "liblspatch") || strstr(f, "lspatch") || strstr(f, "libpine") || strstr(f, "libsandhook") ||
-            strstr(f, "libcnm") || strstr(f, "liball-jni") || strstr(f, "moe.ono") || strstr(f, "ono") || strstr(f, "lzlnb") ||
+            strstr(f, "libcnm") || strstr(f, "liball-jni") || strstr(f, "moe.ono") || strstr(f, "ono_") || strstr(f, "lzlnb") ||
             strstr(f, "cnm0") || strstr(f, "cn.jesse") || strstr(f, "luckypray") || strstr(f, "libdexkit")) {
             return true;
         }
@@ -240,7 +240,9 @@ static bool is_qa_private_path(const char* path) {
            strcasestr(path, "libqauxv-core0") != nullptr ||
            strcasestr(path, "libqauxv-core1") != nullptr ||
            strcasestr(path, "qnotified") != nullptr ||
-           strcasestr(path, "global_config") != nullptr ||
+           (strcasestr(path, "global_config") != nullptr && strstr(path, "ar_global_config") == nullptr &&
+            (strstr(path, "/global_config") != nullptr || strstr(path, "qa_mmkv/global_config") != nullptr ||
+             strstr(path, "qauxv_global_config") != nullptr)) ||
            strcasestr(path, "oat_inline_deopt_cache") != nullptr ||
            strcasestr(path, "last_use_emoticon_time") != nullptr ||
            strcasestr(path, "sDumpTG_") != nullptr ||
@@ -251,7 +253,6 @@ static bool is_qa_private_path(const char* path) {
            strcasestr(path, "ono_image_tag") != nullptr ||
            strcasestr(path, "ono_need_find_method") != nullptr ||
            strcasestr(path, "moe.ono") != nullptr ||
-           strcasestr(path, "/ONO") != nullptr ||
            strcasestr(path, "sesearchcache") != nullptr ||
            strstr(path, "files/.se") != nullptr ||
            strstr(path, "/.se/") != nullptr ||
@@ -405,10 +406,10 @@ static bool is_sensitive_name_for_caller(const char* name, void* return_address)
         "bin.mt", "mt2", "singleneuron", "bytebuddy",
         "thanos", "termux", "duckusb", "lspatch",
         "org.lsposed.lspatch", "moe.ono", "ono_mmkv", "ono_hcb_",
-        "ono_bubble_cache", "ono_image_tag", "ono_need_find_method", "ONO",
+        "ono_bubble_cache", "ono_image_tag", "ono_need_find_method",
         "lzlnb", "libcnm", "liball-jni", "cnm0",
         "sesearchcache", "kc.dat", ".sys_cache",
-        "global_config", "oat_inline_deopt_cache", "last_use_emoticon_time",
+        "qauxv_global_config", "oat_inline_deopt_cache", "last_use_emoticon_time",
         "sDumpTG_", "qauxv", "qa_mmkv", "tmp_qa_", "qnotified",
         "kernelsu", "apatch", "supersu", "superuser", "kingroot", "kinguser",
         "oneclickroot", "rootgenius", "shuamesu", "appcloner", "microvirtd",
@@ -416,6 +417,9 @@ static bool is_sensitive_name_for_caller(const char* name, void* return_address)
         nullptr
     };
     if (strcmp(name, ".se") == 0) return true;
+    if (strcasecmp(name, "global_config") == 0 || strcasecmp(name, "global_config.xml") == 0 || strcasecmp(name, "global_config.lock") == 0) {
+        if (!is_caller_qa(return_address)) return true;
+    }
     for (int i = 0; root_patterns[i]; i++) {
         if (strcasestr(name, root_patterns[i])) return true;
     }
@@ -696,11 +700,11 @@ FILE* build_filtered_mounts() {
         return nullptr;
     }
 
-    char line[512];
+    char line[2048];
     const char* blacklist[] = {
         "/dev/block/loop", "magisk", "core/mirror", "core/img", "/data/adb",
         "modules", "ksu", "apatch", "overlay", "lsposed", "lspatch",
-        "moe.ono", "ono_mmkv", "lzlnb", "cnm",
+        "moe.ono", "ono_mmkv", "lzlnb", "libcnm", "cnm0",
         "mountify", "tricky_store", "metamodule", "ksud", "zygisksu",
         nullptr
     };
@@ -736,7 +740,7 @@ FILE* build_filtered_mountinfo() {
     const char* blacklist[] = {
         "/dev/block/loop", "magisk", "core/mirror", "core/img", "/data/adb",
         "modules", "ksu", "apatch", "overlay", "lsposed", "lspatch",
-        "moe.ono", "ono_mmkv", "lzlnb", "cnm",
+        "moe.ono", "ono_mmkv", "lzlnb", "libcnm", "cnm0",
         "mountify", "tricky_store", "metamodule", "ksud", "zygisksu",
         nullptr
     };
@@ -771,7 +775,7 @@ FILE* build_filtered_net_unix() {
     const char* blacklist[] = {
         "lsp", "lspbridge", "lsp_dex2oat", "lsposed", "xposed",
         "zn_", "zygisk", "magisk", "ksu", "ksud", "apatch", "daemonsu",
-        "qauxv", "ono", "lzlnb", "cnm", "frida", "mountify", "tricky_store",
+        "qauxv", "moe.ono", "ono_", "lzlnb", "libcnm", "cnm0", "frida", "mountify", "tricky_store",
         nullptr
     };
 

@@ -35,7 +35,7 @@ static char* fake_xq_strstr(const char* haystack, const char* needle) {
             "dexkit", "libdexkit", "flatbuffers", "sandhook", "yahfa", "epic", "pine", "taichi", "liblspd",
             "qqbypass", "xalsace", "libnative-bypass", "libbytehook", "bytehook", "trampoline",
             "qauxv", "io.github.qauxv", "libqauxv", "cc.ioctl", "qnotified",
-            "lspatch", "org.lsposed.lspatch", "moe.ono", "ono", "lzlnb", "cnm", "libcnm", "liball-jni",
+            "lspatch", "org.lsposed.lspatch", "moe.ono", "ono_", "lzlnb", "libcnm", "cnm0", "liball-jni",
             "sesearchcache",
             "me.weishu.kernelsu", "me.bmax.apatch", "eu.chainfire.supersu",
             "com.koushikdutta.superuser", "com.noshufou.android.su", "com.kingroot.kinguser",
