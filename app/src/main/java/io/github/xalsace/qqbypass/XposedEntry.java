@@ -248,9 +248,19 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
 
     public static void log(String message) {
         if (!HookConfig.VERBOSE_LOGGING) return;
+        if (message == null) return;
         try {
-            android.util.Log.i(TAG, message);
-            de.robv.android.xposed.XposedBridge.log("[" + TAG + "] " + message);
+            boolean isErr = message.contains("error") || message.contains("Error") ||
+                            message.contains("ERROR") || message.contains("fail") ||
+                            message.contains("Fail") || message.contains("FAIL") ||
+                            message.contains("exception") || message.contains("Exception");
+            if (isErr) {
+                android.util.Log.e(TAG, message);
+                de.robv.android.xposed.XposedBridge.log("[" + TAG + "] [ERROR] " + message);
+            } else {
+                android.util.Log.i(TAG, message);
+                de.robv.android.xposed.XposedBridge.log("[" + TAG + "] " + message);
+            }
         } catch (Throwable ignored) {
         }
     }
@@ -262,10 +272,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
     public static void logError(String message, Throwable t) {
         try {
             android.util.Log.e(TAG, message, t);
-            de.robv.android.xposed.XposedBridge.log("[" + TAG + "] [ERROR] " + message);
-            if (t != null) {
-                de.robv.android.xposed.XposedBridge.log(t);
-            }
+            de.robv.android.xposed.XposedBridge.log("[" + TAG + "] [ERROR] " + message + (t != null ? " | " + android.util.Log.getStackTraceString(t) : ""));
         } catch (Throwable ignored) {
         }
     }

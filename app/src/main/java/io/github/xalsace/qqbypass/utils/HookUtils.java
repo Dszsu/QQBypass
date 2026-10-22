@@ -107,6 +107,35 @@ public class HookUtils {
     }
 
     /**
+     * Hook all overloads of method if it exists on class (silent if not found, 0 failures recorded)
+     */
+    public static void hookAllMethodsIfExists(Class<?> clazz, String methodName, XC_MethodHook callback) {
+        if (clazz == null || clazz.isInterface()) return;
+        String name = clazz.getName() + "." + methodName;
+        try {
+            int hooked = 0;
+            for (Method method : clazz.getDeclaredMethods()) {
+                if (method.getName().equals(methodName)) {
+                    if (Modifier.isAbstract(method.getModifiers())) {
+                        continue;
+                    }
+                    try {
+                        XposedBridge.hookMethod(method, callback);
+                        hooked++;
+                    } catch (Throwable t) {
+                        HookTracker.recordJavaFailure(name + "()", t);
+                    }
+                }
+            }
+            if (hooked > 0) {
+                HookTracker.recordJavaSuccess(name);
+            }
+        } catch (Throwable t) {
+            HookTracker.recordJavaFailure(name, t);
+        }
+    }
+
+    /**
      * Hook constructor by class name
      */
     public static void hookConstructor(String className, Object... parameterTypesAndCallback) {

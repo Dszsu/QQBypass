@@ -575,7 +575,14 @@ public class NetworkReportHook {
         if (cl == null) return;
         String[] eridanusClasses = {
             "com.tencent.turingfd.sdk.xq.Eridanus",
-            "com.tencent.tfd.sdk.wxa.Eridanus"
+            "com.tencent.tfd.sdk.wxa.Ara",
+            "com.tencent.tfd.sdk.wxa.Nectarine",
+            "com.tencent.tfd.sdk.wxa.this",
+            "com.tencent.turingcam.F2BEC",
+            "com.tencent.turingcam.Ckq8l",
+            "com.tencent.turingcam.JD1Ej",
+            "com.tencent.turingcam.FLlEM",
+            "com.tencent.turingcam.FxCVY"
         };
         for (String clsName : eridanusClasses) {
             Class<?> clazz = XposedHelpers.findClassIfExists(clsName, cl);
@@ -638,9 +645,70 @@ public class NetworkReportHook {
                         }
                     }
                 };
-                HookUtils.hookAllMethods(clazz, "a", byteReaderHook);
-                HookUtils.hookAllMethods(clazz, "b", byteReaderHook);
+                HookUtils.hookAllMethodsIfExists(clazz, "a", byteReaderHook);
+                HookUtils.hookAllMethodsIfExists(clazz, "b", byteReaderHook);
                 XposedEntry.log("[TuringFD] Hooked Eridanus byte readers on " + clsName);
+            }
+        }
+
+        // Process status probers (Pomegranate, Blueberry, oqKCa)
+        String[] statusProbers = {
+            "com.tencent.turingfd.sdk.xq.Pomegranate",
+            "com.tencent.tfd.sdk.wxa.Blueberry",
+            "com.tencent.turingcam.oqKCa"
+        };
+        for (String proberCls : statusProbers) {
+            Class<?> clazz = XposedHelpers.findClassIfExists(proberCls, cl);
+            if (clazz != null) {
+                HookUtils.hookAllMethodsIfExists(clazz, "b", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res != null) {
+                            try {
+                                for (java.lang.reflect.Field f : res.getClass().getDeclaredFields()) {
+                                    if (f.getType() == int.class) {
+                                        f.setAccessible(true);
+                                        String fname = f.getName();
+                                        if (fname.equals("c") || fname.equals("f1003c") || fname.equals("f1167c")) {
+                                            f.setInt(res, 0); // TracerPid = 0
+                                        } else if (fname.equals("a")) {
+                                            f.setInt(res, 1); // PPid = 1
+                                        }
+                                    }
+                                }
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringFD] Hooked status prober on " + proberCls);
+            }
+        }
+
+        // Process status POJO constructors (Plum, Blueberry$Cdo, oqKCa$spXPg)
+        String[] statusPojos = {
+            "com.tencent.turingfd.sdk.xq.Plum",
+            "com.tencent.tfd.sdk.wxa.Blueberry$Cdo",
+            "com.tencent.turingcam.oqKCa$spXPg"
+        };
+        for (String pojoCls : statusPojos) {
+            Class<?> clazz = XposedHelpers.findClassIfExists(pojoCls, cl);
+            if (clazz != null) {
+                HookUtils.hookAllConstructors(clazz, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length >= 4) {
+                            if (param.args[0] instanceof Integer) {
+                                param.args[0] = 1; // PPid = 1
+                            }
+                            if (param.args[3] instanceof Integer) {
+                                param.args[3] = 0; // TracerPid = 0
+                            }
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringFD] Hooked status POJO constructor on " + pojoCls);
             }
         }
     }
