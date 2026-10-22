@@ -143,8 +143,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         java.util.concurrent.Executors.newSingleThreadExecutor();
 
     public static void dispatchLateStageHooks(ClassLoader cl) {
-        if (cl == null || sObservedLoaders.contains(cl)) return;
-        sObservedLoaders.add(cl);
+        if (cl == null) return;
         try {
             NetworkReportHook.hookLateStage(cl);
             QQ950PatchHook.hookLateStage(cl);
@@ -183,7 +182,45 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         }
 
         try {
-            // 2. Hook dalvik.system.BaseDexClassLoader constructors asynchronously to never block main thread
+            // 2. Hook Application.onCreate() - all MultiDex secondary DEXes are guaranteed to be fully installed
+            de.robv.android.xposed.XposedBridge.hookAllMethods(
+                android.app.Application.class,
+                "onCreate",
+                new de.robv.android.xposed.XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof android.app.Application) {
+                            android.app.Application app = (android.app.Application) param.thisObject;
+                            dispatchLateStageHooks(app.getClassLoader());
+                        }
+                    }
+                }
+            );
+        } catch (Throwable t) {
+            log("Failed to hook Application.onCreate: " + t.getMessage());
+        }
+
+        try {
+            // 3. Hook Service.onCreate() - critical for background processes like :MSF running MsfService
+            de.robv.android.xposed.XposedBridge.hookAllMethods(
+                android.app.Service.class,
+                "onCreate",
+                new de.robv.android.xposed.XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof android.app.Service) {
+                            android.app.Service svc = (android.app.Service) param.thisObject;
+                            dispatchLateStageHooks(svc.getClassLoader());
+                        }
+                    }
+                }
+            );
+        } catch (Throwable t) {
+            log("Failed to hook Service.onCreate: " + t.getMessage());
+        }
+
+        try {
+            // 4. Hook dalvik.system.BaseDexClassLoader constructors asynchronously for dynamic DEX plugins
             de.robv.android.xposed.XposedBridge.hookAllConstructors(
                 dalvik.system.BaseDexClassLoader.class,
                 new de.robv.android.xposed.XC_MethodHook() {
@@ -197,7 +234,9 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                                 clStr.contains("cn.jesse") || clStr.contains("lspatch")) {
                                 return;
                             }
-                            sLateHookExecutor.execute(() -> dispatchLateStageHooks(cl));
+                            if (sObservedLoaders.add(cl)) {
+                                sLateHookExecutor.execute(() -> dispatchLateStageHooks(cl));
+                            }
                         }
                     }
                 }

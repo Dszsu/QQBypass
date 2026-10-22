@@ -508,6 +508,8 @@ public class NetworkReportHook {
                             fakeBytes = "1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
                         } else if (path.contains("net/unix")) {
                             fakeBytes = "".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        } else if (path.contains("net/tcp") || path.contains("net/tcp6")) {
+                            fakeBytes = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
                         }
 
                         if (fakeBytes != null) {
@@ -577,9 +579,11 @@ public class NetworkReportHook {
         if (cmd == null || cmd.isEmpty()) return false;
         return "StatSvc.ReqMSFOffline".equals(cmd) ||
                "StatSvc.ReqForceOffline".equals(cmd) ||
+               "StatSvc.RspMSFForceOffline".equals(cmd) ||
                "MessageSvc.PushForceOffline".equals(cmd) ||
                cmd.startsWith("trpc.login.ecdh.report") ||
-               "ConfigPushSvc.PushReq".equals(cmd);
+               "ConfigPushSvc.PushReq".equals(cmd) ||
+               "cmd_forceLogout".equals(cmd);
     }
 
     private static void hookErrorHandlerClass(Class<?> ehCls) {

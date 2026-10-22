@@ -168,6 +168,9 @@ public class QQ950PatchHook {
 
         // Tier 17: SafeReport & XpsReport Suppression
         hookSafeReportAndXps(lpparam, cl);
+
+        // Tier 18: TuringFD Port / Process & Accessibility Neutralization (Berry & this)
+        hookTuringBerryAndThis(lpparam, cl);
     }
 
     // ==================== Tier 1: void-return, crash-safe ====================
@@ -1156,6 +1159,7 @@ public class QQ950PatchHook {
             hookO3SecurityAndTelemetryWithClassLoader(cl);
             hookFeUtilsAWithClassLoader(cl);
             hookQQ9375DefensesWithClassLoader(cl);
+            hookTuringBerryAndThisWithClassLoader(cl);
         } catch (Throwable t) {
             XposedEntry.log("[LateStage] hookLateStage error: " + t.getMessage());
         }
@@ -4443,6 +4447,81 @@ public class QQ950PatchHook {
         // Do NOT arbitrarily clear report items to empty!
         // Empty report packets trigger missing-telemetry and packet-format anomaly heuristics on the server.
         // Genuine logging items are allowed to pass through normally.
+    }
+
+    private static final java.util.Set<String> sHookedTuringBerryClasses =
+        java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * Tier 18: TuringFD Port / Process & Accessibility Neutralization (Berry & this).
+     */
+    public static void hookTuringBerryAndThis(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
+        if (cl == null) cl = HookConfig.getClassLoader();
+        hookTuringBerryAndThisWithClassLoader(cl);
+    }
+
+    public static void hookTuringBerryAndThisWithClassLoader(ClassLoader cl) {
+        if (cl == null) return;
+
+        String[] berryClasses = {
+            "com.tencent.turingfd.sdk.xq.Berry",
+            "com.tencent.tfd.sdk.wxa.Berry"
+        };
+        for (String bClsName : berryClasses) {
+            Class<?> bCls = XposedHelpers.findClassIfExists(bClsName, cl);
+            if (bCls != null && sHookedTuringBerryClasses.add(bClsName)) {
+                // Berry.b() -> listens to open ports/tcp -> return standard non-root "v4;-1_v6;-1"
+                HookUtils.hookAllMethods(bCls, "b", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult("v4;-1_v6;-1");
+                    }
+                });
+                // Berry.a() -> scans /proc for suspicious non-system process names -> return empty list
+                HookUtils.hookAllMethods(bCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.method instanceof java.lang.reflect.Method &&
+                            ((java.lang.reflect.Method) param.method).getReturnType() == java.util.ArrayList.class) {
+                            param.setResult(new java.util.ArrayList<>());
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Sanitized Berry port/process scanners on " + bClsName);
+            }
+        }
+
+        String[] thisClasses = {
+            "com.tencent.turingfd.sdk.xq.this",
+            "com.tencent.tfd.sdk.wxa.this"
+        };
+        for (String tClsName : thisClasses) {
+            Class<?> tCls = XposedHelpers.findClassIfExists(tClsName, cl);
+            if (tCls != null && sHookedTuringBerryClasses.add(tClsName)) {
+                // this.a(Context) -> returns accessibility inspection string -> clean baseline "0,0,,0,,"
+                HookUtils.hookAllMethods(tCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length == 1 &&
+                            param.args[0] instanceof android.content.Context) {
+                            param.setResult("0,0,,0,,");
+                        } else if (param.args != null && param.args.length == 1 &&
+                            param.args[0] != null &&
+                            "android.accessibilityservice.AccessibilityServiceInfo".equals(param.args[0].getClass().getName())) {
+                            param.setResult(true);
+                        }
+                    }
+                });
+                // this.b(Context) -> returns enabled accessibility component list -> empty list
+                HookUtils.hookAllMethods(tCls, "b", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult(new java.util.ArrayList<>());
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Sanitized accessibility inspectors on " + tClsName);
+            }
+        }
     }
 }
 

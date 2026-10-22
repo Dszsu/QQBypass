@@ -1384,6 +1384,20 @@ public class DynamicRootDetectionHook {
                             } else if (returnType == long.class) {
                                 param.setResult(0L);
                             }
+                        } else if ("enabled_accessibility_services".equals(name)) {
+                            Class<?> returnType = param.method instanceof java.lang.reflect.Method ?
+                                ((java.lang.reflect.Method) param.method).getReturnType() : String.class;
+                            if (returnType == String.class) {
+                                param.setResult("");
+                            }
+                        } else if ("accessibility_enabled".equals(name)) {
+                            Class<?> returnType = param.method instanceof java.lang.reflect.Method ?
+                                ((java.lang.reflect.Method) param.method).getReturnType() : int.class;
+                            if (returnType == int.class) {
+                                param.setResult(0);
+                            } else if (returnType == String.class) {
+                                param.setResult("0");
+                            }
                         }
                     }
                 }

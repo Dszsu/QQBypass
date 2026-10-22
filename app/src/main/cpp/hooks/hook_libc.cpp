@@ -799,6 +799,26 @@ static bool is_proc_net_unix_path(const char* path) {
             (strncmp(path, "/proc/", 6) == 0 && strstr(path, "/net/unix")));
 }
 
+// 构造干净的 /proc/net/tcp 与 /proc/net/tcp6 虚拟文件（仅保留标准表头，零开放监听端口）
+FILE* build_filtered_net_tcp(bool is_v6) {
+    FILE* fake = create_memory_file(is_v6 ? "net_tcp6" : "net_tcp");
+    if (!fake) return nullptr;
+    fputs("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n", fake);
+    rewind(fake);
+    return fake;
+}
+
+static bool is_proc_net_tcp_path(const char* path) {
+    if (!path) return false;
+    return (strcmp(path, "/proc/net/tcp") == 0 ||
+            strcmp(path, "/proc/net/tcp6") == 0 ||
+            strcmp(path, "/proc/self/net/tcp") == 0 ||
+            strcmp(path, "/proc/self/net/tcp6") == 0 ||
+            strcmp(path, "/proc/thread-self/net/tcp") == 0 ||
+            strcmp(path, "/proc/thread-self/net/tcp6") == 0 ||
+            (strncmp(path, "/proc/", 6) == 0 && (strstr(path, "/net/tcp") || strstr(path, "/net/tcp6"))));
+}
+
 // 构造沙箱默认 SELinux context 虚拟文件，防止 Turing 检测到 permissive 或 root domain
 FILE* build_filtered_selinux_attr() {
     FILE* fake = create_memory_file("attr_current");
@@ -1066,7 +1086,9 @@ static bool handle_virtual_stat(const char* pathname, struct stat* statbuf) {
         is_thermal_path(pathname) ||
         is_proc_uptime(pathname) ||
         is_proc_loadavg(pathname) ||
-        is_cpufreq_path(pathname)) {
+        is_cpufreq_path(pathname) ||
+        is_proc_net_tcp_path(pathname) ||
+        is_proc_net_unix_path(pathname)) {
         if (statbuf) {
             memset(statbuf, 0, sizeof(*statbuf));
             statbuf->st_mode = S_IFREG | 0444;
@@ -1182,6 +1204,13 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
             audit_native_probe("libc", "fopen_net_unix", "redirected to clean net_unix");
             LOGI("Intercepted fopen net/unix: %s", pathname);
             FILE* fake = build_filtered_net_unix();
+            if (fake) return fake;
+        }
+        if (is_proc_net_tcp_path(pathname)) {
+            audit_native_probe("libc", "fopen_net_tcp", "redirected to clean net_tcp");
+            LOGI("Intercepted fopen net/tcp: %s", pathname);
+            bool is_v6 = strstr(pathname, "tcp6") != nullptr;
+            FILE* fake = build_filtered_net_tcp(is_v6);
             if (fake) return fake;
         }
         if (is_proc_attr_current_path(pathname)) {
@@ -1359,6 +1388,17 @@ int fake_open(const char* pathname, int flags, ...) {
                 return fd;
             }
         }
+        if (is_proc_net_tcp_path(pathname)) {
+            audit_native_probe("libc", "open_net_tcp", "redirected to clean net_tcp");
+            LOGI("Intercepted open net/tcp: %s", pathname);
+            bool is_v6 = strstr(pathname, "tcp6") != nullptr;
+            FILE* fake = build_filtered_net_tcp(is_v6);
+            if (fake) {
+                int fd = dup(fileno(fake));
+                fclose(fake);
+                return fd;
+            }
+        }
         if (is_proc_attr_current_path(pathname)) {
             LOGI("Intercepted open attr/current: %s", pathname);
             FILE* fake = build_filtered_selinux_attr();
@@ -1514,6 +1554,17 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
         if (is_proc_net_unix_path(pathname)) {
             LOGI("Intercepted openat net/unix: %s", pathname);
             FILE* fake = build_filtered_net_unix();
+            if (fake) {
+                int fd = dup(fileno(fake));
+                fclose(fake);
+                return fd;
+            }
+        }
+        if (is_proc_net_tcp_path(pathname)) {
+            audit_native_probe("libc", "openat_net_tcp", "redirected to clean net_tcp");
+            LOGI("Intercepted openat net/tcp: %s", pathname);
+            bool is_v6 = strstr(pathname, "tcp6") != nullptr;
+            FILE* fake = build_filtered_net_tcp(is_v6);
             if (fake) {
                 int fd = dup(fileno(fake));
                 fclose(fake);
@@ -1992,7 +2043,7 @@ int fake_access(const char* pathname, int mode) {
         errno = ENOENT;
         return -1;
     }
-    if (is_battery_path(pathname) || is_thermal_path(pathname) || is_proc_uptime(pathname) || is_proc_loadavg(pathname) || is_cpufreq_path(pathname)) {
+    if (is_battery_path(pathname) || is_thermal_path(pathname) || is_proc_uptime(pathname) || is_proc_loadavg(pathname) || is_cpufreq_path(pathname) || is_proc_net_tcp_path(pathname) || is_proc_net_unix_path(pathname)) {
         return 0;
     }
     if (real_access_ptr) return real_access_ptr(pathname, mode);
@@ -2008,7 +2059,7 @@ static int fake_faccessat(int dirfd, const char* pathname, int mode, int flags) 
         errno = ENOENT;
         return -1;
     }
-    if (is_battery_path(pathname) || is_thermal_path(pathname) || is_proc_uptime(pathname) || is_proc_loadavg(pathname) || is_cpufreq_path(pathname)) {
+    if (is_battery_path(pathname) || is_thermal_path(pathname) || is_proc_uptime(pathname) || is_proc_loadavg(pathname) || is_cpufreq_path(pathname) || is_proc_net_tcp_path(pathname) || is_proc_net_unix_path(pathname)) {
         return 0;
     }
     if (real_faccessat_ptr) return real_faccessat_ptr(dirfd, pathname, mode, flags);
@@ -2726,6 +2777,16 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
                     return fd;
                 }
             }
+            if (is_proc_net_tcp_path(path)) {
+                LOGI("fake_syscall: openat net/tcp redirected: %s", path);
+                bool is_v6 = strstr(path, "tcp6") != nullptr;
+                FILE* fake = build_filtered_net_tcp(is_v6);
+                if (fake) {
+                    int fd = dup(fileno(fake));
+                    fclose(fake);
+                    return fd;
+                }
+            }
             if (is_proc_attr_current_path(path)) {
                 LOGI("fake_syscall: openat attr/current redirected: %s", path);
                 FILE* fake = build_filtered_selinux_attr();
@@ -2807,7 +2868,7 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
                 errno = ENOENT;
                 return -1;
             }
-            if (is_battery_path(path) || is_thermal_path(path) || is_proc_uptime(path) || is_proc_loadavg(path) || is_cpufreq_path(path)) {
+            if (is_battery_path(path) || is_thermal_path(path) || is_proc_uptime(path) || is_proc_loadavg(path) || is_cpufreq_path(path) || is_proc_net_tcp_path(path) || is_proc_net_unix_path(path)) {
                 return 0;
             }
         }
