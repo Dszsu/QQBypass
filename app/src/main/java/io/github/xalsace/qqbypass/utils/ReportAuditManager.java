@@ -279,6 +279,10 @@ public class ReportAuditManager {
 
                 // 3. Clean legacy non-bucketed audit files and old temporary/prune files
                 cleanLegacyFiles(dir);
+
+                // 4. Retain only the 50 most recent raw binary packets in outbound_packets & inbound_packets
+                cleanBinaryPacketDirectory(new File(dir, "outbound_packets"), 50);
+                cleanBinaryPacketDirectory(new File(dir, "inbound_packets"), 50);
             }
 
             // 4. Sweep and purge all residual audit logs from legacy non-cache directories
@@ -339,6 +343,56 @@ public class ReportAuditManager {
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    private static void cleanBinaryPacketDirectory(File dir, int maxKeep) {
+        if (dir == null || !dir.exists() || !dir.isDirectory()) return;
+        try {
+            File[] files = dir.listFiles(new FilenameFilter() {
+                @Override
+                public boolean accept(File d, String name) {
+                    return name.endsWith(".bin");
+                }
+            });
+            if (files == null || files.length <= maxKeep) return;
+
+            Arrays.sort(files, new Comparator<File>() {
+                @Override
+                public int compare(File f1, File f2) {
+                    return Long.compare(f2.lastModified(), f1.lastModified());
+                }
+            });
+
+            for (int i = maxKeep; i < files.length; i++) {
+                try {
+                    files[i].delete();
+                } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Saves raw uncompressed binary payloads directly to disk for offline reverse engineering.
+     */
+    public static void saveBinaryPayload(String subDirName, String cmd, int seq, byte[] payload) {
+        if (payload == null || payload.length == 0) return;
+        try {
+            File baseDir = new File(PRIMARY_DIR, subDirName);
+            if (!baseDir.exists()) {
+                baseDir.mkdirs();
+            }
+            String safeCmd = (cmd == null ? "unknown" : cmd.replaceAll("[^a-zA-Z0-9._-]", "_"));
+            if (safeCmd.length() > 60) {
+                safeCmd = safeCmd.substring(0, 60);
+            }
+            String timeTag = get30MinTimeTag(System.currentTimeMillis());
+            long rand = System.currentTimeMillis() % 100000;
+            File targetFile = new File(baseDir, safeCmd + "_" + timeTag + "_seq" + seq + "_" + rand + ".bin");
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(targetFile)) {
+                fos.write(payload);
+                fos.flush();
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static String getCurrentTimestamp() {
@@ -409,6 +463,9 @@ public class ReportAuditManager {
                 cLower.contains("channelmanager") ||
                 cLower.contains("channelproxy") ||
                 cLower.contains("outbound") ||
+                cLower.contains("inbound") ||
+                cLower.contains("plaintext") ||
+                cLower.contains("securitydispatch") ||
                 cLower.contains("fekit") ||
                 cLower.contains("wlogin") ||
                 cLower.contains("safecenter") ||
@@ -529,14 +586,15 @@ public class ReportAuditManager {
             String lower = eventOrCmd.toLowerCase(Locale.US);
             if (lower.contains("error") || lower.contains("fail") || lower.contains("exception")
                     || lower.contains("crash") || lower.contains("msf_decode_packet_fail")
-                    || lower.contains("kick") || lower.contains("offline")) {
+                    || lower.contains("kick") || lower.contains("offline") || lower.contains("ban")) {
                 return true;
             }
         }
         if (extraDetail != null) {
             String lower = extraDetail.toLowerCase(Locale.US);
             if (lower.contains("error") || lower.contains("fail") || lower.contains("exception")
-                    || lower.contains("failcode") || lower.contains("err=") || lower.contains("success=false")) {
+                    || lower.contains("failcode") || lower.contains("err=") || lower.contains("success=false")
+                    || lower.contains("ssoret") || lower.contains("trpcretcode")) {
                 return true;
             }
         }
@@ -885,6 +943,13 @@ public class ReportAuditManager {
             }
 
             if (payload != null && payloadLen > 0) {
+                // 1. Structural Protobuf Decoding
+                String pbTree = decodeProtobuf(payload);
+                if (pbTree != null && !pbTree.trim().isEmpty()) {
+                    sb.append("Decoded Protobuf Tree:\n").append(pbTree).append("\n");
+                }
+
+                // 2. Extracted printable strings
                 List<String> printable = extractPrintableStringsWithOffsets(payload, 3, 50);
                 if (!printable.isEmpty()) {
                     sb.append("Extracted Printable Strings (").append(printable.size()).append(" entries):\n");
@@ -893,13 +958,19 @@ public class ReportAuditManager {
                     }
                 }
 
+                // 3. Extracted JSON
                 String jsonStr = tryExtractJson(printable);
                 if (jsonStr != null) {
                     sb.append("Decoded JSON Data:\n    ").append(jsonStr).append("\n");
                 }
 
-                sb.append("Hex Dump Preview (up to 256 bytes):\n");
-                sb.append(formatHexDump(payload, 256));
+                // 4. Hex dump: cancel 256B cutoff, allow up to 4096 bytes (covers full security payloads)
+                int dumpLimit = Math.min(payloadLen, 4096);
+                sb.append("Hex Dump Preview (up to ").append(dumpLimit).append(" bytes):\n");
+                sb.append(formatHexDump(payload, dumpLimit));
+
+                // 5. Raw binary disk dump
+                saveBinaryPayload("outbound_packets", cmd, 0, payload);
             }
 
             if (stackDepth > 0) {
@@ -931,6 +1002,333 @@ public class ReportAuditManager {
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordOutboundRiskPayload: " + t.getMessage());
         }
+    }
+
+    /**
+     * Dedicated Inbound Server Response Auditor.
+     * Records server return codes, fail codes, error messages, and payload bodies
+     * for all security, authentication, and risk telemetry responses from Tencent servers.
+     */
+    public static void recordInboundResponse(String channel, String cmd, int ssoSeq, int retCode, String errMsg, byte[] payload, String extraInfo, int stackDepth) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
+        try {
+            String time = getCurrentTimestamp();
+            int pid = Process.myPid();
+            int tid = Process.myTid();
+            String threadName = Thread.currentThread().getName();
+
+            int payloadLen = payload != null ? payload.length : 0;
+            StringBuilder sb = new StringBuilder(1024);
+            sb.append("\n==================== [INBOUND SERVER RESPONSE RECEIVED] ====================\n")
+              .append("Time: ").append(time).append("\n")
+              .append("Process: ").append(sProcessName).append(" (pid:").append(pid).append(", tid:").append(tid).append(", thread:").append(threadName).append(")\n")
+              .append("Channel: ").append(channel).append("\n")
+              .append("Command: ").append(cmd != null ? cmd : "unknown").append("\n")
+              .append("SSO Seq: ").append(ssoSeq).append("\n")
+              .append("Server Return Code: ").append(retCode).append("\n");
+
+            if (errMsg != null && !errMsg.isEmpty()) {
+                sb.append("Server Error Message: \"").append(errMsg).append("\"\n");
+            }
+            sb.append("Payload Size: ").append(payloadLen).append(" bytes\n");
+
+            if (extraInfo != null && !extraInfo.isEmpty()) {
+                sb.append("Extra Information: ").append(extraInfo).append("\n");
+            }
+
+            if (payload != null && payloadLen > 0) {
+                String pbTree = decodeProtobuf(payload);
+                if (pbTree != null && !pbTree.trim().isEmpty()) {
+                    sb.append("Decoded Protobuf Tree:\n").append(pbTree).append("\n");
+                }
+
+                List<String> printable = extractPrintableStringsWithOffsets(payload, 3, 50);
+                if (!printable.isEmpty()) {
+                    sb.append("Extracted Printable Strings (").append(printable.size()).append(" entries):\n");
+                    for (String str : printable) {
+                        sb.append("    ").append(str).append("\n");
+                    }
+                }
+
+                String jsonStr = tryExtractJson(printable);
+                if (jsonStr != null) {
+                    sb.append("Decoded JSON Data:\n    ").append(jsonStr).append("\n");
+                }
+
+                int dumpLimit = Math.min(payloadLen, 4096);
+                sb.append("Hex Dump Preview (up to ").append(dumpLimit).append(" bytes):\n");
+                sb.append(formatHexDump(payload, dumpLimit));
+
+                saveBinaryPayload("inbound_packets", cmd, ssoSeq, payload);
+            }
+
+            if (stackDepth > 0) {
+                sb.append("Caller Stack Trace:\n");
+                StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+                if (stack != null) {
+                    int count = 0;
+                    for (StackTraceElement ste : stack) {
+                        String cn = ste.getClassName();
+                        if (cn.contains("ReportAuditManager") || cn.contains("java.lang.Thread")) continue;
+                        sb.append("    at ").append(ste.toString()).append("\n");
+                        count++;
+                        if (count >= stackDepth) break;
+                    }
+                }
+            }
+            sb.append("============================================================================\n");
+
+            String fullLog = sb.toString();
+            boolean isError = (retCode != 0 && retCode != 1000) || isErrorLevel(channel, cmd, errMsg, null);
+            sLogQueue.offer(new AuditEntry(fullLog, true, isError));
+            if (isError) {
+                Log.e(TAG, fullLog);
+                XposedBridge.log("[ERROR] " + fullLog);
+            } else {
+                Log.w(TAG, fullLog);
+                XposedBridge.log(fullLog);
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in recordInboundResponse: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Dedicated Plaintext Security Dispatch Auditor.
+     * Records unencrypted plaintext event parameters, requests, and signatures before
+     * native encryption or packaging by FEKit / QQSecuritySign / O3BusinessHandler.
+     */
+    public static void recordPlaintextSecurityDispatch(String channel, String event, String plainParams, byte[] plainData, String extraInfo) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
+        try {
+            String time = getCurrentTimestamp();
+            int pid = Process.myPid();
+            int tid = Process.myTid();
+            String threadName = Thread.currentThread().getName();
+
+            StringBuilder sb = new StringBuilder(1024);
+            sb.append("\n==================== [PLAINTEXT SECURITY DISPATCH (PRE-ENCRYPTION)] ====================\n")
+              .append("Time: ").append(time).append("\n")
+              .append("Process: ").append(sProcessName).append(" (pid:").append(pid).append(", tid:").append(tid).append(", thread:").append(threadName).append(")\n")
+              .append("Channel: ").append(channel).append("\n")
+              .append("Event / Operation: ").append(event != null ? event : "unknown").append("\n");
+
+            if (extraInfo != null && !extraInfo.isEmpty()) {
+                sb.append("Extra Information: ").append(extraInfo).append("\n");
+            }
+
+            if (plainParams != null && !plainParams.isEmpty()) {
+                sb.append("Plaintext Parameters / JSON:\n    ").append(plainParams).append("\n");
+            }
+
+            if (plainData != null && plainData.length > 0) {
+                sb.append("Payload Size: ").append(plainData.length).append(" bytes\n");
+                String pbTree = decodeProtobuf(plainData);
+                if (pbTree != null && !pbTree.trim().isEmpty()) {
+                    sb.append("Decoded Protobuf Tree:\n").append(pbTree).append("\n");
+                }
+                int dumpLimit = Math.min(plainData.length, 4096);
+                sb.append("Hex Dump Preview (up to ").append(dumpLimit).append(" bytes):\n");
+                sb.append(formatHexDump(plainData, dumpLimit));
+            }
+
+            sb.append("Caller: ").append(getCallerSummary(6)).append("\n");
+            sb.append("========================================================================================\n");
+
+            String fullLog = sb.toString();
+            sLogQueue.offer(new AuditEntry(fullLog, true, false));
+            Log.w(TAG, fullLog);
+            XposedBridge.log(fullLog);
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in recordPlaintextSecurityDispatch: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Dedicated FEKit Native Internal Log Bridge.
+     * Captures internal logs emitted by libFEKit.so / libfekit_sec.so via IFEKitLog.
+     */
+    public static void recordFEKitInternalLog(String level, String tag, String msg) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
+        try {
+            String time = getCurrentTimestamp();
+            int pid = Process.myPid();
+            int tid = Process.myTid();
+
+            StringBuilder sb = new StringBuilder(256);
+            sb.append("[").append(time).append("]")
+              .append("[").append(sProcessName).append(" pid:").append(pid).append(" tid:").append(tid).append("]")
+              .append("[FEKitNativeLog][").append(level != null ? level : "I").append("][").append(tag != null ? tag : "FEKit").append("] ")
+              .append(msg != null ? msg : "");
+
+            String fullLog = sb.toString();
+            boolean isError = "E".equalsIgnoreCase(level) || "W".equalsIgnoreCase(level) ||
+                    (msg != null && (msg.contains("kick") || msg.contains("fail") || msg.contains("error") || msg.contains("offline") || msg.contains("ban")));
+            sLogQueue.offer(new AuditEntry(fullLog, true, isError));
+            if (isError) {
+                Log.e(TAG, fullLog);
+                XposedBridge.log("[FEKitLog] " + fullLog);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Zero-dependency recursive Protobuf payload decoder.
+     * Parses wire types (Varint, Fixed64, Length-Delimited, Fixed32),
+     * distinguishes sub-messages, strings, JSON, and raw bytes, and formats
+     * as an indented tree structure.
+     */
+    public static String decodeProtobuf(byte[] data) {
+        if (data == null || data.length == 0) return null;
+        try {
+            List<String> lines = decodeProtobufRecursive(data, 0, data.length, 0);
+            if (lines == null || lines.isEmpty()) return null;
+            StringBuilder sb = new StringBuilder(lines.size() * 32);
+            for (String line : lines) {
+                sb.append("    ").append(line).append("\n");
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static List<String> decodeProtobufRecursive(byte[] data, int offset, int length, int depth) {
+        if (depth > 8) return null;
+        int idx = offset;
+        int end = offset + length;
+        List<String> result = new ArrayList<>();
+        String indent = getIndent(depth);
+
+        while (idx < end) {
+            long key = 0;
+            int shift = 0;
+            boolean validKey = false;
+            while (idx < end) {
+                byte b = data[idx++];
+                key |= (long) (b & 0x7F) << shift;
+                if ((b & 0x80) == 0) {
+                    validKey = true;
+                    break;
+                }
+                shift += 7;
+                if (shift > 64) return null;
+            }
+            if (!validKey) return null;
+
+            int fieldNum = (int) (key >>> 3);
+            int wireType = (int) (key & 0x07);
+            if (fieldNum <= 0 || fieldNum > 50000) return null;
+
+            if (wireType == 0) { // Varint
+                long val = 0;
+                shift = 0;
+                boolean validVal = false;
+                while (idx < end) {
+                    byte b = data[idx++];
+                    val |= (long) (b & 0x7F) << shift;
+                    if ((b & 0x80) == 0) {
+                        validVal = true;
+                        break;
+                    }
+                    shift += 7;
+                    if (shift > 64) return null;
+                }
+                if (!validVal) return null;
+                result.add(indent + "Field " + fieldNum + " (varint): " + val);
+
+            } else if (wireType == 1) { // 64-bit fixed
+                if (idx + 8 > end) return null;
+                StringBuilder hex = new StringBuilder(16);
+                for (int i = 0; i < 8; i++) {
+                    hex.append(String.format(Locale.US, "%02x", data[idx + i]));
+                }
+                idx += 8;
+                result.add(indent + "Field " + fieldNum + " (fixed64): 0x" + hex);
+
+            } else if (wireType == 2) { // Length-delimited
+                int flen = 0;
+                shift = 0;
+                boolean validLen = false;
+                while (idx < end) {
+                    byte b = data[idx++];
+                    flen |= (b & 0x7F) << shift;
+                    if ((b & 0x80) == 0) {
+                        validLen = true;
+                        break;
+                    }
+                    shift += 7;
+                    if (shift > 32) return null;
+                }
+                if (!validLen || flen < 0 || idx + flen > end) return null;
+
+                int subOffset = idx;
+                idx += flen;
+
+                if (flen == 0) {
+                    result.add(indent + "Field " + fieldNum + " (length-delimited, empty)");
+                    continue;
+                }
+
+                List<String> subResult = decodeProtobufRecursive(data, subOffset, flen, depth + 1);
+                if (subResult != null && !subResult.isEmpty()) {
+                    result.add(indent + "Field " + fieldNum + " (embedded message, len=" + flen + "):");
+                    result.addAll(subResult);
+                } else {
+                    String s = tryDecodeUtf8(data, subOffset, flen);
+                    if (s != null) {
+                        result.add(indent + "Field " + fieldNum + " (string, len=" + flen + "): \"" + s + "\"");
+                    } else {
+                        int previewLen = Math.min(flen, 32);
+                        StringBuilder hex = new StringBuilder(previewLen * 2);
+                        for (int i = 0; i < previewLen; i++) {
+                            hex.append(String.format(Locale.US, "%02x", data[subOffset + i]));
+                        }
+                        if (flen > previewLen) hex.append("...");
+                        result.add(indent + "Field " + fieldNum + " (bytes, len=" + flen + "): 0x" + hex);
+                    }
+                }
+
+            } else if (wireType == 5) { // 32-bit fixed
+                if (idx + 4 > end) return null;
+                StringBuilder hex = new StringBuilder(8);
+                for (int i = 0; i < 4; i++) {
+                    hex.append(String.format(Locale.US, "%02x", data[idx + i]));
+                }
+                idx += 4;
+                result.add(indent + "Field " + fieldNum + " (fixed32): 0x" + hex);
+
+            } else {
+                return null;
+            }
+        }
+        return result.isEmpty() ? null : result;
+    }
+
+    private static String getIndent(int depth) {
+        StringBuilder sb = new StringBuilder(depth * 2);
+        for (int i = 0; i < depth; i++) {
+            sb.append("  ");
+        }
+        return sb.toString();
+    }
+
+    private static String tryDecodeUtf8(byte[] data, int offset, int length) {
+        if (length <= 0) return null;
+        try {
+            String s = new String(data, offset, length, "UTF-8");
+            int printable = 0;
+            for (int i = 0; i < s.length(); i++) {
+                char c = s.charAt(i);
+                if (c >= 32 && c <= 126) printable++;
+                else if (c == '\t' || c == '\n' || c == '\r') printable++;
+                else if (Character.isLetterOrDigit(c)) printable++;
+            }
+            if (printable >= s.length() * 0.85) {
+                return s.replace("\n", "\\n").replace("\r", "\\r");
+            }
+        } catch (Throwable ignored) {}
+        return null;
     }
 
     /**

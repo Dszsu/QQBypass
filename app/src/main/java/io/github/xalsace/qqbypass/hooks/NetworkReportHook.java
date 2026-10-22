@@ -99,6 +99,9 @@ public class NetworkReportHook {
             hookKickAudit(lpparam);
             hookWlogin(cl);
             hookTuringD1Network(cl);
+            hookInboundResponses(cl);
+            hookPlaintextSecurityDispatches(cl);
+            hookFEKitNativeLog(cl);
         }
 
         // Inspection checks (TuringFD /proc scanner neutralization)
@@ -112,6 +115,9 @@ public class NetworkReportHook {
             hookKickAuditInternal(cl);
             hookWlogin(cl);
             hookTuringD1Network(cl);
+            hookInboundResponses(cl);
+            hookPlaintextSecurityDispatches(cl);
+            hookFEKitNativeLog(cl);
         }
         hookTuringEridanus(cl);
 
@@ -351,9 +357,19 @@ public class NetworkReportHook {
                                     "MSFKernelBridge", cmd, null, extra.toString(), 0);
                             }
 
+                            if (secSign != null && secSign.length > 0) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                    "MSFKernelBridge.secSign", cmd + "#secSign", secSign, "seq=" + seq + (uin != null ? ", uin=" + uin : ""), 4);
+                            }
+
+                            if (secDevToken != null && secDevToken.length > 0) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                    "MSFKernelBridge.secDevToken", cmd + "#secDevToken", secDevToken, "seq=" + seq + (uin != null ? ", uin=" + uin : ""), 4);
+                            }
+
                             if (secExtra != null && secExtra.length > 0) {
                                 io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
-                                    "MSFKernelBridge.secExtra", cmd + "#secExtra", secExtra, "seq=" + seq, 4);
+                                    "MSFKernelBridge.secExtra", cmd + "#secExtra", secExtra, "seq=" + seq + (uin != null ? ", uin=" + uin : ""), 4);
                             }
 
                             if (cmd != null && (isKickCmd(cmd) || "StatSvc.RspMSFForceOffline".equals(cmd))) {
@@ -1294,6 +1310,472 @@ public class NetworkReportHook {
                 }
             });
             XposedEntry.log("[KickAudit] Installed read-only kick audit on LoginReporterImpl.reportClearLoginData");
+        }
+    }
+
+    /**
+     * Inbound Server Response Auditing.
+     * Intercepts server responses from MSF kernel callbacks, ChannelManager native callbacks,
+     * and high-level servlets to detect return codes, failure tips, and decoded response payloads.
+     */
+    private static void hookInboundResponses(ClassLoader cl) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT || cl == null) return;
+
+        // 1. IMSFCallbackBridge: onMSFPacketState, onMSFError, onSSORetError
+        String[] cbClasses = {
+            "com.tencent.mobileqq.msf.core.service.crossplatform.b$e",
+            "com.tencent.mobileqq.msfcore.IMSFCallbackBridge"
+        };
+        for (String cbName : cbClasses) {
+            Class<?> cbCls = XposedHelpers.findClassIfExists(cbName, cl);
+            if (cbCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_" + cbName)) {
+                HookUtils.hookAllMethods(cbCls, "onMSFPacketState", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args == null || param.args.length < 1 || param.args[0] == null) return;
+                        Object adapter = param.args[0];
+                        try {
+                            String cmd = (String) XposedHelpers.callMethod(adapter, "getCmd");
+                            if (cmd == null || isCoreProtocolCommand(cmd)) return;
+
+                            int seq = 0;
+                            int ssoRet = 0;
+                            int trpcRet = 0;
+                            String ssoErr = null;
+                            String trpcErr = null;
+                            byte[] recvData = null;
+                            String uin = null;
+
+                            try { seq = ((Number) XposedHelpers.callMethod(adapter, "getSeq")).intValue(); } catch (Throwable ignored) {}
+                            try { ssoRet = ((Number) XposedHelpers.callMethod(adapter, "getSsoRet")).intValue(); } catch (Throwable ignored) {}
+                            try { trpcRet = ((Number) XposedHelpers.callMethod(adapter, "getTrpcRetcode")).intValue(); } catch (Throwable ignored) {}
+                            try { ssoErr = (String) XposedHelpers.callMethod(adapter, "getSsoErrTips"); } catch (Throwable ignored) {}
+                            try {
+                                Object rawTrpcErr = XposedHelpers.callMethod(adapter, "getTrpcErrMsg");
+                                if (rawTrpcErr instanceof byte[]) {
+                                    byte[] trpcBytes = (byte[]) rawTrpcErr;
+                                    if (trpcBytes.length > 0) {
+                                        trpcErr = new String(trpcBytes, java.nio.charset.StandardCharsets.UTF_8);
+                                    }
+                                } else if (rawTrpcErr != null) {
+                                    trpcErr = rawTrpcErr.toString();
+                                }
+                            } catch (Throwable ignored) {}
+                            try { recvData = (byte[]) XposedHelpers.callMethod(adapter, "getRecvData"); } catch (Throwable ignored) {}
+                            try { uin = (String) XposedHelpers.callMethod(adapter, "getUin"); } catch (Throwable ignored) {}
+
+                            StringBuilder extra = new StringBuilder();
+                            if (uin != null && !uin.isEmpty() && !"0".equals(uin)) {
+                                extra.append("uin=").append(uin);
+                            }
+                            if (trpcRet != 0) {
+                                if (extra.length() > 0) extra.append(", ");
+                                extra.append("trpcRetcode=").append(trpcRet);
+                            }
+                            if (trpcErr != null && !trpcErr.isEmpty()) {
+                                if (extra.length() > 0) extra.append(", ");
+                                extra.append("trpcErrMsg=\"").append(trpcErr).append("\"");
+                            }
+
+                            boolean isSec = io.github.xalsace.qqbypass.utils.ReportAuditManager.isSecurityOrEnvironmentEvent("MSFCallbackBridge", cmd, null, null);
+                            if (isSec || ssoRet != 0 || trpcRet != 0 || isKickOrTokenFailCode(ssoRet) || isKickOrTokenFailCode(trpcRet)) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordInboundResponse(
+                                    "MSFCallbackBridge.onMSFPacketState",
+                                    cmd, seq, ssoRet, ssoErr, recvData, extra.toString(), 6);
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                });
+
+                HookUtils.hookAllMethods(cbCls, "onMSFError", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args == null || param.args.length < 5) return;
+                        int errCode = param.args[0] instanceof Number ? ((Number) param.args[0]).intValue() : 0;
+                        String str1 = String.valueOf(param.args[1]);
+                        String errTitle = String.valueOf(param.args[2]);
+                        String errContent = String.valueOf(param.args[3]);
+                        String extInfo = String.valueOf(param.args[4]);
+                        String detail = "errTitle=\"" + errTitle + "\", errContent=\"" + errContent + "\", extInfo=\"" + extInfo + "\", str1=" + str1;
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordInboundResponse(
+                            "MSFCallbackBridge.onMSFError", "onMSFError", 0, errCode, errTitle + ": " + errContent, null, detail, 6);
+                    }
+                });
+
+                HookUtils.hookAllMethods(cbCls, "onSSORetError", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args == null || param.args.length < 4) return;
+                        int errCode = param.args[0] instanceof Number ? ((Number) param.args[0]).intValue() : 0;
+                        String cmd = String.valueOf(param.args[1]);
+                        String ssoErrTips = String.valueOf(param.args[2]);
+                        String detail = "ssoErrTips=\"" + ssoErrTips + "\", extra=" + param.args[3];
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordInboundResponse(
+                            "MSFCallbackBridge.onSSORetError", cmd, 0, errCode, ssoErrTips, null, detail, 6);
+                    }
+                });
+
+                XposedEntry.log("[NetworkReport] Hooked IMSFCallbackBridge methods on " + cbName);
+            }
+        }
+
+        // 2. ChannelManager: onReceive & onNativeReceive
+        Class<?> cmCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.channel.ChannelManager", cl);
+        if (cmCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_ChannelManager_onReceive")) {
+            XC_MethodHook onReceiveHook = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 2) return;
+                    String cmd = param.args[0] instanceof String ? (String) param.args[0] : "unknown";
+                    if (isCoreProtocolCommand(cmd)) return;
+
+                    byte[] data = param.args[1] instanceof byte[] ? (byte[]) param.args[1] : null;
+                    boolean isSuccess = true;
+                    int resultCode = 1000;
+                    long callbackId = 0L;
+
+                    if (param.args.length >= 3 && param.args[2] instanceof Boolean) {
+                        isSuccess = (Boolean) param.args[2];
+                    }
+                    if (param.args.length >= 4 && param.args[3] instanceof Number) {
+                        resultCode = ((Number) param.args[3]).intValue();
+                    }
+                    if (param.args.length >= 5 && param.args[4] instanceof Number) {
+                        callbackId = ((Number) param.args[4]).longValue();
+                    } else if (param.args.length == 4 && param.args[3] instanceof Number) {
+                        callbackId = ((Number) param.args[3]).longValue();
+                    }
+
+                    String extra = "isSuccess=" + isSuccess + ", callbackId=" + callbackId;
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordInboundResponse(
+                        "ChannelManager." + param.method.getName(),
+                        cmd, (int) callbackId, resultCode, null, data, extra, 4);
+                }
+            };
+            HookUtils.hookAllMethods(cmCls, "onReceive", onReceiveHook);
+            HookUtils.hookAllMethods(cmCls, "onNativeReceive", onReceiveHook);
+            XposedEntry.log("[NetworkReport] Hooked ChannelManager onReceive/onNativeReceive on loader " + cl);
+        }
+
+        // 3. FEKitManager (com.tencent.mobileqq.msf.core.security.a) response handler
+        Class<?> feKitMgrCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.security.a", cl);
+        if (feKitMgrCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_FEKitManager_a")) {
+            HookUtils.hookAllMethods(feKitMgrCls, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 2) return;
+                    Object toMsg = null;
+                    Object fromMsg = null;
+                    for (Object arg : param.args) {
+                        if (arg != null) {
+                            String cName = arg.getClass().getName();
+                            if (cName.contains("ToServiceMsg")) toMsg = arg;
+                            else if (cName.contains("FromServiceMsg")) fromMsg = arg;
+                        }
+                    }
+                    if (fromMsg != null) {
+                        try {
+                            String cmd = (String) XposedHelpers.callMethod(fromMsg, "getServiceCmd");
+                            if (cmd == null || isCoreProtocolCommand(cmd)) return;
+                            int failCode = ((Number) XposedHelpers.callMethod(fromMsg, "getBusinessFailCode")).intValue();
+                            String failMsg = (String) XposedHelpers.callMethod(fromMsg, "getBusinessFailMsg");
+                            int ssoSeq = ((Number) XposedHelpers.callMethod(fromMsg, "getRequestSsoSeq")).intValue();
+                            byte[] wupBuf = (byte[]) XposedHelpers.callMethod(fromMsg, "getWupBuffer");
+                            String extra = "resCode=" + XposedHelpers.callMethod(fromMsg, "getResultCode");
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordInboundResponse(
+                                "FEKitManager.handleSecServiceResp",
+                                cmd, ssoSeq, failCode, failMsg, wupBuf, extra, 4);
+                        } catch (Throwable ignored) {}
+                    }
+                }
+            });
+            XposedEntry.log("[NetworkReport] Hooked FEKitManager security response handler on loader " + cl);
+        }
+
+        // 4. O3BusinessHandler.onReceive
+        Class<?> o3HandlerCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.dt.web.O3BusinessHandler", cl);
+        if (o3HandlerCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_O3BusinessHandler_onReceive")) {
+            HookUtils.hookAllMethods(o3HandlerCls, "onReceive", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 2) return;
+                    Object fromMsg = param.args[1];
+                    if (fromMsg != null && fromMsg.getClass().getName().contains("FromServiceMsg")) {
+                        try {
+                            String cmd = (String) XposedHelpers.callMethod(fromMsg, "getServiceCmd");
+                            int failCode = ((Number) XposedHelpers.callMethod(fromMsg, "getBusinessFailCode")).intValue();
+                            String failMsg = (String) XposedHelpers.callMethod(fromMsg, "getBusinessFailMsg");
+                            int ssoSeq = ((Number) XposedHelpers.callMethod(fromMsg, "getRequestSsoSeq")).intValue();
+                            byte[] wupBuf = (byte[]) XposedHelpers.callMethod(fromMsg, "getWupBuffer");
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordInboundResponse(
+                                "O3BusinessHandler.onReceive",
+                                cmd, ssoSeq, failCode, failMsg, wupBuf, null, 4);
+                        } catch (Throwable ignored) {}
+                    }
+                }
+            });
+            XposedEntry.log("[NetworkReport] Hooked O3BusinessHandler onReceive on loader " + cl);
+        }
+
+        // 5. O3MsfServlet.onReceive
+        Class<?> o3ServletCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.dt.web.O3MsfServlet", cl);
+        if (o3ServletCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_O3MsfServlet")) {
+            HookUtils.hookAllMethods(o3ServletCls, "onReceive", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 2) return;
+                    Object fromMsg = param.args[1];
+                    if (fromMsg != null && fromMsg.getClass().getName().contains("FromServiceMsg")) {
+                        try {
+                            String cmd = (String) XposedHelpers.callMethod(fromMsg, "getServiceCmd");
+                            int failCode = ((Number) XposedHelpers.callMethod(fromMsg, "getBusinessFailCode")).intValue();
+                            String failMsg = (String) XposedHelpers.callMethod(fromMsg, "getBusinessFailMsg");
+                            int ssoSeq = ((Number) XposedHelpers.callMethod(fromMsg, "getRequestSsoSeq")).intValue();
+                            byte[] wupBuf = (byte[]) XposedHelpers.callMethod(fromMsg, "getWupBuffer");
+                            Object attrs = XposedHelpers.callMethod(fromMsg, "getAttributes");
+                            String extra = attrs != null ? "attrs=" + attrs : "";
+                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordInboundResponse(
+                                "O3MsfServlet.onReceive",
+                                cmd, ssoSeq, failCode, failMsg, wupBuf, extra, 4);
+                        } catch (Throwable ignored) {}
+                    }
+                }
+            });
+            XposedEntry.log("[NetworkReport] Hooked O3MsfServlet onReceive on loader " + cl);
+        }
+    }
+
+    /**
+     * Pre-Encryption Plaintext Security Dispatch Auditing.
+     * Captures plaintext JSON configuration, tokens, and verification arguments
+     * before native obfuscation / encryption by libFEKit.so, libfekit_sec.so, or libQSec.so.
+     */
+    private static void hookPlaintextSecurityDispatches(ClassLoader cl) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT || cl == null) return;
+
+        // 1. O3BusinessHandler: P2, Q2, S2
+        Class<?> o3HandlerCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.dt.web.O3BusinessHandler", cl);
+        if (o3HandlerCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_O3BusinessHandler_dispatches")) {
+            XC_MethodHook o3Hook = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 2) return;
+                    String event = param.args[0] != null ? param.args[0].toString() : "unknown";
+                    if (isCoreProtocolCommand(event)) return;
+                    String params = param.args[1] != null ? param.args[1].toString() : null;
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
+                        "O3BusinessHandler." + param.method.getName(),
+                        event, params, null, null);
+                }
+            };
+            HookUtils.hookAllMethods(o3HandlerCls, "P2", o3Hook);
+            HookUtils.hookAllMethods(o3HandlerCls, "Q2", o3Hook);
+            HookUtils.hookAllMethods(o3HandlerCls, "S2", o3Hook);
+            XposedEntry.log("[NetworkReport] Hooked O3BusinessHandler P2/Q2/S2 plaintext dispatchers on loader " + cl);
+        }
+
+        // 2. FEKit: dispatchEvent & dispatchEventPB
+        Class<?> feKitCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.fe.FEKit", cl);
+        if (feKitCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_FEKit_dispatchEvent")) {
+            XC_MethodHook feKitHook = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 1) return;
+                    String event = param.args[0] != null ? param.args[0].toString() : "unknown";
+                    if (isCoreProtocolCommand(event)) return;
+                    byte[] data = null;
+                    String strParams = null;
+                    if (param.args.length >= 2) {
+                        if (param.args[1] instanceof byte[]) {
+                            data = (byte[]) param.args[1];
+                        } else if (param.args[1] != null) {
+                            strParams = param.args[1].toString();
+                            if (param.args.length >= 3 && param.args[2] != null) {
+                                strParams += ", arg2=" + param.args[2];
+                            }
+                        }
+                    }
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
+                        "FEKit." + param.method.getName(),
+                        event, strParams, data, null);
+                }
+            };
+            HookUtils.hookAllMethods(feKitCls, "dispatchEvent", feKitHook);
+            HookUtils.hookAllMethods(feKitCls, "dispatchEventPB", feKitHook);
+            XposedEntry.log("[NetworkReport] Hooked FEKit dispatchEvent/dispatchEventPB on loader " + cl);
+        }
+
+        // 3. Dtn: mainProcessDispatch
+        Class<?> dtnCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.dt.Dtn", cl);
+        if (dtnCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_Dtn")) {
+            XC_MethodHook dtnHook = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 1) return;
+                    String event = param.args[0] != null ? param.args[0].toString() : "unknown";
+                    if (isCoreProtocolCommand(event)) return;
+                    byte[] data = null;
+                    String strParams = null;
+                    if (param.args.length >= 2) {
+                        if (param.args[1] instanceof byte[]) {
+                            data = (byte[]) param.args[1];
+                        } else if (param.args[1] != null) {
+                            strParams = param.args[1].toString();
+                        }
+                    }
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
+                        "Dtn." + param.method.getName(),
+                        event, strParams, data, null);
+                }
+            };
+            HookUtils.hookAllMethods(dtnCls, "mainProcessDispatch", dtnHook);
+            XposedEntry.log("[NetworkReport] Hooked Dtn mainProcessDispatch on loader " + cl);
+        }
+
+        // 4. QQSecuritySign: getSign & dispatchEvent
+        Class<?> secSignCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.sign.QQSecuritySign", cl);
+        if (secSignCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_QQSecuritySign")) {
+            HookUtils.hookAllMethods(secSignCls, "getSign", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 2) return;
+                    String uin = "";
+                    String cmd = "";
+                    byte[] buffer = null;
+
+                    for (Object arg : param.args) {
+                        if (arg instanceof String) {
+                            String s = (String) arg;
+                            if (s.contains(".") || s.contains("_") || s.length() > 5) {
+                                if (cmd.isEmpty()) cmd = s;
+                            } else if (uin.isEmpty() && s.matches("\\d+")) {
+                                uin = s;
+                            }
+                        } else if (arg instanceof byte[] && buffer == null) {
+                            buffer = (byte[]) arg;
+                        }
+                    }
+
+                    if (isCoreProtocolCommand(cmd)) return;
+
+                    Object signResult = param.getResult();
+                    StringBuilder extra = new StringBuilder();
+                    if (!uin.isEmpty()) extra.append("uin=").append(uin).append(", ");
+                    extra.append("cmd=").append(cmd);
+
+                    if (signResult != null) {
+                        try {
+                            Object sign = XposedHelpers.getObjectField(signResult, "sign");
+                            Object token = XposedHelpers.getObjectField(signResult, "token");
+                            Object extraObj = XposedHelpers.getObjectField(signResult, "extra");
+                            if (sign instanceof byte[]) extra.append(", signLen=").append(((byte[]) sign).length);
+                            if (token instanceof byte[]) extra.append(", tokenLen=").append(((byte[]) token).length);
+                            if (extraObj instanceof byte[]) extra.append(", extraLen=").append(((byte[]) extraObj).length);
+                        } catch (Throwable ignored) {}
+                    }
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
+                        "QQSecuritySign.getSign", cmd, null, buffer, extra.toString());
+                }
+            });
+
+            XC_MethodHook secDispatchHook = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 1) return;
+                    String event = param.args[0] != null ? param.args[0].toString() : "unknown";
+                    if (isCoreProtocolCommand(event)) return;
+                    byte[] data = null;
+                    String strParams = null;
+                    if (param.args.length >= 2) {
+                        if (param.args[1] instanceof byte[]) {
+                            data = (byte[]) param.args[1];
+                        } else if (param.args[1] != null) {
+                            strParams = param.args[1].toString();
+                        }
+                    }
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
+                        "QQSecuritySign." + param.method.getName(),
+                        event, strParams, data, null);
+                }
+            };
+            HookUtils.hookAllMethods(secSignCls, "dispatchEvent", secDispatchHook);
+            HookUtils.hookAllMethods(secSignCls, "dispatchEventPB", secDispatchHook);
+            XposedEntry.log("[NetworkReport] Hooked QQSecuritySign getSign/dispatchEvent on loader " + cl);
+        }
+    }
+
+    /**
+     * Captures internal diagnostic and kick telemetry logs emitted by libFEKit.so / libfekit_sec.so.
+     */
+    private static void hookFEKitNativeLog(ClassLoader cl) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT || cl == null) return;
+
+        XC_MethodHook logHook = new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                if (param.args == null || param.args.length < 3) return;
+                String tag = param.args[0] != null ? param.args[0].toString() : "";
+                String msg = param.args[2] != null ? param.args[2].toString() : "";
+                String level = param.method.getName().toUpperCase(java.util.Locale.ROOT);
+                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordFEKitInternalLog(level, tag, msg);
+            }
+        };
+
+        String[] levels = {"d", "e", "i", "v", "w"};
+
+        // 1. Hook com.tencent.mobileqq.fe.c$a (Main process FEKit default logger)
+        Class<?> feCInnerCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.fe.c$a", cl);
+        if (feCInnerCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_FEKit_c$a")) {
+            for (String lvl : levels) {
+                HookUtils.hookAllMethods(feCInnerCls, lvl, logHook);
+            }
+            XposedEntry.log("[NetworkReport] Hooked main process FEKit logger (com.tencent.mobileqq.fe.c$a)");
+        }
+
+        // 2. Hook com.tencent.mobileqq.msf.core.security.a$c (MSF process FEKit default logger)
+        Class<?> msfSecInnerCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.security.a$c", cl);
+        if (msfSecInnerCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_FEKit_a$c")) {
+            for (String lvl : levels) {
+                HookUtils.hookAllMethods(msfSecInnerCls, lvl, logHook);
+            }
+            XposedEntry.log("[NetworkReport] Hooked MSF process FEKit logger (com.tencent.mobileqq.msf.core.security.a$c)");
+        }
+
+        // 3. Hook dynamic IFEKitLog setters (FEKit.initLog and c.d)
+        Class<?> feKitCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.fe.FEKit", cl);
+        if (feKitCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_FEKit_initLog")) {
+            HookUtils.hookAllMethods(feKitCls, "initLog", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length > 0 && param.args[0] != null) {
+                        Class<?> customLogCls = param.args[0].getClass();
+                        if (sHookedNetworkClasses.add(cl.hashCode() + "_" + customLogCls.getName())) {
+                            for (String lvl : levels) {
+                                HookUtils.hookAllMethods(customLogCls, lvl, logHook);
+                            }
+                            XposedEntry.log("[NetworkReport] Hooked custom IFEKitLog: " + customLogCls.getName());
+                        }
+                    }
+                }
+            });
+        }
+
+        Class<?> feCCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.fe.c", cl);
+        if (feCCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_FEKit_c_d")) {
+            HookUtils.hookAllMethods(feCCls, "d", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length > 0 && param.args[0] != null) {
+                        Class<?> customLogCls = param.args[0].getClass();
+                        if (sHookedNetworkClasses.add(cl.hashCode() + "_" + customLogCls.getName())) {
+                            for (String lvl : levels) {
+                                HookUtils.hookAllMethods(customLogCls, lvl, logHook);
+                            }
+                            XposedEntry.log("[NetworkReport] Hooked custom IFEKitLog via c.d: " + customLogCls.getName());
+                        }
+                    }
+                }
+            });
         }
     }
 
