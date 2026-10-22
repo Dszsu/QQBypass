@@ -654,7 +654,7 @@ public class ReportAuditManager {
             case "207": return "T1 Client Information";
             case "210": return "Timing Profiler (C/T/LT Timestamps)";
             case "240": return "N1 Network / Device Fingerprint";
-            case "250": return "Core Device Architecture ID";
+            case "250": return "Core Device Architecture ID (Injected DSOs Scanner)";
             case "251": return "Dual App / Multi-User Flag (Binary)";
             case "252": return "Virtual Environment / Container Check";
             case "253": return "Device Hardware Spec D (Kiwifruit.d)";
@@ -662,7 +662,7 @@ public class ReportAuditManager {
             case "255": return "Device Spec Public (Screen/DPI)";
             case "256": return "Proc Scanner Detailed Process Name";
             case "257": return "E-Tag Environment Info";
-            case "259": return "ZA Environment Integrity Flag";
+            case "259": return "ZA Environment Integrity Flag (Proxy/VPN Detection)";
             case "264": return "CPU Info & Native Architecture (Auriga)";
             case "266": return "Persistent Device Storage Cache 901";
             case "267": return "Sensor & Motion Hardware Scan";
@@ -674,7 +674,7 @@ public class ReportAuditManager {
             case "274": return "IMEI Telephony Fingerprint";
             case "275": return "Android ID Device Identifier";
             case "276": return "IMSI Subscriber Identifier";
-            case "279": return "Mounts & Virtual Filesystem Scan";
+            case "279": return "Executable-Writable Memory (RWXP) Scan";
             case "280": return "SELinux & Root Detection State";
             case "281": return "Device Uptime & Boot Offset";
             case "282": return "SIM Card Status (Kiwifruit.c)";
@@ -701,10 +701,10 @@ public class ReportAuditManager {
             case "2016": return "System Properties & Prop Scan";
             case "2017": return "A2 Prop Fingerprint";
             case "2018": return "Process UID (Process.myUid())";
-            case "2019": return "PackageManager & Installed Apps Scan (mPM)";
+            case "2019": return "PackageManager & Installed Apps Scan (mPM Proxy Verification)";
             case "2021": return "Accessibility Services & TalkBack List";
             case "2022": return "A10 Prop Fingerprint";
-            case "2024": return "A13 System Flag";
+            case "2024": return "A13 System Flag (ART Method Hook Verification)";
             case "2029": return "String Signature Flag";
             default: return "Risk Item " + key;
         }
@@ -936,6 +936,36 @@ public class ReportAuditManager {
             XposedBridge.log(fullLog);
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordOutboundRiskMap: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Record risk telemetry sanitization event before native pack & network transmission.
+     */
+    public static void recordSanitizationEvent(String channel, String operation, java.util.List<String> sanitizedDetails) {
+        if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
+        try {
+            String time = getCurrentTimestamp();
+            int pid = Process.myPid();
+            int tid = Process.myTid();
+            String threadName = Thread.currentThread().getName();
+
+            StringBuilder sb = new StringBuilder(512);
+            sb.append("\n==================== [RISK TELEMETRY SANITIZED & NEUTRALIZED] ====================\n")
+              .append("Time: ").append(time).append("\n")
+              .append("Process: ").append(sProcessName).append(" (pid:").append(pid).append(", tid:").append(tid).append(", thread:").append(threadName).append(")\n")
+              .append("Channel: ").append(channel).append("\n")
+              .append("Target Operation: ").append(operation).append("\n")
+              .append("Neutralized Risk Items (").append(sanitizedDetails.size()).append("): ").append(sanitizedDetails.toString()).append("\n")
+              .append("Action: Neutralized module/hook/rwxp artifacts in memory before encryption & network transmission.\n")
+              .append("==================================================================================\n");
+
+            String fullLog = sb.toString();
+            sLogQueue.offer(new AuditEntry(fullLog, true, false));
+            Log.i(TAG, fullLog);
+            XposedBridge.log(fullLog);
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in recordSanitizationEvent: " + t.getMessage(), t);
         }
     }
 

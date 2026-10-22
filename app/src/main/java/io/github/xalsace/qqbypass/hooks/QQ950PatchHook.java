@@ -4537,6 +4537,65 @@ public class QQ950PatchHook {
                 XposedEntry.log("[TuringPatch] Sanitized accessibility inspectors on " + tClsName);
             }
         }
+
+        // Bennet: scans /proc/self/maps for third-party injected DSOs/JARs outside QQ's package -> Key 250
+        String[] bennetClasses = {
+            "com.tencent.turingfd.sdk.xq.Bennet",
+            "com.tencent.tfd.sdk.wxa.Bennet"
+        };
+        for (String bnClsName : bennetClasses) {
+            Class<?> bnCls = XposedHelpers.findClassIfExists(bnClsName, cl);
+            if (bnCls != null && sHookedTuringBerryClasses.add(bnClsName)) {
+                HookUtils.hookIfMethodExists(bnCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args == null || param.args.length == 0 ||
+                            (param.args.length == 1 && param.args[0] instanceof android.content.Context)) {
+                            param.setResult("");
+                        } else if (param.args.length >= 4) {
+                            param.setResult(null);
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Sanitized Bennet DSO injection scanner on " + bnClsName);
+            }
+        }
+
+        // Bergamot: scans /proc/self/maps for non-/data/ executable-writable memory (rwxp) -> Key 279
+        String[] bergamotClasses = {
+            "com.tencent.turingfd.sdk.xq.Bergamot",
+            "com.tencent.tfd.sdk.wxa.Bergamot"
+        };
+        for (String bgClsName : bergamotClasses) {
+            Class<?> bgCls = XposedHelpers.findClassIfExists(bgClsName, cl);
+            if (bgCls != null && sHookedTuringBerryClasses.add(bgClsName)) {
+                HookUtils.hookIfMethodExists(bgCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult(null);
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Sanitized Bergamot RWXP memory scanner on " + bgClsName);
+            }
+        }
+
+        // Quarenden: checks network proxy / VPN settings -> Key 259
+        String[] quarendenClasses = {
+            "com.tencent.turingfd.sdk.xq.Quarenden",
+            "com.tencent.tfd.sdk.wxa.Quarenden"
+        };
+        for (String qClsName : quarendenClasses) {
+            Class<?> qCls = XposedHelpers.findClassIfExists(qClsName, cl);
+            if (qCls != null && sHookedTuringBerryClasses.add(qClsName)) {
+                HookUtils.hookIfMethodExists(qCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult(false);
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Sanitized Quarenden proxy/VPN detector on " + qClsName);
+            }
+        }
     }
 
     private static final java.util.Set<String> sHookedTuringMapClasses =
@@ -4584,14 +4643,87 @@ public class QQ950PatchHook {
                                     if (param.args == null) return;
                                     for (Object arg : param.args) {
                                         if (arg instanceof Map) {
-                                            Map<?, ?> map = (Map<?, ?>) arg;
+                                            @SuppressWarnings("unchecked")
+                                            Map<Object, Object> map = (Map<Object, Object>) arg;
                                             if (!map.isEmpty()) {
                                                 String target = (param.thisObject != null ?
                                                     param.thisObject.getClass().getSimpleName() :
                                                     param.method.getDeclaringClass().getSimpleName())
                                                     + "." + param.method.getName();
+
+                                                // 1. Audit real outbound risk map before sanitization
                                                 io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskMap(
                                                     "TuringFD", target, map, 6);
+
+                                                // 2. Surgical Sanitization of critical risk detection items
+                                                boolean sanitized = false;
+                                                java.util.List<String> sanitizedDetails = new java.util.ArrayList<>();
+
+                                                // Key 250: Bennet /proc/self/maps third-party DSO injection scanner
+                                                if (map.containsKey("250")) {
+                                                    Object v = map.get("250");
+                                                    if (v != null && !v.toString().isEmpty()) {
+                                                        map.put("250", "");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("250(InjectedDSOs)");
+                                                    }
+                                                }
+
+                                                // Key 279: Bergamot /proc/self/maps RWXP memory scanner
+                                                if (map.containsKey("279")) {
+                                                    Object v = map.get("279");
+                                                    if (v != null && !v.toString().isEmpty()) {
+                                                        map.put("279", "");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("279(RWXP)");
+                                                    }
+                                                }
+
+                                                // Key 2019: PackageManager mPM dynamic proxy inspection
+                                                if (map.containsKey("2019")) {
+                                                    Object v = map.get("2019");
+                                                    if (v != null && v.toString().contains("Proxy")) {
+                                                        map.put("2019", "android.content.pm.IPackageManager$Stub$Proxy,,");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("2019(mPMProxy)");
+                                                    }
+                                                }
+
+                                                // Key 2024: ART method hook reflection verification flags
+                                                if (map.containsKey("2024")) {
+                                                    Object v = map.get("2024");
+                                                    if (v != null && !v.toString().isEmpty()) {
+                                                        map.put("2024", "");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("2024(MethodHooks)");
+                                                    }
+                                                }
+
+                                                // Key 259: Quarenden proxy/VPN detection flag
+                                                if (map.containsKey("259")) {
+                                                    Object v = map.get("259");
+                                                    if ("1".equals(v)) {
+                                                        map.put("259", "0");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("259(Proxy)");
+                                                    }
+                                                }
+
+                                                // Key 289: ClassLoader hierarchy anomaly
+                                                if (map.containsKey("289")) {
+                                                    Object v = map.get("289");
+                                                    if (v != null && !v.toString().isEmpty()) {
+                                                        map.put("289", "");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("289(ClassLoader)");
+                                                    }
+                                                }
+
+                                                if (sanitized) {
+                                                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSanitizationEvent(
+                                                        "TuringFD", target, sanitizedDetails);
+                                                    XposedEntry.log("[TuringPatch] Sanitized outbound risk items " + sanitizedDetails + " before encryption in " + target);
+                                                }
                                             }
                                         }
                                     }
@@ -4624,7 +4756,7 @@ public class QQ950PatchHook {
                                 }
                             });
                         } catch (Throwable t) {
-                            XposedEntry.log("[TuringPatch] Failed to hook " + clsName + "." + method.getName() + ": " + t.getMessage());
+                            XposedEntry.logError("[TuringPatch] Failed to hook " + clsName + "." + method.getName() + ": " + t.getMessage(), t);
                         }
                     }
                 }

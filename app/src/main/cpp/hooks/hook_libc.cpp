@@ -583,9 +583,14 @@ FILE* build_filtered_maps() {
                 if (strcasestr(line, blacklist[i])) { filter = true; break; }
             }
         }
-        // 过滤非系统 Dalvik 的匿名可读写执行蹦床 (rwxp)
-        if (!filter && strstr(line, "rwxp") && !strstr(line, "dalvik")) {
-            filter = true;
+        // 修复系统库因 hook 导致的 rwxp 违规权限为合法的 r-xp，过滤非系统 Dalvik 的匿名可读写执行蹦床 (rwxp)
+        if (!filter && strstr(line, "rwxp")) {
+            if (strstr(line, "/apex/") || strstr(line, "/system/")) {
+                char* p = strstr(line, "rwxp");
+                if (p) p[2] = '-'; // 替换为 r-xp
+            } else if (!strstr(line, "dalvik")) {
+                filter = true;
+            }
         }
         // 过滤非 QQ/WebView/Chrome 自身的第三方 /data/app/ 与 /data/data/ 注入路径 (05_掉线修复规格.md)
         if (!filter && (strstr(line, "/data/app/") || strstr(line, "/data/data/") || strstr(line, "/data/user/"))) {
@@ -661,8 +666,14 @@ FILE* build_filtered_smaps() {
                     }
                 }
             }
-            if (!filtering_current_block && strstr(line, "rwxp") && !strstr(line, "dalvik")) {
-                filtering_current_block = true;
+            // 修复系统库因 hook 导致的 rwxp 违规权限为合法的 r-xp，过滤非系统 Dalvik 的匿名可读写执行蹦床 (rwxp)
+            if (!filtering_current_block && strstr(line, "rwxp")) {
+                if (strstr(line, "/apex/") || strstr(line, "/system/")) {
+                    char* p = strstr(line, "rwxp");
+                    if (p) p[2] = '-'; // 替换为 r-xp
+                } else if (!strstr(line, "dalvik")) {
+                    filtering_current_block = true;
+                }
             }
             if (!filtering_current_block && (strstr(line, "/data/app/") || strstr(line, "/data/data/") || strstr(line, "/data/user/"))) {
                 if (!strstr(line, "com.tencent.mobileqq") &&
@@ -1342,6 +1353,7 @@ int fake_open(const char* pathname, int flags, ...) {
         }
         if (strstr(pathname, "smaps")) {
             if (should_filter_proc_maps(__builtin_return_address(0))) {
+                audit_native_probe("libc", "open_smaps", "redirected to clean smaps");
                 LOGI("Intercepted open smaps: %s", pathname);
                 FILE* fake = build_filtered_smaps();
                 if (fake) {
@@ -1354,6 +1366,7 @@ int fake_open(const char* pathname, int flags, ...) {
         else if (strcmp(pathname, "/proc/self/maps") == 0 ||
             (strstr(pathname, "/proc/") && strstr(pathname, "/maps"))) {
             if (should_filter_proc_maps(__builtin_return_address(0))) {
+                audit_native_probe("libc", "open_maps", "redirected to clean maps");
                 LOGI("Intercepted open maps: %s", pathname);
                 FILE* fake = build_filtered_maps();
                 if (fake) {
@@ -1514,6 +1527,7 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
         }
         if (strstr(pathname, "smaps")) {
             if (should_filter_proc_maps(__builtin_return_address(0))) {
+                audit_native_probe("libc", "openat_smaps", "redirected to clean smaps");
                 LOGI("Intercepted openat smaps: %s", pathname);
                 FILE* fake = build_filtered_smaps();
                 if (fake) {
@@ -1526,6 +1540,7 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
         else if (strcmp(pathname, "/proc/self/maps") == 0 ||
             (strstr(pathname, "/proc/") && strstr(pathname, "/maps"))) {
             if (should_filter_proc_maps(__builtin_return_address(0))) {
+                audit_native_probe("libc", "openat_maps", "redirected to clean maps");
                 LOGI("Intercepted openat maps: %s", pathname);
                 FILE* fake = build_filtered_maps();
                 if (fake) {
@@ -2731,6 +2746,7 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
             }
             if (strstr(path, "smaps")) {
                 if (should_filter_proc_maps(caller_addr)) {
+                    audit_native_probe("libc", "syscall_openat_smaps", "redirected to clean smaps");
                     LOGI("fake_syscall: openat smaps redirected: %s", path);
                     FILE* fake = build_filtered_smaps();
                     if (fake) {
@@ -2743,6 +2759,7 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
             if (strcmp(path, "/proc/self/maps") == 0 ||
                 (strstr(path, "/proc/") && strstr(path, "/maps"))) {
                 if (should_filter_proc_maps(caller_addr)) {
+                    audit_native_probe("libc", "syscall_openat_maps", "redirected to clean maps");
                     LOGI("fake_syscall: openat maps redirected: %s", path);
                     FILE* fake = build_filtered_maps();
                     if (fake) {

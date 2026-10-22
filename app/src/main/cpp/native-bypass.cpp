@@ -34,6 +34,31 @@
 
 #include "utils/safe_bytehook.h"
 #include <stdlib.h>
+#include <sys/mman.h>
+
+/**
+ * 修复系统与运行时动态库的内存保护权限（消除 rwxp 违规）
+ * 某些 hook 引擎（如 ByteHook/注入工具）在修改系统库（如 libdl.so）PLT/GOT 或打桩后可能留下 rwxp 属性，
+ * 这会被 TuringFD 的 Bergamot.a 直接捕获并上报为 Key 279 致命风控项。
+ * 本函数遍历 /proc/self/maps，将所有属于 /apex/ 和 /system/ 的 rwxp 页面安全还原为 r-xp。
+ */
+static void sanitize_system_memory_permissions() {
+    FILE* fp = fopen("/proc/self/maps", "r");
+    if (!fp) return;
+    char line[1024];
+    while (fgets(line, sizeof(line), fp)) {
+        if (strstr(line, "rwxp") && (strstr(line, "/apex/") || strstr(line, "/system/"))) {
+            uintptr_t start = 0, end = 0;
+            if (sscanf(line, "%lx-%lx", &start, &end) == 2 && start > 0 && end > start) {
+                size_t len = end - start;
+                int ret = mprotect((void*)start, len, PROT_READ | PROT_EXEC);
+                (void)ret;
+                LOGI("Sanitized rwxp page %lx-%lx to r-xp (ret=%d)", start, end, ret);
+            }
+        }
+    }
+    fclose(fp);
+}
 
 // Standalone C++ memory operators to avoid any external libc++ dependency
 void* operator new(size_t size) { return malloc(size); }
@@ -93,6 +118,7 @@ static void* install_hooks_thread(void* arg) {
     TRACK_NATIVE_HOOK_ALL(nullptr, "shadowhook_dump_records", (void*)fake_shadowhook_dump_records, nullptr, nullptr);
 
     g_bytehook_hooks_installed = true;
+    sanitize_system_memory_permissions();
 
     pthread_t patch_th;
     pthread_create(&patch_th, nullptr, [](void*) -> void* {
@@ -100,6 +126,7 @@ static void* install_hooks_thread(void* arg) {
             usleep(400000); // 400ms interval for early startup DSO patching
             hook_libfekit::patch_libfekit_in_memory();
             hook_libqsec::patch_libqsec_in_memory();
+            sanitize_system_memory_permissions();
         }
         return nullptr;
     }, nullptr);
@@ -227,6 +254,7 @@ Java_io_github_xalsace_qqbypass_NativeBypass_patchLibraryNative(JNIEnv* env, jcl
         } else if (strstr(name, "QSec") || strstr(name, "qsec")) {
             hook_libqsec::patch_libqsec_in_memory();
         }
+        sanitize_system_memory_permissions();
         env->ReleaseStringUTFChars(lib_name, name);
     }
 }
