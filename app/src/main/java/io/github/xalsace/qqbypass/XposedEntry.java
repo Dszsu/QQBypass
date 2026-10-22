@@ -250,10 +250,10 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         if (!HookConfig.VERBOSE_LOGGING) return;
         if (message == null) return;
         try {
-            boolean isErr = message.contains("error") || message.contains("Error") ||
-                            message.contains("ERROR") || message.contains("fail") ||
-                            message.contains("Fail") || message.contains("FAIL") ||
-                            message.contains("exception") || message.contains("Exception");
+            String lower = message.toLowerCase(java.util.Locale.US);
+            boolean isErr = lower.contains("error") || lower.contains("fail") ||
+                            lower.contains("exception") || lower.contains("crash") ||
+                            lower.contains("kick") || lower.contains("offline");
             if (isErr) {
                 android.util.Log.e(TAG, message);
                 de.robv.android.xposed.XposedBridge.log("[" + TAG + "] [ERROR] " + message);

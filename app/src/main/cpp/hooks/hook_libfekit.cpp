@@ -31,7 +31,16 @@ static char* (*real_fekit_strstr_ptr)(const char*, const char*) = nullptr;
 
 static bool is_fekit_blocked_path(const char* pathname) {
     if (!pathname) return false;
-    return hook_libc::is_sensitive_path(pathname) || hook_libc::is_sensitive_name(pathname);
+    return hook_libc::is_sensitive_path(pathname) ||
+           hook_libc::is_sensitive_name(pathname) ||
+           hook_libc::is_root_proc_path(pathname) ||
+           hook_libc::is_sensitive_proc_fd(pathname);
+}
+
+static bool is_fekit_blocked_path(int dirfd, const char* pathname) {
+    if (!pathname) return false;
+    return is_fekit_blocked_path(pathname) ||
+           hook_libc::is_sensitive_proc_fd(dirfd, pathname);
 }
 
 // system 代理：阻止 root 检测命令
@@ -97,7 +106,7 @@ static char* fake_strstr(const char* haystack, const char* needle) {
     char* result = real_fekit_strstr_ptr ? real_fekit_strstr_ptr(haystack, needle) : BYTEHOOK_CALL_PREV(fake_strstr, haystack, needle);
     if (result && needle) {
         const char* sensitive[] = {
-            "lsposed", "xposed", "riru", "zygisk", "magisk", "frida", "kernelsu", "ksud", "/ksu/", "libapatch", "me.bmax.apatch", "/apatch/", "shamiko",
+            "lsposed", "xposed", "riru", "zygisk", "magisk", ".magisk", "frida", "kernelsu", "ksud", "/ksu/", "libapatch", "me.bmax.apatch", "/apatch/", "shamiko",
             "dexkit", "libdexkit", "sandhook", "yahfa", "libepic", "libpine", "taichi", "liblspd",
             "qqbypass", "xalsace", "libnative-bypass", "libbytehook", "bytehook", "trampoline",
             "qauxv", "io.github.qauxv", "libqauxv", "cc.ioctl", "qnotified",
@@ -111,6 +120,8 @@ static char* fake_strstr(const char* haystack, const char* needle) {
             "com.shuame.rootgenius", "com.applisto.appcloner",
             "RuntimeEnvCensor", "parse_libart", "detection_libfekit_file",
             "VMStack_getThreadStackTrace", "trpc.o3.report.Report.SsoReport",
+            "busybox", "substrate", "cydia", "sutemp", "daemonsu", "permmgrd", "360sguard",
+            "/data/adb",
             nullptr
         };
         for (int i = 0; sensitive[i]; i++) {
@@ -123,6 +134,112 @@ static char* fake_strstr(const char* haystack, const char* needle) {
     return result;
 }
 
+// strcasestr 代理：拦截 libfekit.so 对敏感关键字的忽略大小写匹配
+static char* fake_strcasestr(const char* haystack, const char* needle) {
+    SAFE_BYTEHOOK_SCOPE();
+    char* result = BYTEHOOK_CALL_PREV(fake_strcasestr, haystack, needle);
+    if (result && needle) {
+        const char* sensitive[] = {
+            "lsposed", "xposed", "riru", "zygisk", "magisk", ".magisk", "frida", "kernelsu", "ksud", "/ksu/", "libapatch", "me.bmax.apatch", "/apatch/", "shamiko",
+            "dexkit", "libdexkit", "sandhook", "yahfa", "libepic", "libpine", "taichi", "liblspd",
+            "qqbypass", "xalsace", "libnative-bypass", "libbytehook", "bytehook", "trampoline",
+            "qauxv", "io.github.qauxv", "libqauxv", "cc.ioctl", "qnotified",
+            "bin.mt", "mt.plus", "top.nkbe.npatch", "npatch", "singleneuron", "bytebuddy",
+            "nep.timeline", "me.ketal", "me.hd", "xyz.nextalone", "top.linl",
+            "lspatch", "org.lsposed.lspatch", "moe.ono", "ono_", "lzlnb", "libcnm", "cnm0", "liball-jni",
+            "sesearchcache",
+            "me.weishu.kernelsu", "me.bmax.apatch", "eu.chainfire.supersu",
+            "com.koushikdutta.superuser", "com.noshufou.android.su", "com.kingroot.kinguser",
+            "com.kingo.root", "com.smedialink.oneclickroot", "com.zhiqupk.root.global",
+            "com.shuame.rootgenius", "com.applisto.appcloner",
+            "RuntimeEnvCensor", "parse_libart", "detection_libfekit_file",
+            "VMStack_getThreadStackTrace", "trpc.o3.report.Report.SsoReport",
+            "busybox", "substrate", "cydia", "sutemp", "daemonsu", "permmgrd", "360sguard",
+            "/data/adb",
+            nullptr
+        };
+        for (int i = 0; sensitive[i]; i++) {
+            if (strcasecmp(needle, sensitive[i]) == 0 || strstr(needle, sensitive[i])) {
+                LOGD("Blocked strcasestr match: %s", needle);
+                return nullptr;
+            }
+        }
+    }
+    return result;
+}
+
+// FEKit 专有虚拟/过滤文件流重定向助手
+static FILE* get_fekit_redirected_stream(const char* pathname) {
+    if (!pathname) return nullptr;
+    if (hook_libc::is_root_proc_path(pathname)) {
+        return nullptr;
+    }
+    if (hook_libc::is_proc_cmdline_path(pathname)) {
+        audit_native_probe("FEKit", "file_cmdline", "redirected to clean cmdline");
+        LOGI("FEKit redirected cmdline: %s", pathname);
+        return hook_libc::build_virtual_cmdline(pathname);
+    }
+    if (strstr(pathname, "smaps")) {
+        audit_native_probe("FEKit", "file_smaps", "redirected to clean smaps");
+        LOGI("FEKit redirected smaps: %s", pathname);
+        return hook_libc::build_filtered_smaps();
+    }
+    if (strcmp(pathname, "/proc/self/maps") == 0 || (strstr(pathname, "/proc/") && strstr(pathname, "/maps"))) {
+        audit_native_probe("FEKit", "file_maps", "redirected to clean maps");
+        LOGI("FEKit redirected maps: %s", pathname);
+        return hook_libc::build_filtered_maps();
+    }
+    if (strstr(pathname, "mountinfo")) {
+        audit_native_probe("FEKit", "file_mountinfo", "redirected to clean mountinfo");
+        LOGI("FEKit redirected mountinfo: %s", pathname);
+        return hook_libc::build_filtered_mountinfo();
+    }
+    if (strstr(pathname, "mounts")) {
+        audit_native_probe("FEKit", "file_mounts", "redirected to clean mounts");
+        LOGI("FEKit redirected mounts: %s", pathname);
+        return hook_libc::build_filtered_mounts();
+    }
+    if (strstr(pathname, "net/unix")) {
+        audit_native_probe("FEKit", "file_net_unix", "redirected to clean net_unix");
+        LOGI("FEKit redirected net/unix: %s", pathname);
+        return hook_libc::build_filtered_net_unix();
+    }
+    if (strstr(pathname, "net/tcp")) {
+        audit_native_probe("FEKit", "file_net_tcp", "redirected to clean net_tcp");
+        LOGI("FEKit redirected net/tcp: %s", pathname);
+        return hook_libc::build_filtered_net_tcp(strstr(pathname, "tcp6") != nullptr);
+    }
+    if (strstr(pathname, "attr/current")) {
+        audit_native_probe("FEKit", "file_attr_current", "redirected to clean selinux_attr");
+        LOGI("FEKit redirected attr/current: %s", pathname);
+        return hook_libc::build_filtered_selinux_attr();
+    }
+    if (strstr(pathname, "cgroup")) {
+        audit_native_probe("FEKit", "file_cgroup", "redirected to clean cgroup");
+        LOGI("FEKit redirected cgroup: %s", pathname);
+        return hook_libc::build_filtered_cgroup();
+    }
+    if (strstr(pathname, "/status") && strstr(pathname, "/proc/")) {
+        audit_native_probe("FEKit", "file_status", "redirected to clean status");
+        LOGI("FEKit redirected status: %s", pathname);
+        return hook_libc::build_filtered_status();
+    }
+    if (strstr(pathname, "/wchan") && strstr(pathname, "/proc/")) {
+        audit_native_probe("FEKit", "file_wchan", "redirected to clean wchan");
+        LOGI("FEKit redirected wchan: %s", pathname);
+        return hook_libc::build_filtered_wchan();
+    }
+    return nullptr;
+}
+
+static int get_fekit_redirected_fd(const char* pathname) {
+    FILE* fp = get_fekit_redirected_stream(pathname);
+    if (!fp) return -1;
+    int fd = dup(fileno(fp));
+    fclose(fp);
+    return fd;
+}
+
 // access / faccessat 代理：彻底封死 FEKit RuntimeEnvCensorTask 22 个前缀扫描 root/busybox/su 探测
 static int fake_fekit_access(const char* pathname, int mode) {
     SAFE_BYTEHOOK_SCOPE();
@@ -132,16 +249,22 @@ static int fake_fekit_access(const char* pathname, int mode) {
         errno = ENOENT;
         return -1;
     }
+    if (hook_libc::is_proc_cmdline_path(pathname)) {
+        return 0;
+    }
     return BYTEHOOK_CALL_PREV(fake_fekit_access, pathname, mode);
 }
 
 static int fake_fekit_faccessat(int dirfd, const char* pathname, int mode, int flags) {
     SAFE_BYTEHOOK_SCOPE();
     if (!pathname) return -1;
-    if (is_fekit_blocked_path(pathname)) {
-        LOGD("FEKit blocked faccessat: %s", pathname);
+    if (is_fekit_blocked_path(dirfd, pathname)) {
+        LOGD("FEKit blocked faccessat: %s (dirfd=%d)", pathname, dirfd);
         errno = ENOENT;
         return -1;
+    }
+    if (hook_libc::is_proc_cmdline_path(pathname)) {
+        return 0;
     }
     return BYTEHOOK_CALL_PREV(fake_fekit_faccessat, dirfd, pathname, mode, flags);
 }
@@ -155,6 +278,9 @@ static int fake_fekit_stat(const char* pathname, struct stat* statbuf) {
         errno = ENOENT;
         return -1;
     }
+    if (hook_libc::handle_virtual_stat(pathname, statbuf)) {
+        return 0;
+    }
     return BYTEHOOK_CALL_PREV(fake_fekit_stat, pathname, statbuf);
 }
 
@@ -166,10 +292,13 @@ static int fake_fekit_lstat(const char* pathname, struct stat* statbuf) {
         errno = ENOENT;
         return -1;
     }
+    if (hook_libc::handle_virtual_stat(pathname, statbuf)) {
+        return 0;
+    }
     return BYTEHOOK_CALL_PREV(fake_fekit_lstat, pathname, statbuf);
 }
 
-// open / fopen 代理：阻断 FEKit 直接打开敏感文件
+// open / fopen / openat 代理：彻底重定向/阻断 FEKit 访问 maps/mountinfo/sensitive 文件
 static int fake_fekit_open(const char* pathname, int flags, ...) {
     SAFE_BYTEHOOK_SCOPE();
     if (!pathname) return -1;
@@ -178,6 +307,9 @@ static int fake_fekit_open(const char* pathname, int flags, ...) {
         errno = ENOENT;
         return -1;
     }
+    int fake_fd = get_fekit_redirected_fd(pathname);
+    if (fake_fd >= 0) return fake_fd;
+
     mode_t mode = 0;
     if (flags & O_CREAT) {
         va_list args;
@@ -188,6 +320,27 @@ static int fake_fekit_open(const char* pathname, int flags, ...) {
     return BYTEHOOK_CALL_PREV(fake_fekit_open, pathname, flags, mode);
 }
 
+static int fake_fekit_openat(int dirfd, const char* pathname, int flags, ...) {
+    SAFE_BYTEHOOK_SCOPE();
+    if (!pathname) return -1;
+    if (is_fekit_blocked_path(dirfd, pathname)) {
+        LOGD("FEKit blocked openat: %s (dirfd=%d)", pathname, dirfd);
+        errno = ENOENT;
+        return -1;
+    }
+    int fake_fd = get_fekit_redirected_fd(pathname);
+    if (fake_fd >= 0) return fake_fd;
+
+    mode_t mode = 0;
+    if (flags & O_CREAT) {
+        va_list args;
+        va_start(args, flags);
+        mode = (mode_t)va_arg(args, int);
+        va_end(args);
+    }
+    return BYTEHOOK_CALL_PREV(fake_fekit_openat, dirfd, pathname, flags, mode);
+}
+
 static FILE* fake_fekit_fopen(const char* pathname, const char* mode) {
     SAFE_BYTEHOOK_SCOPE();
     if (!pathname) return nullptr;
@@ -196,6 +349,9 @@ static FILE* fake_fekit_fopen(const char* pathname, const char* mode) {
         errno = ENOENT;
         return nullptr;
     }
+    FILE* fake_fp = get_fekit_redirected_stream(pathname);
+    if (fake_fp) return fake_fp;
+
     return BYTEHOOK_CALL_PREV(fake_fekit_fopen, pathname, mode);
 }
 
@@ -211,7 +367,7 @@ static DIR* fake_fekit_opendir(const char* name) {
     return BYTEHOOK_CALL_PREV(fake_fekit_opendir, name);
 }
 
-// readlink 代理：阻断 FEKit 解析软链接
+// readlink / readlinkat 代理：阻断 FEKit 解析软链接
 static ssize_t fake_fekit_readlink(const char* pathname, char* buf, size_t bufsiz) {
     SAFE_BYTEHOOK_SCOPE();
     if (!pathname) return -1;
@@ -220,7 +376,38 @@ static ssize_t fake_fekit_readlink(const char* pathname, char* buf, size_t bufsi
         errno = ENOENT;
         return -1;
     }
-    return BYTEHOOK_CALL_PREV(fake_fekit_readlink, pathname, buf, bufsiz);
+    ssize_t ret = BYTEHOOK_CALL_PREV(fake_fekit_readlink, pathname, buf, bufsiz);
+    if (ret > 0 && buf) {
+        buf[ret < (ssize_t)bufsiz ? ret : bufsiz - 1] = '\0';
+        if (hook_libc::is_sensitive_link_target(buf)) {
+            LOGI("FEKit readlink sensitive target blocked: %s -> %s", pathname, buf);
+            buf[0] = '\0';
+            errno = ENOENT;
+            return -1;
+        }
+    }
+    return ret;
+}
+
+static ssize_t fake_fekit_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsiz) {
+    SAFE_BYTEHOOK_SCOPE();
+    if (!pathname) return -1;
+    if (is_fekit_blocked_path(dirfd, pathname)) {
+        LOGD("FEKit blocked readlinkat: %s (dirfd=%d)", pathname, dirfd);
+        errno = ENOENT;
+        return -1;
+    }
+    ssize_t ret = BYTEHOOK_CALL_PREV(fake_fekit_readlinkat, dirfd, pathname, buf, bufsiz);
+    if (ret > 0 && buf) {
+        buf[ret < (ssize_t)bufsiz ? ret : bufsiz - 1] = '\0';
+        if (hook_libc::is_sensitive_link_target(buf)) {
+            LOGI("FEKit readlinkat sensitive target blocked: %s -> %s", pathname, buf);
+            buf[0] = '\0';
+            errno = ENOENT;
+            return -1;
+        }
+    }
+    return ret;
 }
 
 #if defined(__aarch64__)
@@ -266,91 +453,59 @@ static const uint32_t TRAMPOLINE_TEMPLATE[] = {
 extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long a4, long a5, long syscall_num, void* caller_pc) {
     // Syscall 56: openat(int dirfd, const char *pathname, int flags, mode_t mode)
     if (syscall_num == 56 || syscall_num == 437) {
+        int dirfd = (int)a0;
         const char* path = (const char*)a1;
         if (path) {
-            if (is_fekit_blocked_path(path)) {
+            if (is_fekit_blocked_path(dirfd, path)) {
                 audit_native_probe("FEKit", "openat_blocked", path);
-                LOGD("FEKit inline syscall openat blocked: %s (caller=%p)", path, caller_pc);
+                LOGD("FEKit inline syscall openat blocked: %s (dirfd=%d, caller=%p)", path, dirfd, caller_pc);
                 return -ENOENT;
             }
-            if (strstr(path, "smaps")) {
-                FILE* fake = hook_libc::build_filtered_smaps();
-                if (fake) {
-                    int fd = dup(fileno(fake));
-                    fclose(fake);
-                    audit_native_probe("FEKit", "openat_smaps", "redirected to clean smaps");
-                    LOGI("FEKit inline syscall openat smaps redirected: %s -> fd %d", path, fd);
-                    return fd;
-                }
-            } else if (strcmp(path, "/proc/self/maps") == 0 || (strstr(path, "/proc/") && strstr(path, "/maps"))) {
-                FILE* fake = hook_libc::build_filtered_maps();
-                if (fake) {
-                    int fd = dup(fileno(fake));
-                    fclose(fake);
-                    audit_native_probe("FEKit", "openat_maps", "redirected to clean maps");
-                    LOGI("FEKit inline syscall openat maps redirected: %s -> fd %d", path, fd);
-                    return fd;
-                }
-            } else if (strstr(path, "mountinfo")) {
-                FILE* fake = hook_libc::build_filtered_mountinfo();
-                if (fake) {
-                    int fd = dup(fileno(fake));
-                    fclose(fake);
-                    audit_native_probe("FEKit", "openat_mountinfo", "redirected to clean mountinfo");
-                    return fd;
-                }
-            } else if (strstr(path, "mounts")) {
-                FILE* fake = hook_libc::build_filtered_mounts();
-                if (fake) {
-                    int fd = dup(fileno(fake));
-                    fclose(fake);
-                    audit_native_probe("FEKit", "openat_mounts", "redirected to clean mounts");
-                    return fd;
-                }
-            } else if (strstr(path, "/status")) {
-                FILE* fake = hook_libc::build_filtered_status();
-                if (fake) {
-                    int fd = dup(fileno(fake));
-                    fclose(fake);
-                    audit_native_probe("FEKit", "openat_status", "redirected to clean status");
-                    return fd;
-                }
-            } else if (strstr(path, "/wchan")) {
-                FILE* fake = hook_libc::build_filtered_wchan();
-                if (fake) {
-                    int fd = dup(fileno(fake));
-                    fclose(fake);
-                    audit_native_probe("FEKit", "openat_wchan", "redirected to clean wchan");
-                    return fd;
-                }
+            int fake_fd = get_fekit_redirected_fd(path);
+            if (fake_fd >= 0) {
+                LOGI("FEKit inline syscall openat redirected: %s -> fd %d", path, fake_fd);
+                return fake_fd;
             }
         }
     }
     // Syscall 79: newfstatat(int dirfd, const char *pathname, struct stat *statbuf, int flags)
     else if (syscall_num == 79) {
+        int dirfd = (int)a0;
         const char* path = (const char*)a1;
-        if (path && is_fekit_blocked_path(path)) {
-            audit_native_probe("FEKit", "newfstatat_blocked", path);
-            LOGD("FEKit inline syscall newfstatat blocked: %s (caller=%p)", path, caller_pc);
-            return -ENOENT;
+        if (path) {
+            if (is_fekit_blocked_path(dirfd, path)) {
+                audit_native_probe("FEKit", "newfstatat_blocked", path);
+                LOGD("FEKit inline syscall newfstatat blocked: %s (dirfd=%d, caller=%p)", path, dirfd, caller_pc);
+                return -ENOENT;
+            }
+            if (hook_libc::handle_virtual_stat(path, (struct stat*)a2)) {
+                return 0;
+            }
         }
     }
     // Syscall 78: readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz)
     else if (syscall_num == 78) {
+        int dirfd = (int)a0;
         const char* path = (const char*)a1;
-        if (path && is_fekit_blocked_path(path)) {
+        if (path && is_fekit_blocked_path(dirfd, path)) {
             audit_native_probe("FEKit", "readlinkat_blocked", path);
-            LOGD("FEKit inline syscall readlinkat blocked: %s (caller=%p)", path, caller_pc);
+            LOGD("FEKit inline syscall readlinkat blocked: %s (dirfd=%d, caller=%p)", path, dirfd, caller_pc);
             return -ENOENT;
         }
     }
     // Syscall 48/439: faccessat
     else if (syscall_num == 48 || syscall_num == 439) {
+        int dirfd = (int)a0;
         const char* path = (const char*)a1;
-        if (path && is_fekit_blocked_path(path)) {
-            audit_native_probe("FEKit", "faccessat_blocked", path);
-            LOGD("FEKit inline syscall faccessat blocked: %s (caller=%p)", path, caller_pc);
-            return -ENOENT;
+        if (path) {
+            if (is_fekit_blocked_path(dirfd, path)) {
+                audit_native_probe("FEKit", "faccessat_blocked", path);
+                LOGD("FEKit inline syscall faccessat blocked: %s (dirfd=%d, caller=%p)", path, dirfd, caller_pc);
+                return -ENOENT;
+            }
+            if (hook_libc::is_proc_cmdline_path(path)) {
+                return 0;
+            }
         }
     }
     // Syscall 43: statfs
@@ -506,6 +661,7 @@ void install_hooks() {
 
     // 字符串匹配：仅对 libfekit.so 作为调用方拦截，避免全局性能损耗
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "strstr", (void*)fake_strstr, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "strcasestr", (void*)fake_strcasestr, nullptr, nullptr);
 
     // 文件访问与探测类：针对 libfekit.so 拦截所有探测 API
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "access", (void*)fake_fekit_access, nullptr, nullptr);
@@ -513,9 +669,14 @@ void install_hooks() {
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "stat", (void*)fake_fekit_stat, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "lstat", (void*)fake_fekit_lstat, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "open", (void*)fake_fekit_open, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "open64", (void*)fake_fekit_open, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "openat", (void*)fake_fekit_openat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "openat64", (void*)fake_fekit_openat, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "fopen", (void*)fake_fekit_fopen, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "fopen64", (void*)fake_fekit_fopen, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "opendir", (void*)fake_fekit_opendir, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "readlink", (void*)fake_fekit_readlink, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "readlinkat", (void*)fake_fekit_readlinkat, nullptr, nullptr);
 }
 
 } // namespace hook_libfekit

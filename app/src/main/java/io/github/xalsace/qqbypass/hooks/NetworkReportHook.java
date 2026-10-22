@@ -300,7 +300,70 @@ public class NetworkReportHook {
 
                         // Always audit if report recording is enabled
                         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport("MSFKernelBridge", cmd, null, "seq=" + seq, 0);
+                            byte[] data = null;
+                            byte[] secSign = null;
+                            byte[] secDevToken = null;
+                            byte[] secExtra = null;
+                            java.util.Map<?, ?> transInfo = null;
+                            String uin = null;
+                            try {
+                                data = (byte[]) XposedHelpers.callMethod(adapter, "getData");
+                            } catch (Throwable ignored) {}
+                            try {
+                                secSign = (byte[]) XposedHelpers.callMethod(adapter, "getSecSign");
+                            } catch (Throwable ignored) {}
+                            try {
+                                secDevToken = (byte[]) XposedHelpers.callMethod(adapter, "getSecDeviceToken");
+                            } catch (Throwable ignored) {}
+                            try {
+                                secExtra = (byte[]) XposedHelpers.callMethod(adapter, "getSecExtra");
+                            } catch (Throwable ignored) {}
+                            try {
+                                transInfo = (java.util.Map<?, ?>) XposedHelpers.callMethod(adapter, "getTransInfo");
+                            } catch (Throwable ignored) {}
+                            try {
+                                uin = (String) XposedHelpers.callMethod(adapter, "getUin");
+                            } catch (Throwable ignored) {}
+
+                            StringBuilder extra = new StringBuilder();
+                            extra.append("seq=").append(seq);
+                            if (uin != null && !uin.isEmpty() && !"0".equals(uin)) {
+                                extra.append(", uin=").append(uin);
+                            }
+                            if (secSign != null && secSign.length > 0) {
+                                extra.append(", secSignLen=").append(secSign.length);
+                            }
+                            if (secDevToken != null && secDevToken.length > 0) {
+                                extra.append(", secDevTokenLen=").append(secDevToken.length);
+                            }
+                            if (secExtra != null && secExtra.length > 0) {
+                                extra.append(", secExtraLen=").append(secExtra.length);
+                            }
+                            if (transInfo != null && !transInfo.isEmpty()) {
+                                extra.append(", transKeys=").append(transInfo.keySet());
+                            }
+
+                            if (data != null && data.length > 0) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                    "MSFKernelBridge", cmd, data, extra.toString(), 6);
+                            } else {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport(
+                                    "MSFKernelBridge", cmd, null, extra.toString(), 0);
+                            }
+
+                            if (secExtra != null && secExtra.length > 0) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                    "MSFKernelBridge.secExtra", cmd + "#secExtra", secExtra, "seq=" + seq, 4);
+                            }
+
+                            if (cmd != null && (isKickCmd(cmd) || "StatSvc.RspMSFForceOffline".equals(cmd))) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                                    "MSFKernelBridge.sendPacket (" + cmd + ")",
+                                    null,
+                                    adapter,
+                                    "Native packet dispatched: seq=" + seq + ", uin=" + uin
+                                );
+                            }
                         }
 
                         if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(cmd)) {
@@ -362,6 +425,27 @@ public class NetworkReportHook {
                     // Always audit outgoing SSO messages if enabled (excluding Heartbeat.Alive to prevent log flood)
                     if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT && command != null && !command.startsWith("Heartbeat.")) {
                         io.github.xalsace.qqbypass.utils.ReportAuditManager.recordMsfSso(command, uin, ssoSeq, needResp, attrs, wup);
+                    }
+
+                    if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT && command != null && (isKickCmd(command) || "StatSvc.RspMSFForceOffline".equals(command))) {
+                        Object attachedFromMsg = null;
+                        try {
+                            attachedFromMsg = XposedHelpers.callMethod(toServiceMsg, "getAttribute", command);
+                            if (attachedFromMsg == null) {
+                                attachedFromMsg = XposedHelpers.callMethod(toServiceMsg, "getAttribute", "StatSvc.RspMSFForceOffline");
+                            }
+                            if (attachedFromMsg == null) {
+                                attachedFromMsg = XposedHelpers.callMethod(toServiceMsg, "getAttribute", "StatSvc.ReqMSFOffline");
+                            }
+                        } catch (Throwable ignored) {}
+
+                        String decodedKickDetails = decodeForceOfflineDetails(cl, attachedFromMsg != null ? attachedFromMsg : toServiceMsg);
+                        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
+                            "MsfCore.sendSsoMsg (" + command + ")",
+                            attachedFromMsg != null ? attachedFromMsg : toServiceMsg,
+                            toServiceMsg,
+                            "MSF ForceOffline ACK dispatched: " + decodedKickDetails
+                        );
                     }
 
                     if (HookConfig.ENABLE_NETWORK_INTERCEPT && shouldBlock(command)) {
@@ -493,8 +577,12 @@ public class NetworkReportHook {
                             int cmd2 = param.args[1] instanceof Number ? ((Number) param.args[1]).intValue() : 0;
                             int cmd3 = param.args[2] instanceof Number ? ((Number) param.args[2]).intValue() : 0;
                             byte[] bArr = (byte[]) param.args[3];
+                            boolean scrubbed = QQ950PatchHook.scrubPackedRiskPayload(bArr);
+                            if (scrubbed) {
+                                XposedEntry.log("[NetworkReport] Scrubbed leaked risk signatures in d1.a payload");
+                            }
                             long timeout = param.args.length >= 5 && param.args[4] instanceof Number ? ((Number) param.args[4]).longValue() : 0L;
-                            String extra = "cmd=" + cmd1 + "/" + cmd2 + "/" + cmd3 + ", timeout=" + timeout + "ms";
+                            String extra = "cmd=" + cmd1 + "/" + cmd2 + "/" + cmd3 + ", timeout=" + timeout + "ms" + (scrubbed ? " (scrubbed)" : "");
                             io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
                                 "TuringFD.Network", "d1.a", bArr, extra, 6);
                         }
@@ -568,7 +656,9 @@ public class NetworkReportHook {
                lower.contains("qa_mmkv") || lower.contains("tmp_qa_") ||
                lower.contains("qa_dyn_lib") || lower.contains("qa_misc") ||
                lower.contains("ono_mmkv") || lower.contains("ono_hcb_") || lower.contains("moe.ono") ||
-               lower.contains("sesearchcache");
+               lower.contains("sesearchcache") ||
+               lower.contains("termux") || lower.contains("com.termux") ||
+               lower.contains("antigravity") || lower.contains(".gemini");
     }
 
     private static void hookTuringEridanus(ClassLoader cl) {
@@ -713,6 +803,13 @@ public class NetworkReportHook {
         }
     }
 
+    private static final byte[] OFFICIAL_TENCENT_PKG_SIG_MD5 = new byte[] {
+        (byte) 0xa6, (byte) 0xb7, (byte) 0x45, (byte) 0xbf,
+        (byte) 0x24, (byte) 0xa2, (byte) 0xc2, (byte) 0x77,
+        (byte) 0x52, (byte) 0x77, (byte) 0x16, (byte) 0xf6,
+        (byte) 0xf3, (byte) 0x6e, (byte) 0xb6, (byte) 0x8d
+    };
+
     private static void hookWlogin(ClassLoader cl) {
         if (cl == null) return;
         Class<?> wCls = XposedHelpers.findClassIfExists("oicq.wlogin_sdk.request.w", cl);
@@ -721,7 +818,22 @@ public class NetworkReportHook {
                 new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        XposedEntry.log("[Wlogin] Intercepted Wlogin device fingerprint on " + wCls.getName());
+                        try {
+                            XposedHelpers.setStaticObjectField(wCls, "J", OFFICIAL_TENCENT_PKG_SIG_MD5.clone());
+                            XposedHelpers.setStaticIntField(wCls, "Y", 0);
+                            XposedEntry.log("[Wlogin] Intercepted Wlogin device fingerprint on " + wCls.getName() + " -> enforced clean signature & w.Y=0");
+                        } catch (Throwable ignored) {}
+                    }
+                });
+        }
+
+        Class<?> utilCls = XposedHelpers.findClassIfExists("oicq.wlogin_sdk.tools.util", cl);
+        if (utilCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_wlogin_util")) {
+            HookUtils.hookAllMethods(utilCls, "getPkgSigFromApkName",
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult(OFFICIAL_TENCENT_PKG_SIG_MD5.clone());
                     }
                 });
         }
@@ -756,6 +868,50 @@ public class NetworkReportHook {
                cmd.startsWith("trpc.login.ecdh.report") ||
                "ConfigPushSvc.PushReq".equals(cmd) ||
                "cmd_forceLogout".equals(cmd);
+    }
+
+    public static String decodeForceOfflineDetails(ClassLoader cl, Object msg) {
+        if (msg == null) return "null";
+        StringBuilder sb = new StringBuilder();
+        try {
+            byte[] wupBuf = (byte[]) XposedHelpers.callMethod(msg, "getWupBuffer");
+            if (wupBuf != null && wupBuf.length > 0) {
+                try {
+                    Class<?> uniPacketCls = XposedHelpers.findClassIfExists("com.qq.jce.wup.UniPacket", cl);
+                    Class<?> reqCls = XposedHelpers.findClassIfExists("com.tencent.msf.service.protocol.push.RequestMSFForceOffline", cl);
+                    if (uniPacketCls != null && reqCls != null) {
+                        Object packet = uniPacketCls.getConstructor(boolean.class).newInstance(true);
+                        XposedHelpers.callMethod(packet, "setEncodeName", "utf-8");
+                        XposedHelpers.callMethod(packet, "decode", (Object) wupBuf);
+                        Object reqObj = XposedHelpers.callMethod(packet, "getByClass", "RequestMSFForceOffline", reqCls.newInstance());
+                        if (reqObj != null) {
+                            long lUin = XposedHelpers.getLongField(reqObj, "lUin");
+                            long iSeqno = XposedHelpers.getLongField(reqObj, "iSeqno");
+                            byte bKickType = XposedHelpers.getByteField(reqObj, "bKickType");
+                            String strTitle = (String) XposedHelpers.getObjectField(reqObj, "strTitle");
+                            String strInfo = (String) XposedHelpers.getObjectField(reqObj, "strInfo");
+                            byte bSigKick = XposedHelpers.getByteField(reqObj, "bSigKick");
+                            byte[] vecSigKickData = (byte[]) XposedHelpers.getObjectField(reqObj, "vecSigKickData");
+                            byte bSameDevice = XposedHelpers.getByteField(reqObj, "bSameDevice");
+
+                            sb.append("RequestMSFForceOffline{lUin=").append(lUin)
+                              .append(", iSeqno=").append(iSeqno)
+                              .append(", bKickType=").append(bKickType)
+                              .append(", strTitle='").append(strTitle).append('\'')
+                              .append(", strInfo='").append(strInfo).append('\'')
+                              .append(", bSigKick=").append(bSigKick)
+                              .append(", bSameDevice=").append(bSameDevice)
+                              .append(", vecSigKickDataLen=").append(vecSigKickData != null ? vecSigKickData.length : 0)
+                              .append("}");
+                            return sb.toString();
+                        }
+                    }
+                } catch (Throwable t) {
+                    sb.append("UniPacket decode: ").append(t.getMessage());
+                }
+            }
+        } catch (Throwable ignored) {}
+        return sb.length() > 0 ? sb.toString() : "raw";
     }
 
     private static void hookErrorHandlerClass(Class<?> ehCls) {
@@ -864,9 +1020,10 @@ public class NetworkReportHook {
                         } catch (Throwable ignored) {}
 
                         if (isKickCmd(cmd) || isKickOrTokenFailCode(failCode)) {
+                            String kickDetail = decodeForceOfflineDetails(cl, fromMsg);
                             io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
                                 "MSF.core.t.a (Read-Only Audit)", fromMsg, toMsg,
-                                "MSF push/sso response received: cmd=" + cmd + ", failCode=" + failCode);
+                                "MSF push/sso response received: cmd=" + cmd + ", failCode=" + failCode + ", detail=" + kickDetail);
                         }
                     }
                 }
@@ -1042,9 +1199,18 @@ public class NetworkReportHook {
                             if (cmd != null && "_msf_kickedAndCleanTokenResp".equals(cmd.toString())) {
                                 String serviceCmd = (String) XposedHelpers.callMethod(toMsg, "getServiceCmd");
                                 Object fromServiceMsg = serviceCmd != null ? XposedHelpers.callMethod(toMsg, "getAttribute", serviceCmd) : null;
+                                if (fromServiceMsg == null) {
+                                    fromServiceMsg = XposedHelpers.callMethod(toMsg, "getAttribute", "StatSvc.RspMSFForceOffline");
+                                }
+                                if (fromServiceMsg == null) {
+                                    fromServiceMsg = XposedHelpers.callMethod(toMsg, "getAttribute", "StatSvc.ReqMSFOffline");
+                                }
+                                String detail = decodeForceOfflineDetails(cl, fromServiceMsg != null ? fromServiceMsg : toMsg);
                                 io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
                                     "crossplatform.c$a.run (Read-Only Audit)",
-                                    fromServiceMsg, "_msf_kickedAndCleanTokenResp executing");
+                                    fromServiceMsg != null ? fromServiceMsg : toMsg,
+                                    toMsg,
+                                    "_msf_kickedAndCleanTokenResp executing: " + detail);
                             }
                         }
                     } catch (Throwable ignored) {}
@@ -1067,9 +1233,18 @@ public class NetworkReportHook {
                                     if (cmd != null && "_msf_kickedAndCleanTokenResp".equals(cmd.toString())) {
                                         String serviceCmd = (String) XposedHelpers.callMethod(toMsg, "getServiceCmd");
                                         Object fromServiceMsg = serviceCmd != null ? XposedHelpers.callMethod(toMsg, "getAttribute", serviceCmd) : null;
+                                        if (fromServiceMsg == null) {
+                                            fromServiceMsg = XposedHelpers.callMethod(toMsg, "getAttribute", "StatSvc.RspMSFForceOffline");
+                                        }
+                                        if (fromServiceMsg == null) {
+                                            fromServiceMsg = XposedHelpers.callMethod(toMsg, "getAttribute", "StatSvc.ReqMSFOffline");
+                                        }
+                                        String detail = decodeForceOfflineDetails(cl, fromServiceMsg != null ? fromServiceMsg : toMsg);
                                         io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
                                             "crossplatform.c$Runnable.run (Read-Only Audit)",
-                                            fromServiceMsg, "_msf_kickedAndCleanTokenResp executing");
+                                            fromServiceMsg != null ? fromServiceMsg : toMsg,
+                                            toMsg,
+                                            "_msf_kickedAndCleanTokenResp executing: " + detail);
                                     }
                                 }
                             } catch (Throwable ignored) {}

@@ -236,13 +236,45 @@ public class DynamicRootDetectionHook {
                 } else if (first instanceof String) {
                     path = (String) first;
                 }
-                if (path != null && isSuspiciousPath(path)) {
-                    if (isCallerQAuxv()) {
-                        return;
+                if (path != null) {
+                    if (path.contains("/proc/self/maps") || (path.contains("/proc/") && path.endsWith("/maps"))) {
+                        if (!isCallerQAuxv()) {
+                            StackTraceElement[] st = Thread.currentThread().getStackTrace();
+                            for (StackTraceElement ste : st) {
+                                String cn = ste.getClassName();
+                                if (cn != null && (cn.contains("Bennet") || cn.contains("Watermelon") ||
+                                                   cn.contains("turingfd") || cn.contains("tfd") ||
+                                                   cn.contains("qsec") || cn.contains("fe.FEKit"))) {
+                                    XposedEntry.log("File stream maps blocked for detection caller: " + cn);
+                                    throw new FileNotFoundException("No such file or directory: " + path);
+                                }
+                            }
+                        }
                     }
-                    XposedEntry.log("File stream blocked: " + path);
-                    UnifiedHookCoordinator.notifyNativeIfAvailable("file_blocked", path);
-                    throw new FileNotFoundException("No such file or directory: " + path);
+                    if (path.contains("/proc/mounts") || path.contains("/proc/self/mounts") ||
+                        path.contains("/proc/self/mountinfo") || (path.contains("/proc/") && path.contains("mount"))) {
+                        if (!isCallerQAuxv()) {
+                            StackTraceElement[] st = Thread.currentThread().getStackTrace();
+                            for (StackTraceElement ste : st) {
+                                String cn = ste.getClassName();
+                                if (cn != null && (cn.contains("Bennet") || cn.contains("Watermelon") ||
+                                                   cn.contains("turingfd") || cn.contains("tfd") ||
+                                                   cn.contains("qsec") || cn.contains("fe.FEKit") ||
+                                                   cn.contains("qimei"))) {
+                                    XposedEntry.log("File stream mounts blocked for detection caller: " + cn);
+                                    throw new FileNotFoundException("No such file or directory: " + path);
+                                }
+                            }
+                        }
+                    }
+                    if (isSuspiciousPath(path)) {
+                        if (isCallerQAuxv()) {
+                            return;
+                        }
+                        XposedEntry.log("File stream blocked: " + path);
+                        UnifiedHookCoordinator.notifyNativeIfAvailable("file_blocked", path);
+                        throw new FileNotFoundException("No such file or directory: " + path);
+                    }
                 }
             }
         };

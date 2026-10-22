@@ -37,13 +37,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Responsibilities:
  * 1. Asynchronously captures and writes outgoing telemetry / report events to disk:
  *    - All traffic:
- *        * /data/user/0/com.tencent.mobileqq/files/report_audit.log
- *        * /storage/emulated/0/Android/data/com.tencent.mobileqq/files/report_audit.log
- *        * /storage/emulated/0/0_TM/report_audit.log (when writable)
+ *        * /data/user/0/com.tencent.mobileqq/cache/qblogs/report_audit_yyyyMMdd_HHmm.log
+ *        * /storage/emulated/0/Android/data/com.tencent.mobileqq/cache/qblogs/report_audit_yyyyMMdd_HHmm.log
+ *        * /storage/emulated/0/0_TM/qblogs/report_audit_yyyyMMdd_HHmm.log (when writable)
  *    - Pure Security & Environment Telemetry (Filtered, Noise-Free):
- *        * /data/user/0/com.tencent.mobileqq/files/security_environment_audit.log
- *        * /storage/emulated/0/Android/data/com.tencent.mobileqq/files/security_environment_audit.log
- *        * /storage/emulated/0/0_TM/security_environment_audit.log (when writable)
+ *        * /data/user/0/com.tencent.mobileqq/cache/qblogs/security_environment_audit_yyyyMMdd_HHmm.log
+ *        * /storage/emulated/0/Android/data/com.tencent.mobileqq/cache/qblogs/security_environment_audit_yyyyMMdd_HHmm.log
+ *        * /storage/emulated/0/0_TM/qblogs/security_environment_audit_yyyyMMdd_HHmm.log (when writable)
  * 2. Deep decoding of Kick / ForceOffline events:
  *    - Decodes RequestMSFForceOffline / RequestPushForceOffline WUP & JCE structures
  *    - Analyzes bSigKick, strTitle, strInfo, strTips, failCode, failMsg
@@ -57,10 +57,17 @@ public class ReportAuditManager {
     private static final String TAG = "QQReportAudit";
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB rolling limit
 
-    // Base directories for report audit logs
-    private static final File PRIMARY_DIR = new File("/data/user/0/com.tencent.mobileqq/files");
-    private static final File SECONDARY_DIR = new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files");
-    private static final File TERTIARY_DIR = new File("/storage/emulated/0/0_TM");
+    // Base directories for report audit logs: unified in cache/qblogs
+    private static final File PRIMARY_DIR = new File("/data/user/0/com.tencent.mobileqq/cache/qblogs");
+    private static final File SECONDARY_DIR = new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/cache/qblogs");
+    private static final File TERTIARY_DIR = new File("/storage/emulated/0/0_TM/qblogs");
+
+    // Legacy directories to sweep during cleanup
+    private static final File[] LEGACY_DIRS = new File[] {
+        new File("/data/user/0/com.tencent.mobileqq/files"),
+        new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files"),
+        new File("/storage/emulated/0/0_TM")
+    };
 
     public static final String PREFIX_ALL = "report_audit_";
     public static final String PREFIX_SEC = "security_environment_audit_";
@@ -272,6 +279,14 @@ public class ReportAuditManager {
 
                 // 3. Clean legacy non-bucketed audit files and old temporary/prune files
                 cleanLegacyFiles(dir);
+            }
+
+            // 4. Sweep and purge all residual audit logs from legacy non-cache directories
+            for (File legacyDir : LEGACY_DIRS) {
+                if (legacyDir == null || !legacyDir.exists() || !legacyDir.isDirectory()) continue;
+                cleanDirectoryByPrefix(legacyDir, PREFIX_ALL, 0);
+                cleanDirectoryByPrefix(legacyDir, PREFIX_SEC, 0);
+                cleanLegacyFiles(legacyDir);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in cleanExpiredLogsInternal: " + t.getMessage());
@@ -506,6 +521,39 @@ public class ReportAuditManager {
     }
 
     /**
+     * Checks if a telemetry, report, or error event contains error/failure/kick characteristics.
+     * Guaranteed to return true for events requiring Log.e visibility.
+     */
+    public static boolean isErrorLevel(String channel, String eventOrCmd, String extraDetail, Map<?, ?> params) {
+        if (eventOrCmd != null) {
+            String lower = eventOrCmd.toLowerCase(Locale.US);
+            if (lower.contains("error") || lower.contains("fail") || lower.contains("exception")
+                    || lower.contains("crash") || lower.contains("msf_decode_packet_fail")
+                    || lower.contains("kick") || lower.contains("offline")) {
+                return true;
+            }
+        }
+        if (extraDetail != null) {
+            String lower = extraDetail.toLowerCase(Locale.US);
+            if (lower.contains("error") || lower.contains("fail") || lower.contains("exception")
+                    || lower.contains("failcode") || lower.contains("err=") || lower.contains("success=false")) {
+                return true;
+            }
+        }
+        if (params != null) {
+            for (Map.Entry<?, ?> entry : params.entrySet()) {
+                String k = entry.getKey() != null ? entry.getKey().toString().toLowerCase(Locale.US) : "";
+                String v = entry.getValue() != null ? entry.getValue().toString().toLowerCase(Locale.US) : "";
+                if (k.contains("error") || k.contains("fail") || k.contains("failcode")
+                        || v.contains("error") || v.contains("fail") || v.contains("exception")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * General telemetry / network report audit logger.
      */
     public static void recordReport(String channel, String eventOrCmd, Map<String, ?> params, String extraDetail, int stackDepth) {
@@ -545,9 +593,13 @@ public class ReportAuditManager {
             }
 
             String fullLog = sb.toString();
-            sLogQueue.offer(new AuditEntry(fullLog, isSecurity, false));
+            boolean isError = isErrorLevel(channel, eventOrCmd, extraDetail, params);
+            sLogQueue.offer(new AuditEntry(fullLog, isSecurity || isError, isError));
 
-            if (isSecurity) {
+            if (isError) {
+                Log.e(TAG, "[ERROR_AUDIT] " + fullLog);
+                XposedBridge.log("[ErrorAudit] " + fullLog);
+            } else if (isSecurity) {
                 Log.w(TAG, "[ENV_AUDIT] " + fullLog);
                 XposedBridge.log("[EnvAudit] " + fullLog);
             }
@@ -610,9 +662,15 @@ public class ReportAuditManager {
             sb.append("\n    Caller: ").append(getCallerSummary(4));
 
             String fullLog = sb.toString();
-            sLogQueue.offer(new AuditEntry(fullLog, true, false));
-            Log.w(TAG, "[ENV_AUDIT] " + fullLog);
-            XposedBridge.log("[EnvAudit] " + fullLog);
+            boolean isError = isErrorLevel("ProtoBufSecurity", packetName, actionSummary, null);
+            sLogQueue.offer(new AuditEntry(fullLog, true, isError));
+            if (isError) {
+                Log.e(TAG, "[ERROR_AUDIT] " + fullLog);
+                XposedBridge.log("[ErrorAudit] " + fullLog);
+            } else {
+                Log.w(TAG, "[ENV_AUDIT] " + fullLog);
+                XposedBridge.log("[EnvAudit] " + fullLog);
+            }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordProtoBufSecurity: " + t.getMessage());
         }
@@ -861,9 +919,15 @@ public class ReportAuditManager {
             sb.append("==================================================================================\n");
 
             String fullLog = sb.toString();
-            sLogQueue.offer(new AuditEntry(fullLog, true, false));
-            Log.w(TAG, fullLog);
-            XposedBridge.log(fullLog);
+            boolean isError = isErrorLevel(channel, cmd, extraInfo, null);
+            sLogQueue.offer(new AuditEntry(fullLog, true, isError));
+            if (isError) {
+                Log.e(TAG, fullLog);
+                XposedBridge.log("[ERROR] " + fullLog);
+            } else {
+                Log.w(TAG, fullLog);
+                XposedBridge.log(fullLog);
+            }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordOutboundRiskPayload: " + t.getMessage());
         }
@@ -931,9 +995,15 @@ public class ReportAuditManager {
             sb.append("==================================================================================\n");
 
             String fullLog = sb.toString();
-            sLogQueue.offer(new AuditEntry(fullLog, true, false));
-            Log.w(TAG, fullLog);
-            XposedBridge.log(fullLog);
+            boolean isError = isErrorLevel(channel, operation, null, riskMap);
+            sLogQueue.offer(new AuditEntry(fullLog, true, isError));
+            if (isError) {
+                Log.e(TAG, fullLog);
+                XposedBridge.log("[ERROR] " + fullLog);
+            } else {
+                Log.w(TAG, fullLog);
+                XposedBridge.log(fullLog);
+            }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordOutboundRiskMap: " + t.getMessage());
         }
@@ -942,6 +1012,12 @@ public class ReportAuditManager {
     /**
      * Record risk telemetry sanitization event before native pack & network transmission.
      */
+    public static void recordSanitizationEvent(String channel, String operation, String detail) {
+        java.util.List<String> list = new java.util.ArrayList<>();
+        if (detail != null) list.add(detail);
+        recordSanitizationEvent(channel, operation, list);
+    }
+
     public static void recordSanitizationEvent(String channel, String operation, java.util.List<String> sanitizedDetails) {
         if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
         try {
@@ -1114,10 +1190,10 @@ public class ReportAuditManager {
 
         String fullLog = sb.toString();
         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-            sLogQueue.offer(new AuditEntry(fullLog, true, false));
+            sLogQueue.offer(new AuditEntry(fullLog, true, true));
         }
-        Log.w(TAG, fullLog);
-        XposedBridge.log("[ReportAudit] " + fullLog);
+        Log.e(TAG, fullLog);
+        XposedBridge.log("[ReportAudit] [ERROR] " + fullLog);
 
         return sensitive;
     }

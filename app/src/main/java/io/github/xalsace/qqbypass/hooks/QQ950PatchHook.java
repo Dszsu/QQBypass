@@ -175,6 +175,9 @@ public class QQ950PatchHook {
 
         // Tier 19: Outbound TuringFD Risk Dictionary (map2) Deep-Audit
         hookTuringOutboundRiskMap(lpparam, cl);
+
+        // Tier 20: TVK Player CKey & CKeyGuard Security Neutralization
+        hookCKeyAndTVKSecurity(cl);
     }
 
     // ==================== Tier 1: void-return, crash-safe ====================
@@ -1165,6 +1168,7 @@ public class QQ950PatchHook {
             hookQQ9375DefensesWithClassLoader(cl);
             hookTuringBerryAndThisWithClassLoader(cl);
             hookTuringOutboundRiskMapWithClassLoader(cl);
+            hookCKeyAndTVKSecurity(cl);
         } catch (Throwable t) {
             XposedEntry.logError("[LateStage] hookLateStage error: " + t.getMessage(), t);
         }
@@ -4763,6 +4767,247 @@ public class QQ950PatchHook {
                 XposedEntry.log("[TuringPatch] Installed outbound risk map hooks on " + clsName);
             }
         }
+    }
+
+    public static final byte[] OFFICIAL_TENCENT_PKG_SIG_MD5 = new byte[] {
+        (byte) 0xa6, (byte) 0xb7, (byte) 0x45, (byte) 0xbf,
+        (byte) 0x24, (byte) 0xa2, (byte) 0xc2, (byte) 0x77,
+        (byte) 0x52, (byte) 0x77, (byte) 0x16, (byte) 0xf6,
+        (byte) 0xf3, (byte) 0x6e, (byte) 0xb6, (byte) 0x8d
+    };
+
+    private static final java.util.Set<ClassLoader> sHookedCKeyLoaders =
+        java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+    /**
+     * Tier 20: TVK Player CKey & CKeyGuard Security Data Normalization & Pass-Through.
+     * In accordance with user policy ("有些本应无条件上报的数据禁止阻断"):
+     * Unconditional telemetry events (vs_init, vs_ckey, vs_taskenc) are strictly preserved and allowed to transmit.
+     * We perform transparent normalization on their payload:
+     * - CKeyBeaconReport: Keeps Beacon reporting pipeline OPEN. Normalizes any empty vs_platform / vs_sdtfrom.
+     * - VsReporter: Ensures propInit supplies legitimate parameters (vs_platform=V1000, vs_sdtfrom=1,
+     *   vs_so_version=V3.0.000, guard_so_version=V1.0.002, pkg=com.tencent.mobileqq).
+     * - VsAppKeyVerify: Returns a valid VsAppKeyBean, registers it in VsAppKeyUtil, and ensures CKeyFacade fields are initialized.
+     * - CKeyGuard: Sets clean versions (V1.0.002), ensures bLoadSucc=true, and lets native sGuardInit execute safely.
+     * - CKeyFacade: Sets bLoadSucc=true, clean versions (V3.0.000), and provides official package signature MD5.
+     */
+    public static void hookCKeyAndTVKSecurity(ClassLoader cl) {
+        if (cl == null || !sHookedCKeyLoaders.add(cl)) return;
+
+        try {
+            // 1. CKeyBeaconReport: KEEP PIPELINE OPEN, sanitize payload
+            Class<?> beaconReportCls = XposedHelpers.findClassIfExists("com.tencent.qqlive.tvkplayer.vinfo.ckey.CKeyBeaconReport", cl);
+            if (beaconReportCls != null) {
+                // Ensure switch is explicitly enabled (never closed)
+                try {
+                    XposedHelpers.callStaticMethod(beaconReportCls, "setSwitchReport", true);
+                } catch (Throwable ignored) {}
+
+                // Transparent normalization on trackCustomKVEvent: do NOT block, sanitize properties
+                HookUtils.hookAllMethods(beaconReportCls, "trackCustomKVEvent", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length >= 3 && param.args[2] instanceof java.util.Properties) {
+                            java.util.Properties props = (java.util.Properties) param.args[2];
+                            String plat = props.getProperty("vs_platform");
+                            if (plat == null || plat.isEmpty() || "nil".equals(plat)) {
+                                props.setProperty("vs_platform", "V1000");
+                            }
+                            String sdt = props.getProperty("vs_sdtfrom");
+                            if (sdt == null || sdt.isEmpty() || "nil".equals(sdt)) {
+                                props.setProperty("vs_sdtfrom", "1");
+                            }
+                            props.setProperty("guard_so_version", "V1.0.002");
+                            props.setProperty("vs_so_version", "V3.0.000");
+                            String pkg = props.getProperty("vs_pkgmame");
+                            if (pkg == null || pkg.isEmpty() || "nil".equals(pkg)) {
+                                props.setProperty("vs_pkgmame", "com.tencent.mobileqq");
+                            }
+                        }
+                    }
+                });
+                XposedEntry.log("[CKeyPatch] Installed transparent data normalization on CKeyBeaconReport");
+            }
+
+            // 2. VsAppKeyVerify: always synthesize valid VsAppKeyBean and register in VsAppKeyUtil
+            Class<?> verifyCls = XposedHelpers.findClassIfExists("com.tencent.qqlive.tvkplayer.vinfo.ckey.comm.VsAppKeyVerify", cl);
+            Class<?> beanCls = XposedHelpers.findClassIfExists("com.tencent.qqlive.tvkplayer.vinfo.ckey.comm.VsAppKeyBean", cl);
+            Class<?> utilCls = XposedHelpers.findClassIfExists("com.tencent.qqlive.tvkplayer.vinfo.ckey.comm.VsAppKeyUtil", cl);
+            if (verifyCls != null && beanCls != null) {
+                HookUtils.hookAllMethods(verifyCls, "verifyVsAppKey", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        try {
+                            android.content.Context ctx = param.args != null && param.args.length > 0 && param.args[0] instanceof android.content.Context ?
+                                (android.content.Context) param.args[0] : null;
+                            String pkg = ctx != null ? ctx.getPackageName() : "com.tencent.mobileqq";
+                            Object bean = XposedHelpers.newInstance(beanCls, "V1000", "1", "vskey", pkg);
+
+                            if (utilCls != null) {
+                                try {
+                                    Object utilInst = XposedHelpers.callStaticMethod(utilCls, "getInstance");
+                                    if (utilInst != null) {
+                                        XposedHelpers.callMethod(utilInst, "add", bean);
+                                    }
+                                } catch (Throwable ignored) {}
+                            }
+
+                            try {
+                                Class<?> fCls = XposedHelpers.findClassIfExists("com.tencent.qqlive.tvkplayer.vinfo.ckey.CKeyFacade", cl);
+                                if (fCls != null) {
+                                    XposedHelpers.setStaticObjectField(fCls, "mPlatform", "V1000");
+                                    XposedHelpers.setStaticObjectField(fCls, "mSdtfrom", "1");
+                                    XposedHelpers.setStaticObjectField(fCls, "mVsKey", "vskey");
+                                    XposedHelpers.setStaticObjectField(fCls, "mPkgName", pkg);
+                                }
+                            } catch (Throwable ignored) {}
+
+                            param.setResult(bean);
+                        } catch (Throwable ignored) {}
+                    }
+                });
+            }
+
+            // 3. VsReporter: transparent normalization of propInit (pass-through, DO NOT DROP)
+            Class<?> vsReporterCls = XposedHelpers.findClassIfExists("com.tencent.qqlive.tvkplayer.vinfo.ckey.comm.VsReporter", cl);
+            if (vsReporterCls != null) {
+                HookUtils.hookAllMethods(vsReporterCls, "propInit", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length > 0 && param.args[0] instanceof java.util.Properties) {
+                            java.util.Properties props = (java.util.Properties) param.args[0];
+                            String plat = props.getProperty("vs_platform");
+                            if (plat == null || plat.isEmpty() || "nil".equals(plat)) {
+                                props.setProperty("vs_platform", "V1000");
+                            }
+                            String sdt = props.getProperty("vs_sdtfrom");
+                            if (sdt == null || sdt.isEmpty() || "nil".equals(sdt)) {
+                                props.setProperty("vs_sdtfrom", "1");
+                            }
+                            props.setProperty("guard_so_version", "V1.0.002");
+                            props.setProperty("guard_jar_version", "V3.0.015.5");
+                            props.setProperty("vs_so_version", "V3.0.000");
+                            props.setProperty("vs_jar_version", "V3.0.015.5");
+                            props.setProperty("vs_pkgmame", "com.tencent.mobileqq");
+                        }
+                    }
+                });
+            }
+
+            // 4. CKeyGuard: ensure clean versions, let native sGuard execute safely
+            Class<?> guardCls = XposedHelpers.findClassIfExists("com.tencent.qqlive.tvkplayer.vinfo.ckey.CKeyGuard", cl);
+            if (guardCls != null) {
+                try {
+                    XposedHelpers.setStaticBooleanField(guardCls, "bLoadSucc", true);
+                    XposedHelpers.setStaticObjectField(guardCls, "mSoVersion", "V1.0.002");
+                } catch (Throwable ignored) {}
+
+                HookUtils.hookAllMethods(guardCls, "sVersion", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult("V1.0.002");
+                    }
+                });
+                HookUtils.hookAllMethods(guardCls, "getVersion", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult("V1.0.002");
+                    }
+                });
+                HookUtils.hookAllMethods(guardCls, "getSoVersion", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult("V1.0.002");
+                    }
+                });
+                HookUtils.hookAllMethods(guardCls, "sGuardInit", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getThrowable() != null) {
+                            param.setResult(null); // suppress crash if library missing
+                        }
+                        try {
+                            XposedHelpers.setStaticBooleanField(guardCls, "bLoadSucc", true);
+                        } catch (Throwable ignored) {}
+                    }
+                });
+            }
+
+            // 5. CKeyFacade: ensure bLoadSucc = true and clean signature returns
+            Class<?> facadeCls = XposedHelpers.findClassIfExists("com.tencent.qqlive.tvkplayer.vinfo.ckey.CKeyFacade", cl);
+            if (facadeCls != null) {
+                try {
+                    XposedHelpers.setStaticBooleanField(facadeCls, "bLoadSucc", true);
+                    XposedHelpers.setStaticObjectField(facadeCls, "mSoVersion", "V3.0.000");
+                } catch (Throwable ignored) {}
+
+                HookUtils.hookAllMethods(facadeCls, "getSoVersion", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult("V3.0.000");
+                    }
+                });
+                HookUtils.hookAllMethods(facadeCls, "getVersion", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult("V3.0.000");
+                    }
+                });
+                HookUtils.hookAllMethods(facadeCls, "ckeyMoudleInit", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        try {
+                            XposedHelpers.setStaticBooleanField(facadeCls, "bLoadSucc", true);
+                        } catch (Throwable ignored) {}
+                    }
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getThrowable() != null) {
+                            param.setResult(null); // suppress crash if lib missing
+                        }
+                    }
+                });
+            }
+            XposedEntry.log("[CKeyPatch] Successfully hooked CKey & TVK security suite with pass-through normalization on loader " + cl);
+        } catch (Throwable t) {
+            XposedEntry.logError("[CKeyPatch] Error hooking CKey & TVK security: " + t.getMessage(), t);
+        }
+    }
+
+    public static boolean scrubPackedRiskPayload(byte[] data) {
+        if (data == null || data.length < 8) return false;
+        String[] riskSignatures = {
+            "fclnicsd", "jshenoea", "mountify", "debugfs:/dev", "/system/etc/hosts"
+        };
+        boolean modified = false;
+        for (String sig : riskSignatures) {
+            byte[] target = sig.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            int idx = 0;
+            while ((idx = indexOfSubArray(data, target, idx)) != -1) {
+                for (int i = 0; i < target.length; i++) {
+                    data[idx + i] = (byte) '_';
+                }
+                modified = true;
+                idx += target.length;
+            }
+        }
+        return modified;
+    }
+
+    private static int indexOfSubArray(byte[] source, byte[] target, int fromIndex) {
+        if (source == null || target == null || target.length == 0 || fromIndex < 0) return -1;
+        int max = source.length - target.length;
+        for (int i = fromIndex; i <= max; i++) {
+            boolean match = true;
+            for (int j = 0; j < target.length; j++) {
+                if (source[i + j] != target[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return i;
+        }
+        return -1;
     }
 }
 

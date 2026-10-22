@@ -11,6 +11,7 @@ namespace hook_libturingxq {
  * - Risk detection and reporting
  */
 void install_hooks();
+void patch_libturingxq_in_memory();
 
 } // namespace hook_libturingxq
 

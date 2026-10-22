@@ -23,6 +23,7 @@
 #include "hook_libqimei.h"
 #include "hook_libfekit.h"
 #include "hook_libqsec.h"
+#include "hook_libturingxq.h"
 
 #ifndef ST_RDONLY
 #define ST_RDONLY 1
@@ -272,8 +273,11 @@ static bool is_mt_private_path(const char* path) {
            strcasestr(path, "/storage/emulated/0/MT2") != nullptr;
 }
 
+bool is_root_proc_path(const char* path);
+
 bool is_sensitive_path(const char* path) {
     if (!path) return false;
+    if (is_root_proc_path(path)) return true;
     const char* hidden[] = {
         "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su",
         "/data/local/su", "/data/local/bin/su", "/data/local/xbin/su",
@@ -292,7 +296,7 @@ bool is_sensitive_path(const char* path) {
         "top.nkbe.npatch", "npatch", "org.lsposed.manager", "lspilot",
         "bytehook", "native-bypass", "libapatch", "/apatch/", "apatchd", "fusehide", "simplehook",
         "libchecker", "shizuku", "vtools", "bin.mt", "bin.mt.plus", "bin.mt.termex",
-        "thanos", "termux", "duckusb",
+        "thanos", "termux", "duckusb", "antigravity", ".gemini",
         "me.weishu.kernelsu", "me.bmax.apatch", "eu.chainfire.supersu",
         "com.koushikdutta.superuser", "com.noshufou.android.su", "com.kingroot.kinguser",
         "com.kingo.root", "com.smedialink.oneclickroot", "com.zhiqupk.root.global",
@@ -313,8 +317,159 @@ bool is_sensitive_path(const char* path) {
     return false;
 }
 
+bool is_sensitive_link_target(const char* target) {
+    if (!target || !target[0]) return false;
+    static const char* const sensitive_targets[] = {
+        "io.github.qauxv",
+        "qauxv",
+        "qqbypass",
+        "xalsace",
+        "org.lsposed",
+        "lsposed",
+        "lspatch",
+        "bytehook",
+        "shadowhook",
+        "sandhook",
+        "dexkit",
+        "libdexkit",
+        "yahfa",
+        "libepic",
+        "libpine",
+        "taichi",
+        "liblspd",
+        "magisk",
+        "kernelsu",
+        "ksud",
+        "apatch",
+        "termux",
+        "com.termux",
+        "antigravity",
+        ".gemini",
+        "qa_mmkv",
+        "tmp_qa_",
+        "qa_dyn_lib",
+        "qa_misc",
+        "oat_inline_deopt_cache",
+        "moe.ono",
+        "ono_",
+        "lzlnb",
+        "libcnm",
+        "cnm0",
+        "memfd:cmdline",
+        "memfd:anon_mem",
+        "memfd:maps",
+        "memfd:smaps",
+        "memfd:status",
+        "memfd:mounts",
+        "memfd:mountinfo",
+        "memfd:wchan",
+        "memfd:cgroup",
+        "memfd:attr_current",
+        "memfd:uptime",
+        "memfd:loadavg",
+        "memfd:net_tcp",
+        "memfd:net_unix",
+        nullptr
+    };
+    for (int i = 0; sensitive_targets[i]; i++) {
+        if (strcasestr(target, sensitive_targets[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_sensitive_proc_fd(int dirfd, const char* path) {
+    if (!path || !path[0]) return false;
+
+    int saved_errno = errno;
+
+    // 1. Absolute path check: /proc/self/fd/<num> or /proc/<pid>/fd/<num>
+    if (path[0] == '/') {
+        const char* fd_part = nullptr;
+        if (strncmp(path, "/proc/self/fd/", 14) == 0) {
+            fd_part = path + 14;
+        } else if (strncmp(path, "/proc/", 6) == 0) {
+            const char* p = strstr(path + 6, "/fd/");
+            if (p) fd_part = p + 4;
+        }
+        if (fd_part && fd_part[0] >= '0' && fd_part[0] <= '9') {
+            bool all_digits = true;
+            for (const char* p = fd_part; *p; p++) {
+                if (*p < '0' || *p > '9') {
+                    all_digits = false;
+                    break;
+                }
+            }
+            if (all_digits) {
+                char target[512];
+                ssize_t ret = (ssize_t)syscall(__NR_readlinkat, AT_FDCWD, path, target, sizeof(target) - 1);
+                errno = saved_errno;
+                if (ret > 0) {
+                    target[ret] = '\0';
+                    if (is_sensitive_link_target(target)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        errno = saved_errno;
+        return false;
+    }
+
+    // 2. Relative path check with dirfd (e.g. dirfd pointing to /proc/.../fd and path is an fd number)
+    if (dirfd >= 0 && path[0] >= '0' && path[0] <= '9') {
+        bool all_digits = true;
+        for (const char* p = path; *p; p++) {
+            if (*p < '0' || *p > '9') {
+                all_digits = false;
+                break;
+            }
+        }
+        if (all_digits) {
+            char dir_link[128];
+            char proc_fd_path[64];
+            snprintf(proc_fd_path, sizeof(proc_fd_path), "/proc/self/fd/%d", dirfd);
+            ssize_t dlen = (ssize_t)syscall(__NR_readlinkat, AT_FDCWD, proc_fd_path, dir_link, sizeof(dir_link) - 1);
+            if (dlen > 0) {
+                dir_link[dlen] = '\0';
+                if (strstr(dir_link, "/proc/") && strstr(dir_link, "/fd")) {
+                    char target[512];
+                    ssize_t ret = (ssize_t)syscall(__NR_readlinkat, dirfd, path, target, sizeof(target) - 1);
+                    errno = saved_errno;
+                    if (ret > 0) {
+                        target[ret] = '\0';
+                        if (is_sensitive_link_target(target)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    errno = saved_errno;
+    return false;
+}
+
+bool is_sensitive_proc_fd(const char* path) {
+    return is_sensitive_proc_fd(AT_FDCWD, path);
+}
+
 static inline bool is_security_hidden_path(const char* path, void* return_address) {
     if (!path) return false;
+
+    // 0. Sensitive proc fd check (e.g. /proc/self/fd/139 -> io.github.qauxv):
+    // MUST execute BEFORE the /data/app/ whitelist, because /proc/self/fd/xxx
+    // resolves to APK/data paths that Tencent security DSOs probe to detect injected modules.
+    if (is_sensitive_proc_fd(path)) {
+        if (!is_caller_qa(return_address)) {
+            audit_native_probe("libc", "sensitive_proc_fd_blocked", path);
+            LOGI("is_security_hidden_path: blocked sensitive proc fd: %s (caller=%p)", path, return_address);
+            return true;
+        }
+        return false;
+    }
 
     // 1. NEVER block installed APKs in /data/app/ (including QAuxiliary and system packages)
     if (strstr(path, "/data/app/")) {
@@ -383,6 +538,7 @@ static bool is_sensitive_name_for_caller(const char* name, void* return_address)
         return false;
     }
     if (strcmp(name, "su") == 0 ||
+        strcmp(name, "agy") == 0 ||
         strcmp(name, "magisk") == 0 ||
         strcmp(name, "magiskd") == 0 ||
         strcmp(name, "ksud") == 0 ||
@@ -414,6 +570,7 @@ static bool is_sensitive_name_for_caller(const char* name, void* return_address)
         "kernelsu", "supersu", "superuser", "kingroot", "kinguser",
         "oneclickroot", "rootgenius", "shuamesu", "appcloner", "microvirtd",
         "bdsu", "sutemp", "sudo", "init.svc.microvirtd",
+        "antigravity",
         nullptr
     };
     if (strcmp(name, ".se") == 0) return true;
@@ -436,12 +593,16 @@ bool is_sensitive_name(const char* name) {
 
 static bool is_root_pid(const char* pid_str) {
     if (!pid_str || !pid_str[0]) return false;
+    pid_t target_pid = (pid_t)atoi(pid_str);
+    if (target_pid <= 1 || target_pid == getpid()) return false;
+
+    if (!real_open_ptr) real_open_ptr = (int (*)(const char*, int, mode_t))dlsym(RTLD_DEFAULT, "open");
+    if (!real_readlink_ptr) real_readlink_ptr = (ssize_t (*)(const char*, char*, size_t))dlsym(RTLD_DEFAULT, "readlink");
+
     // Check comm
     char comm_path[64];
     snprintf(comm_path, sizeof(comm_path), "/proc/%s/comm", pid_str);
-    int fd = -1;
-    if (real_open_ptr) fd = real_open_ptr(comm_path, O_RDONLY, 0);
-    else fd = open(comm_path, O_RDONLY);
+    int fd = real_open_ptr ? real_open_ptr(comm_path, O_RDONLY, 0) : open(comm_path, O_RDONLY);
     if (fd >= 0) {
         char buf[128];
         ssize_t n = read(fd, buf, sizeof(buf) - 1);
@@ -452,10 +613,16 @@ static bool is_root_pid(const char* pid_str) {
             if (strcmp(buf, "magiskd") == 0 || strcmp(buf, "ksud") == 0 ||
                 strcmp(buf, "su") == 0 || strcmp(buf, "daemonsu") == 0 ||
                 strcmp(buf, "frida-server") == 0 ||
+                strcmp(buf, "agy") == 0 || strcmp(buf, "node") == 0 ||
+                strcmp(buf, "proot") == 0 || strcmp(buf, "tmux") == 0 ||
+                strcmp(buf, "sshd") == 0 || strcmp(buf, "dropbear") == 0 ||
+                strcmp(buf, "gdb") == 0 || strcmp(buf, "lldb") == 0 ||
+                strcmp(buf, "strace") == 0 ||
                 strstr(buf, "bin.mt") || strstr(buf, "mt.plus") ||
                 strstr(buf, "qauxv") || strstr(buf, "lsposed") ||
                 strstr(buf, "lspatch") || strstr(buf, "moe.ono") ||
-                strstr(buf, "lzlnb") || strstr(buf, "npatch")) {
+                strstr(buf, "lzlnb") || strstr(buf, "npatch") ||
+                strstr(buf, "termux") || strstr(buf, "antigravity")) {
                 return true;
             }
         }
@@ -463,8 +630,7 @@ static bool is_root_pid(const char* pid_str) {
     // Check cmdline
     char cmd_path[64];
     snprintf(cmd_path, sizeof(cmd_path), "/proc/%s/cmdline", pid_str);
-    if (real_open_ptr) fd = real_open_ptr(cmd_path, O_RDONLY, 0);
-    else fd = open(cmd_path, O_RDONLY);
+    fd = real_open_ptr ? real_open_ptr(cmd_path, O_RDONLY, 0) : open(cmd_path, O_RDONLY);
     if (fd >= 0) {
         char buf[256];
         ssize_t n = read(fd, buf, sizeof(buf) - 1);
@@ -474,12 +640,61 @@ static bool is_root_pid(const char* pid_str) {
             if (strstr(buf, "bin.mt") || strstr(buf, "io.github.qauxv") ||
                 strstr(buf, "org.lsposed.manager") || strstr(buf, "top.nkbe.npatch") ||
                 strstr(buf, "magisk") || strstr(buf, "ksud") || strstr(buf, "daemonsu") ||
-                strstr(buf, "lspatch") || strstr(buf, "moe.ono") || strstr(buf, "lzlnb")) {
+                strstr(buf, "lspatch") || strstr(buf, "moe.ono") || strstr(buf, "lzlnb") ||
+                strstr(buf, "com.termux") || strstr(buf, "termux") ||
+                strstr(buf, "agy") || strstr(buf, "antigravity") ||
+                strstr(buf, ".gemini") || strstr(buf, "proot")) {
                 return true;
             }
         }
     }
+    // Check exe link
+    char exe_path[64];
+    snprintf(exe_path, sizeof(exe_path), "/proc/%s/exe", pid_str);
+    char exe_target[256];
+    ssize_t elen = real_readlink_ptr ? real_readlink_ptr(exe_path, exe_target, sizeof(exe_target) - 1)
+                                     : readlink(exe_path, exe_target, sizeof(exe_target) - 1);
+    if (elen > 0) {
+        exe_target[elen] = '\0';
+        if (strstr(exe_target, "com.termux") || strstr(exe_target, "/termux") ||
+            strstr(exe_target, "/data/local/tmp") || strstr(exe_target, "/data/adb") ||
+            strstr(exe_target, "magisk") || strstr(exe_target, "ksud") ||
+            strstr(exe_target, "apatch") || strstr(exe_target, "bin.mt") ||
+            strstr(exe_target, "antigravity") || strstr(exe_target, ".gemini")) {
+            return true;
+        }
+    }
+    // Check cwd link
+    char cwd_path[64];
+    snprintf(cwd_path, sizeof(cwd_path), "/proc/%s/cwd", pid_str);
+    char cwd_target[256];
+    ssize_t clen = real_readlink_ptr ? real_readlink_ptr(cwd_path, cwd_target, sizeof(cwd_target) - 1)
+                                     : readlink(cwd_path, cwd_target, sizeof(cwd_target) - 1);
+    if (clen > 0) {
+        cwd_target[clen] = '\0';
+        if (strstr(cwd_target, "com.termux") || strstr(cwd_target, "/termux") ||
+            strstr(cwd_target, "/data/local/tmp") || strstr(cwd_target, "/data/adb") ||
+            strstr(cwd_target, "antigravity") || strstr(cwd_target, ".gemini")) {
+            return true;
+        }
+    }
     return false;
+}
+
+bool is_root_proc_path(const char* path) {
+    if (!path || strncmp(path, "/proc/", 6) != 0) return false;
+    const char* pid_start = path + 6;
+    if (pid_start[0] < '0' || pid_start[0] > '9') return false;
+    const char* slash = strchr(pid_start, '/');
+    char pid_buf[32];
+    size_t pid_len = slash ? (size_t)(slash - pid_start) : strlen(pid_start);
+    if (pid_len == 0 || pid_len >= sizeof(pid_buf)) return false;
+    for (size_t i = 0; i < pid_len; i++) {
+        if (pid_start[i] < '0' || pid_start[i] > '9') return false;
+    }
+    memcpy(pid_buf, pid_start, pid_len);
+    pid_buf[pid_len] = '\0';
+    return is_root_pid(pid_buf);
 }
 
 // 创建内存虚拟文件（优先使用 memfd_create，无磁盘权限限制，确保在沙箱应用内 100% 成功）
@@ -717,6 +932,7 @@ FILE* build_filtered_mounts() {
         "moe.ono", "ono_mmkv", "lzlnb", "libcnm", "cnm0",
         "mountify", "tricky_store", "metamodule", "zygisksu",
         "hosts", "data_mirror",
+        "debugfs", "fclnicsd", "jshenoea", "tracefs",
         nullptr
     };
 
@@ -724,6 +940,9 @@ FILE* build_filtered_mounts() {
         bool filter = false;
         for (int i = 0; blacklist[i]; i++) {
             if (strcasestr(line, blacklist[i])) { filter = true; break; }
+        }
+        if (!filter && strstr(line, "/dev/") && (strstr(line, "debugfs") || strstr(line, "fclnicsd") || strstr(line, "jshenoea"))) {
+            filter = true;
         }
         if (!filter) fputs(line, fake);
     }
@@ -755,6 +974,7 @@ FILE* build_filtered_mountinfo() {
         "moe.ono", "ono_mmkv", "lzlnb", "libcnm", "cnm0",
         "mountify", "tricky_store", "metamodule", "zygisksu",
         "hosts", "data_mirror",
+        "debugfs", "fclnicsd", "jshenoea", "tracefs",
         nullptr
     };
 
@@ -762,6 +982,9 @@ FILE* build_filtered_mountinfo() {
         bool filter = false;
         for (int i = 0; blacklist[i]; i++) {
             if (strcasestr(line, blacklist[i])) { filter = true; break; }
+        }
+        if (!filter && strstr(line, "/dev/") && (strstr(line, "debugfs") || strstr(line, "fclnicsd") || strstr(line, "jshenoea"))) {
+            filter = true;
         }
         if (!filter) fputs(line, fake);
     }
@@ -1093,7 +1316,31 @@ static FILE* build_virtual_cpufreq() {
     return fake;
 }
 
-static bool handle_virtual_stat(const char* pathname, struct stat* statbuf) {
+bool is_proc_cmdline_path(const char* path) {
+    if (!path) return false;
+    if (strcmp(path, "/proc/self/cmdline") == 0) return true;
+    if (strncmp(path, "/proc/", 6) == 0 && strstr(path, "/cmdline") != nullptr) {
+        return true;
+    }
+    return false;
+}
+
+FILE* build_virtual_cmdline(const char* pathname) {
+    (void)pathname;
+    FILE* fake = create_memory_file("cmdline");
+    if (!fake) return nullptr;
+
+    const char* pname = getprogname();
+    if (!pname || !pname[0]) {
+        pname = "com.tencent.mobileqq";
+    }
+    // Linux /proc/[pid]/cmdline is null-terminated
+    fwrite(pname, 1, strlen(pname) + 1, fake);
+    rewind(fake);
+    return fake;
+}
+
+bool handle_virtual_stat(const char* pathname, struct stat* statbuf) {
     if (!pathname) return false;
     if (is_battery_path(pathname) ||
         is_thermal_path(pathname) ||
@@ -1101,7 +1348,8 @@ static bool handle_virtual_stat(const char* pathname, struct stat* statbuf) {
         is_proc_loadavg(pathname) ||
         is_cpufreq_path(pathname) ||
         is_proc_net_tcp_path(pathname) ||
-        is_proc_net_unix_path(pathname)) {
+        is_proc_net_unix_path(pathname) ||
+        is_proc_cmdline_path(pathname)) {
         if (statbuf) {
             memset(statbuf, 0, sizeof(*statbuf));
             statbuf->st_mode = S_IFREG | 0444;
@@ -1168,21 +1416,18 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
             if (fake) return fake;
         }
 
-        if (strncmp(pathname, "/proc/", 6) == 0) {
-            const char* pid_start = pathname + 6;
-            const char* slash = strchr(pid_start, '/');
-            if (slash && pid_start[0] >= '0' && pid_start[0] <= '9') {
-                char pid_buf[32];
-                size_t pid_len = slash - pid_start;
-                if (pid_len < sizeof(pid_buf)) {
-                    memcpy(pid_buf, pid_start, pid_len);
-                    pid_buf[pid_len] = '\0';
-                    if (is_root_pid(pid_buf)) {
-                        errno = ENOENT;
-                        return nullptr;
-                    }
-                }
+        if (is_proc_cmdline_path(pathname)) {
+            if (is_root_proc_path(pathname)) {
+                errno = ENOENT;
+                return nullptr;
             }
+            FILE* fake = build_virtual_cmdline(pathname);
+            if (fake) return fake;
+        }
+
+        if (is_root_proc_path(pathname)) {
+            errno = ENOENT;
+            return nullptr;
         }
         if (strstr(pathname, "smaps")) {
             if (should_filter_proc_maps(__builtin_return_address(0))) {
@@ -1257,7 +1502,7 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
     return fd >= 0 ? fdopen(fd, mode) : nullptr;
 }
 
-static char* fake_fgets(char* s, int size, FILE* stream) {
+char* fake_fgets(char* s, int size, FILE* stream) {
     SAFE_BYTEHOOK_SCOPE();
     char* result = nullptr;
     if (real_fgets_ptr) result = real_fgets_ptr(s, size, stream);
@@ -1335,21 +1580,18 @@ int fake_open(const char* pathname, int flags, ...) {
             if (fd >= 0) return fd;
         }
 
-        if (strncmp(pathname, "/proc/", 6) == 0) {
-            const char* pid_start = pathname + 6;
-            const char* slash = strchr(pid_start, '/');
-            if (slash && pid_start[0] >= '0' && pid_start[0] <= '9') {
-                char pid_buf[32];
-                size_t pid_len = slash - pid_start;
-                if (pid_len < sizeof(pid_buf)) {
-                    memcpy(pid_buf, pid_start, pid_len);
-                    pid_buf[pid_len] = '\0';
-                    if (is_root_pid(pid_buf)) {
-                        errno = ENOENT;
-                        return -1;
-                    }
-                }
+        if (is_proc_cmdline_path(pathname)) {
+            if (is_root_proc_path(pathname)) {
+                errno = ENOENT;
+                return -1;
             }
+            FILE* fake = build_virtual_cmdline(pathname);
+            if (fake) return open_virtual_file(fake);
+        }
+
+        if (is_root_proc_path(pathname)) {
+            errno = ENOENT;
+            return -1;
         }
         if (strstr(pathname, "smaps")) {
             if (should_filter_proc_maps(__builtin_return_address(0))) {
@@ -1470,9 +1712,11 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
         va_end(args);
     }
 
-    if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+    void* caller_addr = __builtin_return_address(0);
+    if (is_security_hidden_path(pathname, caller_addr) ||
+        (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, pathname))) {
         simulate_vfs_lookup_delay();
-        LOGD("Hidden path openat: %s", pathname);
+        LOGD("Hidden path openat: %s (dirfd=%d)", pathname ? pathname : "(null)", dirfd);
         errno = ENOENT;
         return -1;
     }
@@ -1509,21 +1753,18 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
             if (fd >= 0) return fd;
         }
 
-        if (strncmp(pathname, "/proc/", 6) == 0) {
-            const char* pid_start = pathname + 6;
-            const char* slash = strchr(pid_start, '/');
-            if (slash && pid_start[0] >= '0' && pid_start[0] <= '9') {
-                char pid_buf[32];
-                size_t pid_len = slash - pid_start;
-                if (pid_len < sizeof(pid_buf)) {
-                    memcpy(pid_buf, pid_start, pid_len);
-                    pid_buf[pid_len] = '\0';
-                    if (is_root_pid(pid_buf)) {
-                        errno = ENOENT;
-                        return -1;
-                    }
-                }
+        if (is_proc_cmdline_path(pathname)) {
+            if (is_root_proc_path(pathname)) {
+                errno = ENOENT;
+                return -1;
             }
+            FILE* fake = build_virtual_cmdline(pathname);
+            if (fake) return open_virtual_file(fake);
+        }
+
+        if (is_root_proc_path(pathname)) {
+            errno = ENOENT;
+            return -1;
         }
         if (strstr(pathname, "smaps")) {
             if (should_filter_proc_maps(__builtin_return_address(0))) {
@@ -1633,19 +1874,21 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
     return (int)syscall(__NR_openat, dirfd, pathname, flags, mode);
 }
 
-static int fake_open_2(const char* pathname, int flags) {
+int fake_open_2(const char* pathname, int flags) {
     return fake_open(pathname, flags, 0);
 }
 
-static int fake_openat_2(int dirfd, const char* pathname, int flags) {
+int fake_openat_2(int dirfd, const char* pathname, int flags) {
     return fake_openat(dirfd, pathname, flags, 0);
 }
 
 DIR* fake_opendir(const char* name) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    if (is_security_hidden_path(name, __builtin_return_address(0))) {
-        LOGD("Hidden opendir: %s", name);
+    void* caller_addr = __builtin_return_address(0);
+    if (is_security_hidden_path(name, caller_addr) ||
+        (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(AT_FDCWD, name))) {
+        LOGD("Hidden opendir: %s", name ? name : "(null)");
         errno = ENOENT;
         return nullptr;
     }
@@ -1658,6 +1901,7 @@ struct dirent* fake_readdir(DIR* dirp) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
     void* ret_addr = __builtin_return_address(0);
+    int dfd = dirp ? dirfd(dirp) : -1;
     struct dirent* entry = nullptr;
     while (true) {
         if (real_readdir_ptr) entry = real_readdir_ptr(dirp);
@@ -1673,6 +1917,9 @@ struct dirent* fake_readdir(DIR* dirp) {
             if (is_root_pid(entry->d_name)) {
                 continue;
             }
+            if (dfd >= 0 && !is_caller_qa(ret_addr) && is_sensitive_proc_fd(dfd, entry->d_name)) {
+                continue;
+            }
         }
         break;
     }
@@ -1683,6 +1930,7 @@ static struct dirent64* fake_readdir64(DIR* dirp) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
     void* ret_addr = __builtin_return_address(0);
+    int dfd = dirp ? dirfd(dirp) : -1;
     struct dirent64* entry = nullptr;
     while (true) {
         if (real_readdir64_ptr) entry = real_readdir64_ptr(dirp);
@@ -1698,6 +1946,9 @@ static struct dirent64* fake_readdir64(DIR* dirp) {
             if (is_root_pid(entry->d_name)) {
                 continue;
             }
+            if (dfd >= 0 && !is_caller_qa(ret_addr) && is_sensitive_proc_fd(dfd, entry->d_name)) {
+                continue;
+            }
         }
         break;
     }
@@ -1708,6 +1959,7 @@ static int fake_readdir_r(DIR* dirp, struct dirent* entry, struct dirent** resul
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
     void* ret_addr = __builtin_return_address(0);
+    int dfd = dirp ? dirfd(dirp) : -1;
     while (true) {
         int ret = 0;
         if (real_readdir_r_ptr) ret = real_readdir_r_ptr(dirp, entry, result);
@@ -1728,6 +1980,9 @@ static int fake_readdir_r(DIR* dirp, struct dirent* entry, struct dirent** resul
             if (is_root_pid((*result)->d_name)) {
                 continue;
             }
+            if (dfd >= 0 && !is_caller_qa(ret_addr) && is_sensitive_proc_fd(dfd, (*result)->d_name)) {
+                continue;
+            }
         }
         return 0;
     }
@@ -1737,6 +1992,7 @@ static int fake_readdir64_r(DIR* dirp, struct dirent64* entry, struct dirent64**
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
     void* ret_addr = __builtin_return_address(0);
+    int dfd = dirp ? dirfd(dirp) : -1;
     while (true) {
         int ret = 0;
         if (real_readdir64_r_ptr) ret = real_readdir64_r_ptr(dirp, entry, result);
@@ -1757,12 +2013,15 @@ static int fake_readdir64_r(DIR* dirp, struct dirent64* entry, struct dirent64**
             if (is_root_pid((*result)->d_name)) {
                 continue;
             }
+            if (dfd >= 0 && !is_caller_qa(ret_addr) && is_sensitive_proc_fd(dfd, (*result)->d_name)) {
+                continue;
+            }
         }
         return 0;
     }
 }
 
-static ssize_t sanitize_readlink_buffer(char* buf, size_t bufsiz, ssize_t ret) {
+static ssize_t sanitize_readlink_buffer(char* buf, size_t bufsiz, ssize_t ret, void* caller_addr = nullptr) {
     if (ret <= 0 || !buf || (size_t)ret >= bufsiz) return ret;
     buf[ret] = '\0';
     if (strstr(buf, "memfd:maps")) {
@@ -1821,12 +2080,59 @@ static ssize_t sanitize_readlink_buffer(char* buf, size_t bufsiz, ssize_t ret) {
             strncpy(buf, rep, bufsiz);
             return rlen;
         }
+    } else if (strstr(buf, "memfd:cmdline")) {
+        const char* rep = "/proc/self/cmdline";
+        size_t rlen = strlen(rep);
+        if (bufsiz > rlen) {
+            strncpy(buf, rep, bufsiz);
+            return rlen;
+        }
+    } else if (strstr(buf, "memfd:uptime")) {
+        const char* rep = "/proc/uptime";
+        size_t rlen = strlen(rep);
+        if (bufsiz > rlen) {
+            strncpy(buf, rep, bufsiz);
+            return rlen;
+        }
+    } else if (strstr(buf, "memfd:loadavg")) {
+        const char* rep = "/proc/loadavg";
+        size_t rlen = strlen(rep);
+        if (bufsiz > rlen) {
+            strncpy(buf, rep, bufsiz);
+            return rlen;
+        }
+    } else if (strstr(buf, "memfd:net_tcp")) {
+        const char* rep = "/proc/net/tcp";
+        size_t rlen = strlen(rep);
+        if (bufsiz > rlen) {
+            strncpy(buf, rep, bufsiz);
+            return rlen;
+        }
+    } else if (strstr(buf, "memfd:net_unix")) {
+        const char* rep = "/proc/net/unix";
+        size_t rlen = strlen(rep);
+        if (bufsiz > rlen) {
+            strncpy(buf, rep, bufsiz);
+            return rlen;
+        }
     }
+
+    if (is_sensitive_link_target(buf)) {
+        if (!is_caller_qa(caller_addr)) {
+            audit_native_probe("libc", "readlink_sensitive_target_blocked", buf);
+            LOGI("readlink sensitive target blocked: %s (caller=%p)", buf, caller_addr);
+            buf[0] = '\0';
+            errno = ENOENT;
+            return -1;
+        }
+    }
+
     return ret;
 }
 
-static ssize_t fake_readlink(const char* pathname, char* buf, size_t bufsiz) {
+ssize_t fake_readlink(const char* pathname, char* buf, size_t bufsiz) {
     SAFE_BYTEHOOK_SCOPE();
+    void* caller_addr = __builtin_return_address(0);
 
     if (pathname && strcmp(pathname, "/proc/self/exe") == 0) {
         const char* fake_exe = "/system/bin/app_process64";
@@ -1840,7 +2146,10 @@ static ssize_t fake_readlink(const char* pathname, char* buf, size_t bufsiz) {
         return len;
     }
 
-    if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+    if (is_security_hidden_path(pathname, caller_addr) ||
+        (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(AT_FDCWD, pathname))) {
+        simulate_vfs_lookup_delay();
+        LOGD("Hidden path readlink: %s", pathname ? pathname : "(null)");
         errno = ENOENT;
         return -1;
     }
@@ -1850,7 +2159,7 @@ static ssize_t fake_readlink(const char* pathname, char* buf, size_t bufsiz) {
     else if (g_bytehook_hooks_installed) ret = BYTEHOOK_CALL_PREV(fake_readlink, pathname, buf, bufsiz);
     else ret = (ssize_t)syscall(__NR_readlinkat, AT_FDCWD, pathname, buf, bufsiz);
 
-    return sanitize_readlink_buffer(buf, bufsiz, ret);
+    return sanitize_readlink_buffer(buf, bufsiz, ret, caller_addr);
 }
 
 static ssize_t do_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsiz, void* caller_addr) {
@@ -1866,7 +2175,10 @@ static ssize_t do_readlinkat(int dirfd, const char* pathname, char* buf, size_t 
         return len;
     }
 
-    if (is_security_hidden_path(pathname, caller_addr)) {
+    if (is_security_hidden_path(pathname, caller_addr) ||
+        (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, pathname))) {
+        simulate_vfs_lookup_delay();
+        LOGD("Hidden path do_readlinkat: %s (dirfd=%d)", pathname ? pathname : "(null)", dirfd);
         errno = ENOENT;
         return -1;
     }
@@ -1875,11 +2187,12 @@ static ssize_t do_readlinkat(int dirfd, const char* pathname, char* buf, size_t 
     if (real_readlinkat_ptr) ret = real_readlinkat_ptr(dirfd, pathname, buf, bufsiz);
     else ret = (ssize_t)syscall(__NR_readlinkat, dirfd, pathname, buf, bufsiz);
 
-    return sanitize_readlink_buffer(buf, bufsiz, ret);
+    return sanitize_readlink_buffer(buf, bufsiz, ret, caller_addr);
 }
 
-static ssize_t fake_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsiz) {
+ssize_t fake_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsiz) {
     SAFE_BYTEHOOK_SCOPE();
+    void* caller_addr = __builtin_return_address(0);
 
     if (pathname && strcmp(pathname, "/proc/self/exe") == 0) {
         const char* fake_exe = "/system/bin/app_process64";
@@ -1893,7 +2206,10 @@ static ssize_t fake_readlinkat(int dirfd, const char* pathname, char* buf, size_
         return len;
     }
 
-    if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+    if (is_security_hidden_path(pathname, caller_addr) ||
+        (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, pathname))) {
+        simulate_vfs_lookup_delay();
+        LOGD("Hidden path readlinkat: %s (dirfd=%d)", pathname ? pathname : "(null)", dirfd);
         errno = ENOENT;
         return -1;
     }
@@ -1903,7 +2219,7 @@ static ssize_t fake_readlinkat(int dirfd, const char* pathname, char* buf, size_
     else if (g_bytehook_hooks_installed) ret = BYTEHOOK_CALL_PREV(fake_readlinkat, dirfd, pathname, buf, bufsiz);
     else ret = (ssize_t)syscall(__NR_readlinkat, dirfd, pathname, buf, bufsiz);
 
-    return sanitize_readlink_buffer(buf, bufsiz, ret);
+    return sanitize_readlink_buffer(buf, bufsiz, ret, caller_addr);
 }
 
 static int fake_dladdr(const void* addr, Dl_info* info) {
@@ -2068,11 +2384,13 @@ int fake_access(const char* pathname, int mode) {
     return (int)syscall(__NR_faccessat, AT_FDCWD, pathname, mode, 0);
 }
 
-static int fake_faccessat(int dirfd, const char* pathname, int mode, int flags) {
+int fake_faccessat(int dirfd, const char* pathname, int mode, int flags) {
     SAFE_BYTEHOOK_SCOPE();
-    if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+    void* caller_addr = __builtin_return_address(0);
+    if (is_security_hidden_path(pathname, caller_addr) ||
+        (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, pathname))) {
         simulate_vfs_lookup_delay();
-        LOGD("Hidden path faccessat: %s", pathname);
+        LOGD("Hidden path faccessat: %s (dirfd=%d)", pathname ? pathname : "(null)", dirfd);
         errno = ENOENT;
         return -1;
     }
@@ -2126,9 +2444,11 @@ int fake_lstat(const char* pathname, struct stat* statbuf) {
 
 int fake_fstatat(int dirfd, const char* pathname, struct stat* statbuf, int flags) {
     SAFE_BYTEHOOK_SCOPE();
-    if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+    void* caller_addr = __builtin_return_address(0);
+    if (is_security_hidden_path(pathname, caller_addr) ||
+        (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, pathname))) {
         simulate_vfs_lookup_delay();
-        LOGD("Hidden path fstatat: %s", pathname);
+        LOGD("Hidden path fstatat: %s (dirfd=%d)", pathname ? pathname : "(null)", dirfd);
         errno = ENOENT;
         return -1;
     }
@@ -2445,6 +2765,8 @@ static void* fake_dlopen(const char* filename, int flags) {
             hook_libqsec::patch_libqsec_in_memory();
         } else if (filename && strstr(filename, "libqimei.so")) {
             hook_libqimei::patch_libqimei_in_memory();
+        } else if (filename && (strstr(filename, "libturingxq") || strstr(filename, "turingxq") || strstr(filename, "libtfd"))) {
+            hook_libturingxq::patch_libturingxq_in_memory();
         } else if (filename && strstr(filename, "libqauxv-core0")) {
             s_cached_qauxv_core0 = handle;
         } else if (filename && strstr(filename, "libcnm")) {
@@ -2489,6 +2811,8 @@ static void* fake_android_dlopen_ext(const char* filename, int flags, const void
             hook_libqsec::patch_libqsec_in_memory();
         } else if (filename && strstr(filename, "libqimei.so")) {
             hook_libqimei::patch_libqimei_in_memory();
+        } else if (filename && (strstr(filename, "libturingxq") || strstr(filename, "turingxq") || strstr(filename, "libtfd"))) {
+            hook_libturingxq::patch_libturingxq_in_memory();
         } else if (filename && strstr(filename, "libqauxv-core0")) {
             s_cached_qauxv_core0 = handle;
         } else if (filename && strstr(filename, "libcnm")) {
@@ -2685,11 +3009,13 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
 
     // 56: __NR_openat, 437: __NR_openat2, 322: __NR_openat on arm
     if (number == 56 || number == 437 || number == 322) {
+        int dirfd = (int)(intptr_t)a1;
         const char* path = (const char*)a2;
         if (path) {
-            if (is_security_hidden_path(path, caller_addr)) {
+            if (is_security_hidden_path(path, caller_addr) ||
+                (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, path))) {
                 simulate_vfs_lookup_delay();
-                LOGD("fake_syscall: openat blocked sensitive: %s", path);
+                LOGD("fake_syscall: openat blocked sensitive: %s (dirfd=%d)", path, dirfd);
                 errno = ENOENT;
                 return -1;
             }
@@ -2728,21 +3054,23 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
                 int fd = open_virtual_file(build_virtual_cpufreq());
                 if (fd >= 0) return fd;
             }
-            if (strncmp(path, "/proc/", 6) == 0) {
-                const char* pid_start = path + 6;
-                const char* slash = strchr(pid_start, '/');
-                if (slash && pid_start[0] >= '0' && pid_start[0] <= '9') {
-                    char pid_buf[32];
-                    size_t pid_len = slash - pid_start;
-                    if (pid_len < sizeof(pid_buf)) {
-                        memcpy(pid_buf, pid_start, pid_len);
-                        pid_buf[pid_len] = '\0';
-                        if (is_root_pid(pid_buf)) {
-                            errno = ENOENT;
-                            return -1;
-                        }
-                    }
+            if (is_proc_cmdline_path(path)) {
+                if (is_root_proc_path(path)) {
+                    errno = ENOENT;
+                    return -1;
                 }
+                audit_native_probe("libc", "syscall_openat_cmdline", path);
+                LOGI("fake_syscall: openat cmdline redirected: %s", path);
+                FILE* fake = build_virtual_cmdline(path);
+                if (fake) {
+                    int fd = dup(fileno(fake));
+                    fclose(fake);
+                    return fd;
+                }
+            }
+            if (is_root_proc_path(path)) {
+                errno = ENOENT;
+                return -1;
             }
             if (strstr(path, "smaps")) {
                 if (should_filter_proc_maps(caller_addr)) {
@@ -2859,11 +3187,13 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
     }
     // 79: __NR_newfstatat
     else if (number == 79) {
+        int dirfd = (int)(intptr_t)a1;
         const char* path = (const char*)a2;
         if (path) {
-            if (is_security_hidden_path(path, caller_addr)) {
+            if (is_security_hidden_path(path, caller_addr) ||
+                (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, path))) {
                 simulate_vfs_lookup_delay();
-                LOGD("fake_syscall: newfstatat blocked sensitive: %s", path);
+                LOGD("fake_syscall: newfstatat blocked sensitive: %s (dirfd=%d)", path, dirfd);
                 errno = ENOENT;
                 return -1;
             }
@@ -2879,11 +3209,13 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
     }
     // 48 / 439: __NR_faccessat, __NR_faccessat2
     else if (number == 48 || number == 439) {
+        int dirfd = (int)(intptr_t)a1;
         const char* path = (const char*)a2;
         if (path) {
-            if (is_security_hidden_path(path, caller_addr)) {
+            if (is_security_hidden_path(path, caller_addr) ||
+                (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, path))) {
                 simulate_vfs_lookup_delay();
-                LOGD("fake_syscall: faccessat blocked sensitive: %s", path);
+                LOGD("fake_syscall: faccessat blocked sensitive: %s (dirfd=%d)", path, dirfd);
                 errno = ENOENT;
                 return -1;
             }
@@ -2894,14 +3226,16 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
     }
     // 78: __NR_readlinkat
     else if (number == 78) {
+        int dirfd = (int)(intptr_t)a1;
         const char* path = (const char*)a2;
-        if (path && is_security_hidden_path(path, caller_addr)) {
+        if (path && (is_security_hidden_path(path, caller_addr) ||
+            (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, path)))) {
             simulate_vfs_lookup_delay();
-            LOGD("fake_syscall: readlinkat blocked sensitive: %s", path);
+            LOGD("fake_syscall: readlinkat blocked sensitive: %s (dirfd=%d)", path, dirfd);
             errno = ENOENT;
             return -1;
         }
-        return do_readlinkat((int)(uintptr_t)a1, path, (char*)a3, (size_t)(uintptr_t)a4, caller_addr);
+        return do_readlinkat(dirfd, path, (char*)a3, (size_t)(uintptr_t)a4, caller_addr);
     }
 #ifdef __NR_getdents64
     // 61: __NR_getdents64
@@ -2925,6 +3259,22 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
             char* write_ptr = buf;
             long new_ret = 0;
             void* ret_addr = caller_addr;
+
+            bool is_proc_fd_dir = false;
+            int dir_fd = (int)(intptr_t)a1;
+            if (dir_fd >= 0) {
+                char dir_link[128];
+                char proc_fd_path[64];
+                snprintf(proc_fd_path, sizeof(proc_fd_path), "/proc/self/fd/%d", dir_fd);
+                ssize_t dlen = (ssize_t)syscall(__NR_readlinkat, AT_FDCWD, proc_fd_path, dir_link, sizeof(dir_link) - 1);
+                if (dlen > 0) {
+                    dir_link[dlen] = '\0';
+                    if (strstr(dir_link, "/proc/") && strstr(dir_link, "/fd")) {
+                        is_proc_fd_dir = true;
+                    }
+                }
+            }
+
             while (pos < ret) {
                 struct linux_dirent64* dent = (struct linux_dirent64*)(buf + pos);
                 unsigned short reclen = dent->d_reclen;
@@ -2935,6 +3285,15 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
                 } else if (dent->d_name[0] >= '0' && dent->d_name[0] <= '9') {
                     if (is_root_pid(dent->d_name)) {
                         hide = true;
+                    } else if (is_proc_fd_dir && !is_caller_qa(ret_addr)) {
+                        char target[512];
+                        ssize_t tlen = (ssize_t)syscall(__NR_readlinkat, dir_fd, dent->d_name, target, sizeof(target) - 1);
+                        if (tlen > 0) {
+                            target[tlen] = '\0';
+                            if (is_sensitive_link_target(target)) {
+                                hide = true;
+                            }
+                        }
                     }
                 }
                 if (!hide) {
