@@ -1,6 +1,7 @@
 package io.github.xalsace.qqbypass.hooks;
 
 import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XC_MethodReplacement;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
@@ -84,13 +85,13 @@ public class NetworkReportHook {
 
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
-        // Layer 0 - 3: Channel / MSF report auditing & optional interception
+        // Layer 0 - 3: Channel / MSF report normalization, auditing & optional interception
+        hookChannelManager(cl);
+        hookChannelProxyExt(cl);
         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT || HookConfig.ENABLE_NETWORK_INTERCEPT) {
-            hookChannelManager(cl);
-            hookChannelProxyExt(cl);
             hookMSFKernelBridge(cl);
-            hookMsfCore(cl);
         }
+        hookMsfCore(cl);
 
         // Layer 4 & 5: StatisticCollector & ReportController telemetry auditing
         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
@@ -121,12 +122,12 @@ public class NetworkReportHook {
         }
         hookTuringEridanus(cl);
 
+        hookChannelManager(cl);
+        hookChannelProxyExt(cl);
         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT || HookConfig.ENABLE_NETWORK_INTERCEPT) {
-            hookChannelManager(cl);
-            hookChannelProxyExt(cl);
             hookMSFKernelBridge(cl);
-            hookMsfCore(cl);
         }
+        hookMsfCore(cl);
 
         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
             hookStatisticCollector(cl);
@@ -203,6 +204,16 @@ public class NetworkReportHook {
                         dataLen = data.length;
                     }
 
+                    // Transparently sanitize trpc.o3.report.Report.SsoReport failure telemetry (Rule 4.2 compliant)
+                    if (command != null && (command.equals("trpc.o3.report.Report.SsoReport") || command.contains("SsoReport"))) {
+                        byte[] sanitized = io.github.xalsace.qqbypass.hooks.QQ950PatchHook.sanitizeSsoReportPayload(data);
+                        if (sanitized != data) {
+                            param.args[1] = sanitized;
+                            data = sanitized;
+                            dataLen = sanitized.length;
+                        }
+                    }
+
                     // Always audit outgoing ChannelManager reports if report recording is enabled
                     if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
                         io.github.xalsace.qqbypass.utils.ReportAuditManager.recordChannelManager(command, callbackId, dataLen, data);
@@ -216,7 +227,10 @@ public class NetworkReportHook {
                     }
                 }
             });
-        XposedEntry.log("[NetworkReport] Installed ChannelManager.sendMessage hook on loader " + cl);
+
+        // Neutralize ChannelManager.checkMethod reflection scanner on ChannelProxy
+        HookUtils.hookCandidateMethods("com.tencent.mobileqq.channel.ChannelManager", new String[]{"checkMethod"}, cl, XC_MethodReplacement.DO_NOTHING);
+        XposedEntry.log("[NetworkReport] Installed ChannelManager.sendMessage & checkMethod hooks on loader " + cl);
     }
 
     /**
@@ -250,6 +264,15 @@ public class NetworkReportHook {
                     byte[] data = null;
                     if (param.args.length >= 2 && param.args[1] instanceof byte[]) {
                         data = (byte[]) param.args[1];
+                    }
+
+                    // Transparently sanitize trpc.o3.report.Report.SsoReport failure telemetry (Rule 4.2 compliant)
+                    if (command != null && (command.equals("trpc.o3.report.Report.SsoReport") || command.contains("SsoReport"))) {
+                        byte[] sanitized = io.github.xalsace.qqbypass.hooks.QQ950PatchHook.sanitizeSsoReportPayload(data);
+                        if (sanitized != data) {
+                            param.args[1] = sanitized;
+                            data = sanitized;
+                        }
                     }
 
                     // Always audit if report recording is enabled
@@ -435,6 +458,28 @@ public class NetworkReportHook {
                                     }
                                 }
                             }
+                        }
+
+                        // Transparently sanitize trpc.o3.report.Report.SsoReport if it carries failure telemetry (Rule 4.2 compliant)
+                        if (command != null && (command.equals("trpc.o3.report.Report.SsoReport") || command.contains("SsoReport"))) {
+                            byte[] sanitized = io.github.xalsace.qqbypass.hooks.QQ950PatchHook.sanitizeSsoReportPayload(wup);
+                            if (sanitized != wup) {
+                                try {
+                                    XposedHelpers.callMethod(toServiceMsg, "putWupBuffer", (Object) sanitized);
+                                    wup = sanitized;
+                                } catch (Throwable ignored) {}
+                            }
+                        }
+
+                        // Prevent premature timeouts for ECDH / A2 access during Android Doze / deep sleep
+                        if (command != null && command.startsWith("trpc.o3.ecdh_access.")) {
+                            try {
+                                long curTimeout = ((Number) XposedHelpers.callMethod(toServiceMsg, "getTimeout")).longValue();
+                                if (curTimeout < 60000L) {
+                                    XposedHelpers.callMethod(toServiceMsg, "setTimeout", 90000L);
+                                    XposedEntry.log("[NetworkDefense] Extended " + command + " timeout to 90s (was " + curTimeout + "ms)");
+                                }
+                            } catch (Throwable ignored) {}
                         }
                     } catch (Throwable ignored) {}
 
@@ -1482,6 +1527,9 @@ public class NetworkReportHook {
                             int ssoSeq = ((Number) XposedHelpers.callMethod(fromMsg, "getRequestSsoSeq")).intValue();
                             byte[] wupBuf = (byte[]) XposedHelpers.callMethod(fromMsg, "getWupBuffer");
                             String extra = "resCode=" + XposedHelpers.callMethod(fromMsg, "getResultCode");
+                            if (failCode == 1002 && cmd != null && cmd.startsWith("trpc.o3.ecdh_access.")) {
+                                XposedEntry.log("[FEKitDefense] Detected deep-sleep timeout (1002) on " + cmd + " (seq=" + ssoSeq + "), FEKit retry will be normalized");
+                            }
                             io.github.xalsace.qqbypass.utils.ReportAuditManager.recordInboundResponse(
                                 "FEKitManager.handleSecServiceResp",
                                 cmd, ssoSeq, failCode, failMsg, wupBuf, extra, 4);
