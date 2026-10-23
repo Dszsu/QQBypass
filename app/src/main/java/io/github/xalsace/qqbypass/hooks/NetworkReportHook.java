@@ -1616,9 +1616,9 @@ public class NetworkReportHook {
                         event, params, null, null);
                 }
             };
-            HookUtils.hookAllMethods(o3HandlerCls, "P2", o3Hook);
-            HookUtils.hookAllMethods(o3HandlerCls, "Q2", o3Hook);
-            HookUtils.hookAllMethods(o3HandlerCls, "S2", o3Hook);
+            HookUtils.hookAllMethodsIfExists(o3HandlerCls, "P2", o3Hook);
+            HookUtils.hookAllMethodsIfExists(o3HandlerCls, "Q2", o3Hook);
+            HookUtils.hookAllMethodsIfExists(o3HandlerCls, "S2", o3Hook);
             XposedEntry.log("[NetworkReport] Hooked O3BusinessHandler P2/Q2/S2 plaintext dispatchers on loader " + cl);
         }
 
@@ -1648,8 +1648,8 @@ public class NetworkReportHook {
                         event, strParams, data, null);
                 }
             };
-            HookUtils.hookAllMethods(feKitCls, "dispatchEvent", feKitHook);
-            HookUtils.hookAllMethods(feKitCls, "dispatchEventPB", feKitHook);
+            HookUtils.hookAllMethodsIfExists(feKitCls, "dispatchEvent", feKitHook);
+            HookUtils.hookAllMethodsIfExists(feKitCls, "dispatchEventPB", feKitHook);
             XposedEntry.log("[NetworkReport] Hooked FEKit dispatchEvent/dispatchEventPB on loader " + cl);
         }
 
@@ -1746,8 +1746,8 @@ public class NetworkReportHook {
                         event, strParams, data, null);
                 }
             };
-            HookUtils.hookAllMethods(secSignCls, "dispatchEvent", secDispatchHook);
-            HookUtils.hookAllMethods(secSignCls, "dispatchEventPB", secDispatchHook);
+            HookUtils.hookAllMethodsIfExists(secSignCls, "dispatchEvent", secDispatchHook);
+            HookUtils.hookAllMethodsIfExists(secSignCls, "dispatchEventPB", secDispatchHook);
             XposedEntry.log("[NetworkReport] Hooked QQSecuritySign getSign/dispatchEvent on loader " + cl);
         }
     }
