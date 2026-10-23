@@ -4497,7 +4497,7 @@ public class QQ950PatchHook {
         };
         for (String bClsName : berryClasses) {
             Class<?> bCls = XposedHelpers.findClassIfExists(bClsName, cl);
-            if (bCls != null && sHookedTuringBerryClasses.add(bClsName)) {
+            if (bCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + bClsName)) {
                 // Berry.b() -> listens to open ports/tcp -> return standard non-root "v4;-1_v6;-1"
                 HookUtils.hookIfMethodExists(bCls, "b", new XC_MethodHook() {
                     @Override
@@ -4524,7 +4524,7 @@ public class QQ950PatchHook {
         };
         for (String tClsName : thisClasses) {
             Class<?> tCls = XposedHelpers.findClassIfExists(tClsName, cl);
-            if (tCls != null && sHookedTuringBerryClasses.add(tClsName)) {
+            if (tCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + tClsName)) {
                 // this.a(Context) -> returns accessibility inspection string -> clean baseline "0,0,,0,,"
                 HookUtils.hookIfMethodExists(tCls, "a", new XC_MethodHook() {
                     @Override
@@ -4557,7 +4557,7 @@ public class QQ950PatchHook {
         };
         for (String bnClsName : bennetClasses) {
             Class<?> bnCls = XposedHelpers.findClassIfExists(bnClsName, cl);
-            if (bnCls != null && sHookedTuringBerryClasses.add(bnClsName)) {
+            if (bnCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + bnClsName)) {
                 HookUtils.hookIfMethodExists(bnCls, "a", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -4580,7 +4580,7 @@ public class QQ950PatchHook {
         };
         for (String bgClsName : bergamotClasses) {
             Class<?> bgCls = XposedHelpers.findClassIfExists(bgClsName, cl);
-            if (bgCls != null && sHookedTuringBerryClasses.add(bgClsName)) {
+            if (bgCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + bgClsName)) {
                 HookUtils.hookIfMethodExists(bgCls, "a", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -4598,7 +4598,7 @@ public class QQ950PatchHook {
         };
         for (String qClsName : quarendenClasses) {
             Class<?> qCls = XposedHelpers.findClassIfExists(qClsName, cl);
-            if (qCls != null && sHookedTuringBerryClasses.add(qClsName)) {
+            if (qCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + qClsName)) {
                 HookUtils.hookIfMethodExists(qCls, "a", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -4606,6 +4606,32 @@ public class QQ950PatchHook {
                     }
                 });
                 XposedEntry.log("[TuringPatch] Sanitized Quarenden proxy/VPN detector on " + qClsName);
+            }
+        }
+
+        // Marc: checks active network routing interfaces & gateway IPs -> Key 284
+        String[] marcClasses = {
+            "com.tencent.turingfd.sdk.xq.Marc",
+            "com.tencent.tfd.sdk.wxa.Marc"
+        };
+        for (String mClsName : marcClasses) {
+            Class<?> mCls = XposedHelpers.findClassIfExists(mClsName, cl);
+            if (mCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + mClsName)) {
+                HookUtils.hookIfMethodExists(mCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object result = param.getResult();
+                        if (result instanceof String) {
+                            String str = (String) result;
+                            if (str.contains("tun") || str.contains("198.18.") || str.startsWith("17,")) {
+                                String[] parts = str.split(",");
+                                String caps = parts.length > 1 ? parts[1] : "137711415296";
+                                param.setResult("1," + caps + ",rmnet_data0,10.0.0.2,10.0.0.1");
+                            }
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Sanitized Marc network routing detector on " + mClsName);
             }
         }
     }
@@ -4663,9 +4689,9 @@ public class QQ950PatchHook {
                                                     param.method.getDeclaringClass().getSimpleName())
                                                     + "." + param.method.getName();
 
-                                                // 1. Audit real outbound risk map before sanitization
-                                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskMap(
-                                                    "TuringFD", target, map, 6);
+                                                // 1. Audit real pre-sanitization risk map (snapshot copy)
+                                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPreSanitizationRiskMap(
+                                                    "TuringFD", target, new java.util.LinkedHashMap<>(map), 6);
 
                                                 // 2. Surgical Sanitization of critical risk detection items
                                                 boolean sanitized = false;
@@ -4692,32 +4718,38 @@ public class QQ950PatchHook {
                                                 }
 
                                                 // Key 2019: PackageManager mPM dynamic proxy inspection
+                                                // Clean baseline: "android.content.pm.IPackageManager$Stub$Proxy,,"
                                                 if (map.containsKey("2019")) {
                                                     Object v = map.get("2019");
-                                                    if (v != null && v.toString().contains("Proxy")) {
+                                                    if (v != null && !v.toString().equals("android.content.pm.IPackageManager$Stub$Proxy,,")) {
                                                         map.put("2019", "android.content.pm.IPackageManager$Stub$Proxy,,");
                                                         sanitized = true;
                                                         sanitizedDetails.add("2019(mPMProxy)");
                                                     }
                                                 }
 
-                                                // Key 2024: ART method hook reflection verification flags
-                                                if (map.containsKey("2024")) {
-                                                    Object v = map.get("2024");
-                                                    if (v != null && !v.toString().isEmpty()) {
-                                                        map.put("2024", "");
-                                                        sanitized = true;
-                                                        sanitizedDetails.add("2024(MethodHooks)");
-                                                    }
-                                                }
-
                                                 // Key 259: Quarenden proxy/VPN detection flag
                                                 if (map.containsKey("259")) {
                                                     Object v = map.get("259");
-                                                    if ("1".equals(v)) {
+                                                    if ("1".equals(v) || (v != null && !"0".equals(v.toString()))) {
                                                         map.put("259", "0");
                                                         sanitized = true;
                                                         sanitizedDetails.add("259(Proxy)");
+                                                    }
+                                                }
+
+                                                // Key 284: Marc network routing table & interfaces (tun0 leak)
+                                                if (map.containsKey("284")) {
+                                                    Object v = map.get("284");
+                                                    if (v != null) {
+                                                        String netStr = v.toString();
+                                                        if (netStr.contains("tun") || netStr.contains("198.18.") || netStr.startsWith("17,")) {
+                                                            String[] parts = netStr.split(",");
+                                                            String caps = parts.length > 1 ? parts[1] : "137711415296";
+                                                            map.put("284", "1," + caps + ",rmnet_data0,10.0.0.2,10.0.0.1");
+                                                            sanitized = true;
+                                                            sanitizedDetails.add("284(VPN_InterfaceScrubbed)");
+                                                        }
                                                     }
                                                 }
 
@@ -4731,21 +4763,20 @@ public class QQ950PatchHook {
                                                     }
                                                 }
 
-                                                // Key 2016: System Properties & Prop Scan (contains XposedHelpers/Xpatch references)
-                                                if (map.containsKey("2016")) {
-                                                    Object v = map.get("2016");
-                                                    if (v != null && !v.toString().isEmpty()) {
-                                                        map.put("2016", "");
-                                                        sanitized = true;
-                                                        sanitizedDetails.add("2016(PropScan)");
-                                                    }
-                                                }
+                                                // STRICT RULE 4.2 COMPLIANCE:
+                                                // DO NOT wipe Key 2016 (c_s_l: class scan list) and Key 2024 (m_c_l_2: method check list)!
+                                                // These are cloud-configured probe target lists, NOT detection results!
+                                                // Wiping them causes missing-telemetry and probe configuration corruption anomalies!
 
                                                 if (sanitized) {
                                                     io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSanitizationEvent(
                                                         "TuringFD", target, sanitizedDetails);
                                                     XposedEntry.log("[TuringPatch] Sanitized outbound risk items " + sanitizedDetails + " before encryption in " + target);
                                                 }
+
+                                                // 3. Record ACTUAL outbound risk map dispatched to server after sanitization
+                                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskMap(
+                                                    "TuringFD", target, map, 0);
                                             }
                                         }
                                     }

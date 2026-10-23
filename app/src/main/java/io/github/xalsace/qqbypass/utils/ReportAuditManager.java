@@ -766,62 +766,62 @@ public class ReportAuditManager {
         switch (key) {
             case "1": return "SDK Version / Type";
             case "4": return "Crux Execution Timing Benchmarks";
-            case "205": return "Caelum Hardware Specs";
-            case "207": return "T1 Client Information";
+            case "205": return "Dual App / Cloned Container Fingerprint (Caelum)";
+            case "207": return "T1 Client Authenticator Token";
             case "210": return "Timing Profiler (C/T/LT Timestamps)";
             case "240": return "N1 Network / Device Fingerprint";
-            case "250": return "Core Device Architecture ID (Injected DSOs Scanner)";
+            case "250": return "Injected Third-Party DSOs Scanner (Bennet)";
             case "251": return "Dual App / Multi-User Flag (Binary)";
             case "252": return "Virtual Environment / Container Check";
             case "253": return "Device Hardware Spec D (Kiwifruit.d)";
             case "254": return "Device Hardware Spec B (Kiwifruit.b)";
-            case "255": return "Device Spec Public (Screen/DPI)";
-            case "256": return "Proc Scanner Detailed Process Name";
-            case "257": return "E-Tag Environment Info";
-            case "259": return "ZA Environment Integrity Flag (Proxy/VPN Detection)";
-            case "264": return "CPU Info & Native Architecture (Auriga)";
-            case "266": return "Persistent Device Storage Cache 901";
-            case "267": return "Sensor & Motion Hardware Scan";
-            case "268": return "Proc Scanner Suspicious Process List";
-            case "269": return "A7 Sensor Hardware Flag";
+            case "255": return "Screen Density & Metric Scale (public)";
+            case "256": return "Debugger / Memory Tool Process Scanner";
+            case "257": return "App Context & Package Signature E-Tag";
+            case "259": return "HTTP / WiFi Proxy Detection Flag (Quarenden)";
+            case "264": return "Device Model Identifier (Build.MODEL)";
+            case "266": return "Persistent Storage Cache Tag 901";
+            case "267": return "Sensor & Motion Hardware Scan Token";
+            case "268": return "Non-System Root Daemon Process Scanner";
+            case "269": return "Rockchip SoC Library Scanner (/system/lib)";
             case "270": return "OS Flavor & HarmonyOS Detection (Kiwifruit.a)";
-            case "272": return "Open Ports Scanner (/proc/net/tcp)";
-            case "273": return "Tough Hardware Integrity Key";
-            case "274": return "IMEI Telephony Fingerprint";
+            case "272": return "Open TCP Ports Scanner (/proc/net/tcp)";
+            case "273": return "User Touch / Motion Gesture Buffer (Tough)";
+            case "274": return "Telephony Device IMEI (Privileged)";
             case "275": return "Android ID Device Identifier";
-            case "276": return "IMSI Subscriber Identifier";
-            case "279": return "Executable-Writable Memory (RWXP) Scan";
-            case "280": return "SELinux & Root Detection State";
-            case "281": return "Device Uptime & Boot Offset";
-            case "282": return "SIM Card Status (Kiwifruit.c)";
-            case "283": return "B Info Hardware String";
-            case "284": return "Device Model & Brand Fingerprint";
-            case "285": return "ADB / USB Debugging Status";
-            case "286": return "System Timezone ID";
-            case "287": return "Telephony SIM Operator Code";
-            case "288": return "Multi-User / Dual App User ID Value";
-            case "289": return "ClassLoader Hierarchy & Dynamic Hook Scan";
-            case "290": return "Audio Mode Status";
-            case "291": return "USB Configuration State (adb/mtp)";
-            case "292": return "Android 15 API Compatibility Check";
-            case "293": return "Android 14 API Compatibility Check";
-            case "297": return "A11 System Properties Flag";
+            case "276": return "Telephony Subscriber IMSI (Privileged)";
+            case "279": return "Writable-Executable Memory Scanner (RWXP)";
+            case "280": return "Remote Shell Diagnostic Execution Result (s_h)";
+            case "281": return "System Uptime & Boot Time Offset";
+            case "282": return "SIM Card Operational Status (Kiwifruit.c)";
+            case "283": return "Herbaceous B Info Hardware String";
+            case "284": return "Network Routing & Gateway Topology (Marc)";
+            case "285": return "System Locale / Default Language (zh-CN)";
+            case "286": return "System Timezone Identifier (Asia/Shanghai)";
+            case "287": return "Telephony SIM Operator Code (PLMN)";
+            case "288": return "Multi-User / Dual App User ID (l3.b)";
+            case "289": return "ClassLoader Reflection Dynamic Proxy Scanner";
+            case "290": return "System Audio Manager Mode State";
+            case "291": return "USB Connection Configuration State";
+            case "292": return "Android 15 Compatibility State";
+            case "293": return "Android 14 Compatibility State";
+            case "297": return "Herbaceous A Info String";
             case "303": return "Persistent Device Cache Tag 703";
-            case "308": return "Marc Sensor State Flag";
-            case "309": return "Peanut Device Fingerprint";
-            case "402": return "Turing SDK Client ID";
+            case "308": return "Marc Network Connectivity State";
+            case "309": return "App Version & Signature Upgrade Delta Cache (Peanut)";
+            case "402": return "Turing SDK Channel / Client ID";
             case "406": return "Core Device Hash Signature";
-            case "2001": return "E2 Package Context Integrity Hash";
+            case "2001": return "Package Context Integrity Hash (e2)";
             case "2005": return "UIN State Flag";
-            case "2013": return "Context Signature & APK Cert Verification";
-            case "2016": return "System Properties & Prop Scan";
-            case "2017": return "A2 Prop Fingerprint";
+            case "2013": return "Root / Sandbox Probe Target File Paths (c2)";
+            case "2016": return "Hook Framework Probe Target Classes (c_s_l)";
+            case "2017": return "Security Properties Probe Target List (p_s_l)";
             case "2018": return "Process UID (Process.myUid())";
-            case "2019": return "PackageManager & Installed Apps Scan (mPM Proxy Verification)";
-            case "2021": return "Accessibility Services & TalkBack List";
-            case "2022": return "A10 Prop Fingerprint";
-            case "2024": return "A13 System Flag (ART Method Hook Verification)";
-            case "2029": return "String Signature Flag";
+            case "2019": return "PackageManager Dynamic Proxy Verification (mPM)";
+            case "2021": return "Accessibility Services List (Cthis)";
+            case "2022": return "Security System Properties Deny List (p_d_l)";
+            case "2024": return "ART Method Hook Verification Target Methods (m_c_l_2)";
+            case "2029": return "Native Binary Execution Architecture Threshold (nbe_a_t)";
             default: return "Risk Item " + key;
         }
     }
@@ -1332,11 +1332,22 @@ public class ReportAuditManager {
     }
 
     /**
+     * Audit raw in-memory Turing / Device Risk Dictionary BEFORE QB sanitization filter runs.
+     */
+    public static void recordPreSanitizationRiskMap(String channel, String operation, Map<?, ?> riskMap, int stackDepth) {
+        recordRiskMapInternal(channel, operation, riskMap, stackDepth, false);
+    }
+
+    /**
      * Dedicated High-Visibility Outbound Turing / Device Risk Dictionary Auditor.
      * Formats and logs the complete key-value inspection map compiled by TuringFD / QSec
-     * before native packaging and transmission to Tencent risk servers.
+     * after sanitization and before native packaging and transmission to Tencent risk servers.
      */
     public static void recordOutboundRiskMap(String channel, String operation, Map<?, ?> riskMap, int stackDepth) {
+        recordRiskMapInternal(channel, operation, riskMap, stackDepth, true);
+    }
+
+    private static void recordRiskMapInternal(String channel, String operation, Map<?, ?> riskMap, int stackDepth, boolean isOutbound) {
         if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
         try {
             String time = getCurrentTimestamp();
@@ -1345,11 +1356,20 @@ public class ReportAuditManager {
             String threadName = Thread.currentThread().getName();
 
             StringBuilder sb = new StringBuilder(1024);
-            sb.append("\n==================== [OUTBOUND RISK TELEMETRY SENT TO SERVER] ====================\n")
-              .append("Time: ").append(time).append("\n")
+            if (isOutbound) {
+                sb.append("\n==================== [OUTBOUND RISK TELEMETRY SENT TO SERVER] ====================\n");
+            } else {
+                sb.append("\n==================== [INTERNAL RISK TELEMETRY (PRE-SANITIZATION AUDIT)] ====================\n");
+            }
+            sb.append("Time: ").append(time).append("\n")
               .append("Process: ").append(sProcessName).append(" (pid:").append(pid).append(", tid:").append(tid).append(", thread:").append(threadName).append(")\n")
               .append("Channel: ").append(channel).append("\n")
               .append("Target Operation: ").append(operation).append("\n");
+            if (!isOutbound) {
+                sb.append("Notice: Raw in-memory state captured BEFORE QB normalization & sanitization.\n");
+            } else {
+                sb.append("Notice: Normalized telemetry payload passed to native encryption & dispatched to server.\n");
+            }
 
             if (riskMap != null) {
                 sb.append("Payload Dictionary: ").append(riskMap.size()).append(" risk-control inspection items\n")
