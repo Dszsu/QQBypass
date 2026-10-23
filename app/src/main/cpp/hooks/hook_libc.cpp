@@ -2504,14 +2504,6 @@ int fake_system_property_get(const char* name, char* value) {
         strcpy(value, "stopped");
         return strlen("stopped");
     }
-    if (strcmp(name, "ro.build.version.opporom") == 0) {
-        strcpy(value, "V16.0.0");
-        return strlen("V16.0.0");
-    }
-    if (strcmp(name, "ro.rom.different.version") == 0) {
-        strcpy(value, "ColorOS V16.0.0");
-        return strlen("ColorOS V16.0.0");
-    }
     if (is_sensitive_prop_name(name)) {
         value[0] = '\0';
         return 0;
@@ -2554,8 +2546,6 @@ static void prop_read_callback_wrapper(void* cookie, const char* name, const cha
     else if (strcmp(name, "persist.sys.adb.engineermode") == 0) spoof_val = "0";
     else if (strcmp(name, "sys.usb.config") == 0 || strcmp(name, "sys.usb.state") == 0 || strcmp(name, "persist.sys.usb.config") == 0) spoof_val = "none";
     else if (strcmp(name, "init.svc.adbd") == 0) spoof_val = "stopped";
-    else if (strcmp(name, "ro.build.version.opporom") == 0) spoof_val = "V16.0.0";
-    else if (strcmp(name, "ro.rom.different.version") == 0) spoof_val = "ColorOS V16.0.0";
     else if (is_sensitive_prop_name(name)) spoof_val = "";
 
     if (pcc && pcc->orig_callback) {
@@ -2599,8 +2589,6 @@ int fake_system_property_read(const prop_info* pi, char* name, char* value) {
         else if (strcmp(name, "persist.sys.adb.engineermode") == 0) strcpy(value, "0");
         else if (strcmp(name, "sys.usb.config") == 0 || strcmp(name, "sys.usb.state") == 0 || strcmp(name, "persist.sys.usb.config") == 0) strcpy(value, "none");
         else if (strcmp(name, "init.svc.adbd") == 0) strcpy(value, "stopped");
-        else if (strcmp(name, "ro.build.version.opporom") == 0) strcpy(value, "V16.0.0");
-        else if (strcmp(name, "ro.rom.different.version") == 0) strcpy(value, "ColorOS V16.0.0");
         else if (is_sensitive_prop_name(name)) value[0] = '\0';
     }
     return ret;
