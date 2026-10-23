@@ -235,7 +235,10 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                                 return;
                             }
                             if (sObservedLoaders.add(cl)) {
-                                sLateHookExecutor.execute(() -> dispatchLateStageHooks(cl));
+                                // Synchronously dispatch critical late-stage hooks immediately
+                                // to guarantee source probes (Bennet, Marc, Quarenden, etc.) are hooked
+                                // before any background thread can execute classes from this DEX
+                                dispatchLateStageHooks(cl);
                             }
                         }
                     }

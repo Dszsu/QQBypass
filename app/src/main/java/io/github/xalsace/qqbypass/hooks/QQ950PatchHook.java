@@ -4634,6 +4634,62 @@ public class QQ950PatchHook {
                 XposedEntry.log("[TuringPatch] Sanitized Marc network routing detector on " + mClsName);
             }
         }
+
+        // Rambutan: reflection helper used for mPM dynamic proxy inspection -> Key 2019
+        String[] rambutanClasses = {
+            "com.tencent.turingfd.sdk.xq.Rambutan",
+            "com.tencent.tfd.sdk.wxa.Rambutan"
+        };
+        for (String rClsName : rambutanClasses) {
+            Class<?> rCls = XposedHelpers.findClassIfExists(rClsName, cl);
+            if (rCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + rClsName)) {
+                HookUtils.hookIfMethodExists(rCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length >= 2 && "mPM".equals(param.args[1])) {
+                            try {
+                                Class<?> smClass = Class.forName("android.os.ServiceManager");
+                                Method getService = smClass.getMethod("getService", String.class);
+                                android.os.IBinder binder = (android.os.IBinder) getService.invoke(null, "package");
+                                if (binder != null) {
+                                    Class<?> stubClass = Class.forName("android.content.pm.IPackageManager$Stub");
+                                    Method asInterface = stubClass.getMethod("asInterface", android.os.IBinder.class);
+                                    Object cleanPM = asInterface.invoke(null, binder);
+                                    if (cleanPM != null) {
+                                        param.setResult(cleanPM);
+                                        return;
+                                    }
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Sanitized Rambutan mPM reflection detector on " + rClsName);
+            }
+        }
+
+        // c2: class/field scan list for dynamic proxy / ClassLoader anomaly detection -> Key 289
+        String[] c2Classes = {
+            "com.tencent.turingfd.sdk.xq.c2",
+            "com.tencent.tfd.sdk.wxa.c2"
+        };
+        for (String c2ClsName : c2Classes) {
+            Class<?> c2Cls = XposedHelpers.findClassIfExists(c2ClsName, cl);
+            if (c2Cls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + c2ClsName)) {
+                HookUtils.hookIfMethodExists(c2Cls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args == null || param.args.length == 0) {
+                            if (param.method instanceof Method &&
+                                java.util.HashMap.class.isAssignableFrom(((Method) param.method).getReturnType())) {
+                                param.setResult(new java.util.HashMap<>());
+                            }
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Sanitized c2 ClassLoader anomaly scanner on " + c2ClsName);
+            }
+        }
     }
 
     private static final java.util.Set<String> sHookedTuringMapClasses =
