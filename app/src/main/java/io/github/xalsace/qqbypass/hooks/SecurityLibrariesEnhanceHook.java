@@ -540,16 +540,20 @@ public class SecurityLibrariesEnhanceHook {
                 // checkClassLoadedResult -> returns 0 (SUCCESS)
                 HookUtils.hookAllMethods(clazz, "checkClassLoadedResult", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(0);
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() instanceof Integer && ((Integer) param.getResult()) != 0) {
+                            param.setResult(0);
+                        }
                     }
                 });
 
                 // isCheckSuc$unusedcode_check_debug -> returns true
                 HookUtils.hookAllMethods(clazz, "isCheckSuc$unusedcode_check_debug", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(true);
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (Boolean.FALSE.equals(param.getResult())) {
+                            param.setResult(true);
+                        }
                     }
                 });
             }
@@ -562,16 +566,20 @@ public class SecurityLibrariesEnhanceHook {
                 // c() -> returns true (initialization valid)
                 HookUtils.hookAllMethods(clazz, "c", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(true);
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (Boolean.FALSE.equals(param.getResult())) {
+                            param.setResult(true);
+                        }
                     }
                 });
 
                 // e() -> returns 0 (error code clean)
                 HookUtils.hookAllMethods(clazz, "e", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(0);
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() instanceof Integer && ((Integer) param.getResult()) != 0) {
+                            param.setResult(0);
+                        }
                     }
                 });
 

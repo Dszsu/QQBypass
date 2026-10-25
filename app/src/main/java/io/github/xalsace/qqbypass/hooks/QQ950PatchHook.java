@@ -759,15 +759,6 @@ public class QQ950PatchHook {
 
         // Delegate com.tencent.mobileqq.fe.utils.a to transparent normalization
         hookFeUtilsAWithClassLoader(lpparam != null ? lpparam.classLoader : null);
-
-        // Neutralize com.tencent.mobileqq.dt.app.h (Suspicious CA Certificate detector)
-        final String dtHCls = "com.tencent.mobileqq.dt.app.h";
-        hookSafe(dtHCls, "b", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(new java.util.ArrayList<>());
-            }
-        });
     }
 
     // ============ Tier 2: object-return risk detection (Safe Dynamic Proxies) ============
@@ -866,8 +857,11 @@ public class QQ950PatchHook {
             if (clazz == null || !sHookedTuringClasses.add(clazz)) continue;
             HookUtils.hookAllMethods(clazz, "getErrorCode", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(0L);
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    Object res = p.getResult();
+                    if (res instanceof Number && ((Number) res).longValue() != 0L) {
+                        p.setResult(0L);
+                    }
                 }
             });
             HookUtils.hookAllMethods(clazz, "getDeviceToken", new XC_MethodHook() {
@@ -1001,8 +995,11 @@ public class QQ950PatchHook {
             if (clazz == null || !sHookedTuringClasses.add(clazz)) continue;
             HookUtils.hookAllMethods(clazz, "getErrorCode", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(0);
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    Object res = p.getResult();
+                    if (res instanceof Number && ((Number) res).intValue() != 0) {
+                        p.setResult(0);
+                    }
                 }
             });
             HookUtils.hookAllMethods(clazz, "getExpiredTimestamp", new XC_MethodHook() {
@@ -1252,7 +1249,7 @@ public class QQ950PatchHook {
                                         fn = dexFile.toString();
                                     }
                                     if (fn != null && (fn.contains("qqbypass") || fn.contains("xalsace") ||
-                                        DynamicRootDetectionHook.isSuspiciousPath(fn) || !fn.contains("com.tencent.mobileqq"))) {
+                                        DynamicRootDetectionHook.isSuspiciousPath(fn))) {
                                         param.setResult(false);
                                         return;
                                     }
@@ -1529,9 +1526,7 @@ public class QQ950PatchHook {
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.method instanceof java.lang.reflect.Method) {
                         java.lang.reflect.Method m = (java.lang.reflect.Method) param.method;
-                        if (m.getReturnType() == String.class && (param.args == null || param.args.length == 0)) {
-                            param.setResult(""); // Only String a() -> return error string or ""
-                        } else if (param.args != null && param.args.length == 2) {
+                        if (param.args != null && param.args.length == 2) {
                             if (param.args[0] == null) param.args[0] = "";
                             if (param.args[1] == null) param.args[1] = "";
                         } else if (m.getReturnType() == int.class && param.args != null && param.args.length == 3) {
@@ -1557,7 +1552,12 @@ public class QQ950PatchHook {
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.method instanceof java.lang.reflect.Method) {
                         java.lang.reflect.Method m = (java.lang.reflect.Method) param.method;
-                        if (m.getReturnType() == String.class && param.args != null && param.args.length == 2) {
+                        if (m.getReturnType() == String.class && (param.args == null || param.args.length == 0)) {
+                            Object res = param.getResult();
+                            if (res instanceof String && !((String) res).isEmpty()) {
+                                param.setResult("");
+                            }
+                        } else if (m.getReturnType() == String.class && param.args != null && param.args.length == 2) {
                             Object res = param.getResult();
                             if (res == null || "".equals(res) || (res instanceof String && ((String) res).startsWith("error"))) {
                                 String safeSign = generateSafeTuringSignMsg();
@@ -1868,9 +1868,9 @@ public class QQ950PatchHook {
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args != null && param.args.length >= 2 && param.args[1] instanceof String) {
                         String event = (String) param.args[1];
-                        if (event.contains("Error") || event.contains("Fail") || event.contains("Risk") || event.contains("Turing")) {
+                        if (event.contains("400103") || event.contains("EnvRisk") || event.contains("HookDetect") || event.contains("RootDetect") || event.contains("EmulatorRisk")) {
                             param.setResult(null);
-                            XposedEntry.log("[FacePatch] Suppressed HuiYan buried point event: " + event);
+                            XposedEntry.log("[FacePatch] Suppressed HuiYan risk environment buried point event: " + event);
                         }
                     }
                 }
@@ -4300,10 +4300,19 @@ public class QQ950PatchHook {
                     } else if (p.args[0] instanceof String) {
                         targetPath = (String) p.args[0];
                     } else if (p.args[0] instanceof java.io.InputStream) {
-                        // SecUtil.toHexString strictly formats in UPPERCASE hex digits
-                        p.setResult(officialMd5Upper);
-                        XposedEntry.log("[SecUtilPatch] SecUtil.getFileMd5(InputStream) -> official MD5: " + officialMd5Upper);
-                        return;
+                        boolean isApkCheck = false;
+                        for (StackTraceElement ste : Thread.currentThread().getStackTrace()) {
+                            String clsName = ste.getClassName();
+                            if (clsName.contains("com.tencent.ctsz") || clsName.contains("signature") || clsName.contains("mdm")) {
+                                isApkCheck = true;
+                                break;
+                            }
+                        }
+                        if (isApkCheck) {
+                            p.setResult(officialMd5Upper);
+                            XposedEntry.log("[SecUtilPatch] SecUtil.getFileMd5(InputStream) -> official MD5: " + officialMd5Upper);
+                            return;
+                        }
                     }
                     if (targetPath != null && (targetPath.contains("mobileqq") || targetPath.contains(".apk"))) {
                         // SecUtil.toHexString strictly formats in UPPERCASE hex digits
@@ -4346,8 +4355,18 @@ public class QQ950PatchHook {
             HookUtils.hookAllMethods(usqA, "b", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(officialMd5Upper);
-                    XposedEntry.log("[UsqPatch] com.tencent.usq.a.b -> official MD5: " + officialMd5Upper);
+                    boolean isApkCheck = false;
+                    for (StackTraceElement ste : Thread.currentThread().getStackTrace()) {
+                        String clsName = ste.getClassName();
+                        if (clsName.contains("com.tencent.ctsz") || clsName.contains("signature") || clsName.contains("mdm")) {
+                            isApkCheck = true;
+                            break;
+                        }
+                    }
+                    if (isApkCheck) {
+                        p.setResult(officialMd5Upper);
+                        XposedEntry.log("[UsqPatch] com.tencent.usq.a.b (APK check) -> official MD5: " + officialMd5Upper);
+                    }
                 }
             });
         }
@@ -4366,9 +4385,11 @@ public class QQ950PatchHook {
         if (mqpSecUtilCls != null && sHooked9375Classes.add(mqpSecUtilCls)) {
             HookUtils.hookAllMethods(mqpSecUtilCls, "memchk", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(true);
-                    XposedEntry.log("[MQPSecUtil] memchk -> forced true (memory pattern matched/PASS)");
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    if (Boolean.FALSE.equals(p.getResult())) {
+                        p.setResult(true);
+                        XposedEntry.log("[MQPSecUtil] memchk -> normalized false to true (PASS)");
+                    }
                 }
             });
             HookUtils.hookAllMethods(mqpSecUtilCls, "do_report", new XC_MethodHook() {
@@ -4496,19 +4517,29 @@ public class QQ950PatchHook {
             if (turingBridgeI != null && sHooked9375Classes.add(turingBridgeI)) {
                 HookUtils.hookAllMethods(turingBridgeI, "d", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                        String ticket = getOrGenerateOpenIdTicket();
-                        if (ticket != null && ticket.length() >= 16) {
-                            p.setResult(ticket);
+                    protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                        Object res = p.getResult();
+                        if (res instanceof String && !((String) res).isEmpty()) {
+                            sLastKnownOpenIdTicket = (String) res;
+                        } else {
+                            String ticket = getOrGenerateOpenIdTicket();
+                            if (ticket != null && ticket.length() >= 16) {
+                                p.setResult(ticket);
+                            }
                         }
                     }
                 });
                 HookUtils.hookAllMethods(turingBridgeI, "f", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                        String token = getOrGenerateDeviceToken();
-                        if (token != null && token.length() >= 16) {
-                            p.setResult(token);
+                    protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                        Object res = p.getResult();
+                        if (res instanceof String && !((String) res).isEmpty()) {
+                            sLastKnownDeviceToken = (String) res;
+                        } else {
+                            String token = getOrGenerateDeviceToken();
+                            if (token != null && token.length() >= 16) {
+                                p.setResult(token);
+                            }
                         }
                     }
                 });

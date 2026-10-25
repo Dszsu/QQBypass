@@ -1006,14 +1006,14 @@ public class DynamicRootDetectionHook {
                     }
                 });
 
-                // 6. verifyInstalledApp(Context, String, String) -> false
+                // 6. verifyInstalledApp(Context, String, String) -> false in afterHookedMethod
                 HookUtils.hookAllMethods(pkgUtilClass, "verifyInstalledApp", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args != null && param.args.length > 1 && param.args[1] instanceof String) {
                             String pkg = (String) param.args[1];
                             if (isCallerQAuxv()) return;
-                            if (isSuspiciousPackage(pkg)) {
+                            if (isSuspiciousPackage(pkg) && param.getResult() == Boolean.TRUE) {
                                 param.setResult(false);
                             }
                         }
