@@ -368,19 +368,23 @@ public class QQ950PatchHook {
      * - com.tencent.gathererga.core.internal.provider.impl.UserInfoImpl: isRooted -> clean false provider result
      */
     private static void hookScreenSecurityAndRootDetection(XC_LoadPackage.LoadPackageParam lpparam) {
-        // 1. TenPay ScreenSecurityDetector
+        // 1. TenPay ScreenSecurityDetector: allow natural execution and normalize in afterHookedMethod
         final String ssdCls = "com.tenpay.security.ScreenSecurityDetector";
         hookSafe(ssdCls, "isAtRisk", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
-                XposedEntry.log("[ScreenSecurity] Neutralized ScreenSecurityDetector.isAtRisk -> false");
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (Boolean.TRUE.equals(p.getResult())) {
+                    p.setResult(false);
+                    XposedEntry.log("[ScreenSecurity] Normalized ScreenSecurityDetector.isAtRisk -> false");
+                }
             }
         });
         hookSafe(ssdCls, "isScreenRecording", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (Boolean.TRUE.equals(p.getResult())) {
+                    p.setResult(false);
+                }
             }
         });
         hookSafe(ssdCls, "registerListener", lpparam, new XC_MethodHook() {
@@ -422,34 +426,31 @@ public class QQ950PatchHook {
             }
         });
 
-        // 3. GathererGA UserInfoImpl.isRooted
+        // 3. GathererGA UserInfoImpl.isRooted: allow natural execution and sanitize in afterHookedMethod
         final String userInfoCls = "com.tencent.gathererga.core.internal.provider.impl.UserInfoImpl";
         hookSafe(userInfoCls, "isRooted", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.thisObject == null) return;
-                ClassLoader cl = p.thisObject.getClass().getClassLoader();
-                Class<?> resCls = XposedHelpers.findClassIfExists("com.tencent.gathererga.core.internal.provider.c", cl);
-                if (resCls != null) {
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                Object res = p.getResult();
+                if (res != null) {
                     try {
-                        Object fakeRes = XposedHelpers.newInstance(resCls, 0L, Boolean.FALSE);
-                        p.setResult(fakeRes);
-                        XposedEntry.log("[RootPatch] Sanitized UserInfoImpl.isRooted -> false");
-                        return;
-                    } catch (Throwable ignored) { }
-                }
-                Class<?> iface = XposedHelpers.findClassIfExists("com.tencent.gathererga.core.f", cl);
-                if (iface != null) {
-                    Object proxy = Proxy.newProxyInstance(cl, new Class<?>[]{iface}, new InvocationHandler() {
-                        @Override
-                        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                            String mName = method.getName();
-                            if ("getErrorCode".equals(mName) || "a".equals(mName)) return 0L;
-                            if ("getResult".equals(mName) || "b".equals(mName)) return Boolean.FALSE;
-                            return null;
+                        Object val = XposedHelpers.getObjectField(res, "b");
+                        if (Boolean.TRUE.equals(val)) {
+                            XposedHelpers.setObjectField(res, "b", Boolean.FALSE);
+                            XposedEntry.log("[RootPatch] Sanitized UserInfoImpl.isRooted -> false");
                         }
-                    });
-                    p.setResult(proxy);
+                    } catch (Throwable ignored) {
+                        try {
+                            for (Field f : res.getClass().getDeclaredFields()) {
+                                if (f.getType() == boolean.class || f.getType() == Boolean.class) {
+                                    f.setAccessible(true);
+                                    if (Boolean.TRUE.equals(f.get(res))) {
+                                        f.set(res, Boolean.FALSE);
+                                    }
+                                }
+                            }
+                        } catch (Throwable ignored2) {}
+                    }
                 }
             }
         });
@@ -533,7 +534,7 @@ public class QQ950PatchHook {
         final String pkgUtilCls = "com.tencent.mobileqq.utils.PackageUtil";
         hookSafe(pkgUtilCls, "isAppInstalled", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 if (DynamicRootDetectionHook.isCallerQAuxv()) return;
                 if (p.args != null && p.args.length > 1 && p.args[1] instanceof String) {
                     String pkg = (String) p.args[1];
@@ -546,7 +547,7 @@ public class QQ950PatchHook {
 
         hookSafe(pkgUtilCls, "checkAppInstalled", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 if (DynamicRootDetectionHook.isCallerQAuxv()) return;
                 if (p.args != null && p.args.length > 1 && p.args[1] instanceof String) {
                     String pkg = (String) p.args[1];
@@ -649,7 +650,7 @@ public class QQ950PatchHook {
 
         hookSafe(pkgUtilCls, "verifyInstalledApp", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 if (DynamicRootDetectionHook.isCallerQAuxv()) return;
                 if (p.args != null && p.args.length > 1 && p.args[1] instanceof String) {
                     String pkg = (String) p.args[1];
@@ -676,20 +677,24 @@ public class QQ950PatchHook {
         final String dtcCls = "com.tencent.mobileqq.dt.app.Dtc";
         hookSafe(dtcCls, "isAbnormalConfig", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
-                XposedEntry.log("[DtcPatch] Suppressed Dtc.isAbnormalConfig -> false");
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (Boolean.TRUE.equals(p.getResult())) {
+                    p.setResult(false);
+                    XposedEntry.log("[DtcPatch] Normalized Dtc.isAbnormalConfig -> false");
+                }
             }
         });
         hookSafe(dtcCls, "isDebugVersion", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (Boolean.TRUE.equals(p.getResult())) {
+                    p.setResult(false);
+                }
             }
         });
         hookSafe(dtcCls, "checkAppInstalled", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 if (DynamicRootDetectionHook.isCallerQAuxv()) return;
                 if (p.args != null && p.args.length > 0 && p.args[0] instanceof String) {
                     String pkg = (String) p.args[0];
@@ -701,7 +706,7 @@ public class QQ950PatchHook {
         });
         hookSafe(dtcCls, "checkRiskPermission", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 if (DynamicRootDetectionHook.isCallerQAuxv()) return;
                 if (p.args != null && p.args.length > 1 && p.args[1] instanceof String) {
                     String pkg = (String) p.args[1];
@@ -713,8 +718,10 @@ public class QQ950PatchHook {
         });
         hookSafe("com.tencent.util.AppSetting", "isDebugVersion", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (Boolean.TRUE.equals(p.getResult())) {
+                    p.setResult(false);
+                }
             }
         });
         hookSafe(dtcCls, "getAccessibilityEnabledStatus", lpparam, new XC_MethodHook() {
@@ -1745,14 +1752,19 @@ public class QQ950PatchHook {
             });
             HookUtils.hookAllMethods(cacheClass, "getTuringEnvErrorStr", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult("");
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    Object res = param.getResult();
+                    if (res instanceof String && !((String) res).isEmpty()) {
+                        param.setResult("");
+                    }
                 }
             });
             HookUtils.hookAllMethods(cacheClass, "isNeedFrameCheck", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult(false);
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (Boolean.TRUE.equals(param.getResult())) {
+                        param.setResult(false);
+                    }
                 }
             });
             XposedEntry.log("[FacePatch] Hooked TuringResultCacheEntity.setTuringEnvErrorStr, getTuringEnvErrorStr, isNeedFrameCheck");
@@ -1765,11 +1777,13 @@ public class QQ950PatchHook {
             sHookedFaceClasses.add(arwpmClass);
             HookUtils.hookAllMethods(arwpmClass, "a", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.method instanceof java.lang.reflect.Method) {
                         java.lang.reflect.Method m = (java.lang.reflect.Method) param.method;
                         if (m.getReturnType() == int.class && (param.args == null || param.args.length == 0)) {
-                            param.setResult(0); // public static int a() -> return 0 (initialized and healthy)
+                            if (param.getResult() instanceof Integer && ((Integer) param.getResult()) != 0) {
+                                param.setResult(0); // normalize error to 0 (initialized and healthy)
+                            }
                         }
                     }
                 }
@@ -3624,8 +3638,8 @@ public class QQ950PatchHook {
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void hookRFixFailureSanitization(XC_LoadPackage.LoadPackageParam lpparam) {
-        // 1. RFix Quality Reporter: Drop failure reports in com.tencent.rfix.lib.reporter.e
-        XC_MethodHook dropFailureReportHook = new XC_MethodHook() {
+        // 1. RFix Quality Reporter: Normalize failure reports to SUCCESS in com.tencent.rfix.lib.reporter.e
+        XC_MethodHook normalizeFailureReportHook = new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                 if (p.args == null || p.args.length < 9) return;
@@ -3642,56 +3656,28 @@ public class QQ950PatchHook {
 
                     if (!eventSuccess || (eventCode != null && eventCode.contains("FAIL")) ||
                         "-8".equals(eventCodeExt) || "LOAD_RESULT_PATCH_LOADER_FAIL".equals(eventCode)) {
-                        p.setResult(true);
-                        XposedEntry.log("[RFixPatch] Dropped RFix failure telemetry report: eventCode=" + eventCode + ", codeExt=" + eventCodeExt);
+                        p.args[6] = true;
+                        p.args[7] = "LOAD_RESULT_SUCCESS";
+                        p.args[8] = "0";
+                        XposedEntry.log("[RFixPatch] Normalized RFix failure telemetry report to SUCCESS");
                     }
                 } catch (Throwable t) {
                     XposedEntry.log("[RFixPatch] Error filtering RFix reporter: " + t.getMessage());
                 }
             }
         };
-        hookSafe("com.tencent.rfix.lib.reporter.e", "d", lpparam, dropFailureReportHook);
-        hookSafe("com.tencent.rfix.lib.reporter.e", "e", lpparam, dropFailureReportHook);
+        hookSafe("com.tencent.rfix.lib.reporter.e", "d", lpparam, normalizeFailureReportHook);
+        hookSafe("com.tencent.rfix.lib.reporter.e", "e", lpparam, normalizeFailureReportHook);
 
-        // Drop caller methods in e: a, b
-        hookSafe("com.tencent.rfix.lib.reporter.e", "a", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.args != null && p.args.length > 1 && p.args[1] != null) {
-                    try {
-                        boolean isSuccess = (Boolean) XposedHelpers.callMethod(p.args[1], "isLoaderSuccess");
-                        if (!isSuccess) {
-                            p.setResult(null);
-                            XposedEntry.log("[RFixPatch] Dropped com.tencent.rfix.lib.reporter.e.a failure report");
-                        }
-                    } catch (Throwable ignored) {}
-                }
-            }
-        });
-        hookSafe("com.tencent.rfix.lib.reporter.e", "b", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.args != null && p.args.length > 1 && p.args[1] != null) {
-                    try {
-                        boolean isSuccess = (Boolean) XposedHelpers.callMethod(p.args[1], "isLoaderSuccess");
-                        if (!isSuccess) {
-                            p.setResult(true);
-                            XposedEntry.log("[RFixPatch] Dropped com.tencent.rfix.lib.reporter.e.b failure report");
-                        }
-                    } catch (Throwable ignored) {}
-                }
-            }
-        });
-
-        // 2. RFix ATTASwitch: Force disable RFix ATTA/WeData network reporting
+        // 2. RFix ATTASwitch: Keep RFix ATTA/WeData network reporting pipeline OPEN (Rule 4.2)
         hookSafe("com.tencent.rfix.lib.atta.RFixATTASwitch", "a", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                p.setResult(true);
             }
         });
 
-        // 3. RFix ATTA Database & Upload Helper (com.tencent.rfix.lib.atta.e)
+        // 3. RFix ATTA Database & Upload Helper (com.tencent.rfix.lib.atta.e): normalize records to SUCCESS
         hookSafe("com.tencent.rfix.lib.atta.e", "d", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
@@ -3699,16 +3685,16 @@ public class QQ950PatchHook {
                     java.util.Map map = (java.util.Map) p.args[0];
                     Object eventCode = map.get("event_code");
                     Object eventSuccess = map.get("event_success");
-                    Object attaid = map.get("attaid");
-                    if ("0ac00056535".equals(attaid) && ("0".equals(eventSuccess) || (eventCode != null && eventCode.toString().contains("FAIL")))) {
-                        p.setResult(true);
-                        XposedEntry.log("[RFixPatch] Dropped ATTA poison failure record from atta.e.d");
+                    if ("0".equals(eventSuccess) || (eventCode != null && eventCode.toString().contains("FAIL"))) {
+                        map.put("event_success", "1");
+                        map.put("event_code", "LOAD_RESULT_SUCCESS");
+                        XposedEntry.log("[RFixPatch] Normalized ATTA telemetry record to SUCCESS");
                     }
                 }
             }
         });
 
-        // 4. WeData Reporter (com.tencent.rfix.lib.wedata.base.d)
+        // 4. WeData Reporter (com.tencent.rfix.lib.wedata.base.d): normalize records to SUCCESS
         hookSafe("com.tencent.rfix.lib.wedata.base.d", "c", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
@@ -3717,8 +3703,9 @@ public class QQ950PatchHook {
                     Object eventCode = map.get("event_code");
                     Object eventSuccess = map.get("event_success");
                     if ("0".equals(eventSuccess) || (eventCode != null && eventCode.toString().contains("FAIL"))) {
-                        p.setResult(true);
-                        XposedEntry.log("[RFixPatch] Dropped WeData failure report in wedata.base.d.c");
+                        map.put("event_success", "1");
+                        map.put("event_code", "LOAD_RESULT_SUCCESS");
+                        XposedEntry.log("[RFixPatch] Normalized WeData telemetry record to SUCCESS");
                     }
                 }
             }
@@ -5185,20 +5172,26 @@ public class QQ950PatchHook {
 
                 HookUtils.hookAllMethods(guardCls, "sVersion", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("V1.0.002");
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == null || "".equals(param.getResult())) {
+                            param.setResult("V1.0.002");
+                        }
                     }
                 });
                 HookUtils.hookAllMethods(guardCls, "getVersion", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("V1.0.002");
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == null || "".equals(param.getResult())) {
+                            param.setResult("V1.0.002");
+                        }
                     }
                 });
                 HookUtils.hookAllMethods(guardCls, "getSoVersion", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("V1.0.002");
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == null || "".equals(param.getResult())) {
+                            param.setResult("V1.0.002");
+                        }
                     }
                 });
                 HookUtils.hookAllMethods(guardCls, "sGuardInit", new XC_MethodHook() {
@@ -5224,8 +5217,10 @@ public class QQ950PatchHook {
 
                 HookUtils.hookAllMethods(facadeCls, "getSoVersion", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("V3.0.000");
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == null || "".equals(param.getResult())) {
+                            param.setResult("V3.0.000");
+                        }
                     }
                 });
                 HookUtils.hookAllMethods(facadeCls, "getVersion", new XC_MethodHook() {

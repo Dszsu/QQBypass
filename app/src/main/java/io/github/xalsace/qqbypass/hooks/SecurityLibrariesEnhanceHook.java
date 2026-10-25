@@ -172,10 +172,10 @@ public class SecurityLibrariesEnhanceHook {
                     }
                 });
 
-                // 7. getPropSafe & systemGetSafe -> sanitize sensitive keys
+                // 7. getPropSafe & systemGetSafe -> sanitize sensitive keys in afterHookedMethod
                 HookUtils.hookAllMethods(clazz, "getPropSafe", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
                             String key = (String) param.args[0];
                             String mocked = getSafePropValue(key);
@@ -187,7 +187,7 @@ public class SecurityLibrariesEnhanceHook {
                 });
                 HookUtils.hookAllMethods(clazz, "systemGetSafe", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
                             String key = (String) param.args[0];
                             String mocked = getSafePropValue(key);
@@ -198,19 +198,28 @@ public class SecurityLibrariesEnhanceHook {
                     }
                 });
 
-                // 8. getMtpMode -> none
+                // 8. getMtpMode -> sanitize adb in afterHookedMethod while preserving real mode
                 HookUtils.hookAllMethods(clazz, "getMtpMode", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("none");
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res instanceof String) {
+                            String s = (String) res;
+                            if (s.contains("adb")) {
+                                String cleaned = s.replace(",adb", "").replace("adb,", "").replace("adb", "");
+                                param.setResult(cleaned.isEmpty() ? "none" : cleaned);
+                            }
+                        }
                     }
                 });
 
-                // 9. checkRiskPermission -> 0
+                // 9. checkRiskPermission -> 0 in afterHookedMethod
                 HookUtils.hookAllMethods(clazz, "checkRiskPermission", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(0);
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() instanceof Integer && ((Integer) param.getResult()) != 0) {
+                            param.setResult(0);
+                        }
                     }
                 });
 
