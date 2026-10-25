@@ -83,6 +83,23 @@ public class QQ950PatchHook {
         return "";
     }
 
+    public static boolean isHostApkPath(String path) {
+        if (path == null || path.isEmpty()) return false;
+        if (path.contains("/data/user/") || path.contains("/data/data/") || path.contains("/files/") || path.contains("/cache/")) {
+            return false;
+        }
+        if (path.endsWith("/base.apk") || path.endsWith("/com.tencent.mobileqq.apk")) {
+            return true;
+        }
+        if (HookConfig.loadPackageParam != null && HookConfig.loadPackageParam.appInfo != null) {
+            String sourceDir = HookConfig.loadPackageParam.appInfo.sourceDir;
+            if (sourceDir != null && sourceDir.equals(path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         if (!HookConfig.ENABLE_QQ950_PATCH) return;
 
@@ -2718,20 +2735,18 @@ public class QQ950PatchHook {
         hookSafe(secUtilCls, "getFileMd5", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.args != null && p.args.length > 0) {
+                if (p.args != null && p.args.length > 0 && p.args[0] != null) {
                     Object arg = p.args[0];
-                    boolean isApk = false;
+                    String s = null;
                     if (arg instanceof String) {
-                        String s = (String) arg;
-                        if (s.endsWith(".apk") || s.contains("mobileqq")) isApk = true;
+                        s = (String) arg;
                     } else if (arg instanceof File) {
-                        String s = ((File) arg).getAbsolutePath();
-                        if (s.endsWith(".apk") || s.contains("mobileqq")) isApk = true;
+                        s = ((File) arg).getAbsolutePath();
                     }
-                    if (isApk) {
+                    if (s != null && isHostApkPath(s)) {
                         String officialMd5 = HostVersionManager.getCurrentProfile().getOfficialApkMd5Upper();
                         p.setResult(officialMd5);
-                        XposedEntry.log("[SelfVerifyPatch] SecUtil.getFileMd5 -> spoofed official APK MD5: " + officialMd5);
+                        XposedEntry.log("[SelfVerifyPatch] SecUtil.getFileMd5(" + s + ") -> spoofed official APK MD5: " + officialMd5);
                     }
                 }
             }
@@ -4045,8 +4060,13 @@ public class QQ950PatchHook {
             HookUtils.hookAllMethods(mdmA, "a", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(officialMd5Upper);
-                    XposedEntry.log("[MDMPatch] com.tencent.mdm.a.a -> forced official MD5: " + officialMd5Upper);
+                    if (p.args != null && p.args.length > 0 && p.args[0] instanceof String) {
+                        String targetPath = (String) p.args[0];
+                        if (isHostApkPath(targetPath)) {
+                            p.setResult(officialMd5Upper);
+                            XposedEntry.log("[MDMPatch] com.tencent.mdm.a.a(" + targetPath + ") -> forced official MD5: " + officialMd5Upper);
+                        }
+                    }
                 }
             });
         }
@@ -4054,6 +4074,13 @@ public class QQ950PatchHook {
         // 2. com.tencent.mobileqq.utils.SecUtil.getFileMd5(File), (String), (InputStream)
         Class<?> secUtilCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.utils.SecUtil", cl);
         if (secUtilCls != null && sHooked9375Classes.add(secUtilCls)) {
+            HookUtils.hookAllMethods(secUtilCls, "check0DayRepack", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    p.setResult(false);
+                }
+            });
+
             XC_MethodHook md5Hook = new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
@@ -4078,7 +4105,7 @@ public class QQ950PatchHook {
                             return;
                         }
                     }
-                    if (targetPath != null && (targetPath.contains("mobileqq") || targetPath.contains(".apk"))) {
+                    if (targetPath != null && isHostApkPath(targetPath)) {
                         // SecUtil.toHexString strictly formats in UPPERCASE hex digits
                         p.setResult(officialMd5Upper);
                         XposedEntry.log("[SecUtilPatch] SecUtil.getFileMd5(" + targetPath + ") -> official MD5: " + officialMd5Upper);

@@ -530,11 +530,42 @@ public class SecurityLibrariesEnhanceHook {
     }
 
     /**
-     * 6. Neutralize UnusedCodeCheck (libunusedcodecheck.so & CheckCore):
-     * com.tencent.mobileqq.unusedcodecheck.CheckCore
-     * Verifies loaded classes against expected baseline to detect modified/injected classes.
+     * 6. Neutralize UnusedCodeCheck:
+     * Hook UnusedCodeCheckImpl.run and com.tencent.mobileqq.unusedcodecheck.c.a to safely no-op the background task.
+     * Crucial: Do NOT intercept InitClassInfo.f(Context) or force InitClassInfo.c() -> true!
+     * Swallowing f(Context) leaves field 'f' uninitialized (null); forcing c() -> true then tricked UnusedCodeCheckImpl
+     * into invoking c.a(), which dereferenced null and threw FATAL EXCEPTION NullPointerException in :openSdk and :MSF!
      */
     private static void hookUnusedCodeCheck(ClassLoader cl) {
+        // 1. Safely no-op the background check task in UnusedCodeCheckImpl
+        final String unusedCodeCheckImplCls = "com.tencent.mobileqq.unusedcodecheck.api.impl.UnusedCodeCheckImpl";
+        hookSafe(cl, unusedCodeCheckImplCls, new ClassHookCallback() {
+            @Override
+            public void onClassFound(Class<?> clazz) {
+                HookUtils.hookAllMethods(clazz, "run", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult(null);
+                    }
+                });
+            }
+        });
+
+        // 2. Double backstop: safely no-op c.a() to prevent any NullPointerException
+        final String cCls = "com.tencent.mobileqq.unusedcodecheck.c";
+        hookSafe(cl, cCls, new ClassHookCallback() {
+            @Override
+            public void onClassFound(Class<?> clazz) {
+                HookUtils.hookAllMethods(clazz, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult(null);
+                    }
+                });
+            }
+        });
+
+        // 3. Neutralize CheckCore results
         final String checkCoreCls = "com.tencent.mobileqq.unusedcodecheck.CheckCore";
         hookSafe(cl, checkCoreCls, new ClassHookCallback() {
             @Override
@@ -556,43 +587,6 @@ public class SecurityLibrariesEnhanceHook {
                         if (Boolean.FALSE.equals(param.getResult())) {
                             param.setResult(true);
                         }
-                    }
-                });
-            }
-        });
-
-        final String initClassInfoCls = "com.tencent.mobileqq.unusedcodecheck.InitClassInfo";
-        hookSafe(cl, initClassInfoCls, new ClassHookCallback() {
-            @Override
-            public void onClassFound(Class<?> clazz) {
-                // c() -> returns true (initialization valid)
-                HookUtils.hookAllMethods(clazz, "c", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (Boolean.FALSE.equals(param.getResult())) {
-                            param.setResult(true);
-                        }
-                    }
-                });
-
-                // e() -> returns 0 (error code clean)
-                HookUtils.hookAllMethods(clazz, "e", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.getResult() instanceof Integer && ((Integer) param.getResult()) != 0) {
-                            param.setResult(0);
-                        }
-                    }
-                });
-
-                // f(Context) -> suppress full dex scan and MMKV integrity writes
-                HookUtils.hookAllMethods(clazz, "f", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        try {
-                            XposedHelpers.setIntField(param.thisObject, "g", 0);
-                        } catch (Throwable ignored) {}
-                        param.setResult(null);
                     }
                 });
             }

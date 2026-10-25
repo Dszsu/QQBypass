@@ -584,28 +584,33 @@ public class ReportAuditManager {
     public static boolean isErrorLevel(String channel, String eventOrCmd, String extraDetail, Map<?, ?> params) {
         if (eventOrCmd != null) {
             String lower = eventOrCmd.toLowerCase(Locale.US);
-            if (lower.contains("error") || lower.contains("fail") || lower.contains("exception")
-                    || lower.contains("crash") || lower.contains("msf_decode_packet_fail")
-                    || lower.contains("kick") || lower.contains("offline") || lower.contains("ban")) {
+            if (lower.contains("crash") || lower.contains("fatal") || lower.contains("msf_decode_packet_fail")
+                    || lower.contains("reqmsfoffline") || lower.contains("forceoffline")
+                    || lower.contains("onkicked")) {
                 return true;
             }
         }
         if (extraDetail != null) {
             String lower = extraDetail.toLowerCase(Locale.US);
-            if (lower.contains("error") || lower.contains("fail") || lower.contains("exception")
-                    || lower.contains("failcode") || lower.contains("err=") || lower.contains("success=false")
-                    || lower.contains("ssoret") || lower.contains("trpcretcode")) {
+            if (lower.contains("success=false") || lower.contains("error:") || lower.contains("exception:")
+                    || lower.contains("crash") || lower.contains("fatal")) {
                 return true;
             }
         }
         if (params != null) {
-            for (Map.Entry<?, ?> entry : params.entrySet()) {
-                String k = entry.getKey() != null ? entry.getKey().toString().toLowerCase(Locale.US) : "";
-                String v = entry.getValue() != null ? entry.getValue().toString().toLowerCase(Locale.US) : "";
-                if (k.contains("error") || k.contains("fail") || k.contains("failcode")
-                        || v.contains("error") || v.contains("fail") || v.contains("exception")) {
-                    return true;
-                }
+            Object successVal = params.get("success");
+            if (Boolean.FALSE.equals(successVal) || "false".equalsIgnoreCase(String.valueOf(successVal))) {
+                return true;
+            }
+            Object failCode = params.get("failcode");
+            if (failCode == null) failCode = params.get("failCode");
+            if (failCode == null) failCode = params.get("resultCode");
+            if (failCode instanceof Number) {
+                long code = ((Number) failCode).longValue();
+                if (code != 0 && code != 1000) return true;
+            } else if (failCode instanceof String) {
+                String s = (String) failCode;
+                if (!s.isEmpty() && !"0".equals(s) && !"1000".equals(s)) return true;
             }
         }
         return false;
@@ -656,10 +661,8 @@ public class ReportAuditManager {
 
             if (isError) {
                 Log.e(TAG, "[ERROR_AUDIT] " + fullLog);
-                XposedBridge.log("[ErrorAudit] " + fullLog);
             } else if (isSecurity) {
                 Log.w(TAG, "[ENV_AUDIT] " + fullLog);
-                XposedBridge.log("[EnvAudit] " + fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordReport: " + t.getMessage());
@@ -724,10 +727,8 @@ public class ReportAuditManager {
             sLogQueue.offer(new AuditEntry(fullLog, true, isError));
             if (isError) {
                 Log.e(TAG, "[ERROR_AUDIT] " + fullLog);
-                XposedBridge.log("[ErrorAudit] " + fullLog);
             } else {
                 Log.w(TAG, "[ENV_AUDIT] " + fullLog);
-                XposedBridge.log("[EnvAudit] " + fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordProtoBufSecurity: " + t.getMessage());
@@ -994,10 +995,8 @@ public class ReportAuditManager {
             sLogQueue.offer(new AuditEntry(fullLog, true, isError));
             if (isError) {
                 Log.e(TAG, fullLog);
-                XposedBridge.log("[ERROR] " + fullLog);
             } else {
                 Log.w(TAG, fullLog);
-                XposedBridge.log(fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordOutboundRiskPayload: " + t.getMessage());
@@ -1083,10 +1082,8 @@ public class ReportAuditManager {
             sLogQueue.offer(new AuditEntry(fullLog, true, isError));
             if (isError) {
                 Log.e(TAG, fullLog);
-                XposedBridge.log("[ERROR] " + fullLog);
             } else {
                 Log.w(TAG, fullLog);
-                XposedBridge.log(fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordInboundResponse: " + t.getMessage());
@@ -1138,7 +1135,6 @@ public class ReportAuditManager {
             String fullLog = sb.toString();
             sLogQueue.offer(new AuditEntry(fullLog, true, false));
             Log.w(TAG, fullLog);
-            XposedBridge.log(fullLog);
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordPlaintextSecurityDispatch: " + t.getMessage());
         }
@@ -1167,7 +1163,6 @@ public class ReportAuditManager {
             sLogQueue.offer(new AuditEntry(fullLog, true, isError));
             if (isError) {
                 Log.e(TAG, fullLog);
-                XposedBridge.log("[FEKitLog] " + fullLog);
             }
         } catch (Throwable ignored) {}
     }
@@ -1417,10 +1412,8 @@ public class ReportAuditManager {
             sLogQueue.offer(new AuditEntry(fullLog, true, isError));
             if (isError) {
                 Log.e(TAG, fullLog);
-                XposedBridge.log("[ERROR] " + fullLog);
             } else {
                 Log.w(TAG, fullLog);
-                XposedBridge.log(fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordOutboundRiskMap: " + t.getMessage());
@@ -1457,7 +1450,6 @@ public class ReportAuditManager {
             String fullLog = sb.toString();
             sLogQueue.offer(new AuditEntry(fullLog, true, false));
             Log.i(TAG, fullLog);
-            XposedBridge.log(fullLog);
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordSanitizationEvent: " + t.getMessage(), t);
         }
@@ -1611,7 +1603,6 @@ public class ReportAuditManager {
             sLogQueue.offer(new AuditEntry(fullLog, true, true));
         }
         Log.e(TAG, fullLog);
-        XposedBridge.log("[ReportAudit] [ERROR] " + fullLog);
 
         return sensitive;
     }
