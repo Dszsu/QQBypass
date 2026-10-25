@@ -2101,7 +2101,7 @@ public class QQ950PatchHook {
                                 io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
                                     "O3Report", "est_token", String.valueOf(p.args[1]).getBytes(java.nio.charset.StandardCharsets.UTF_8), "Authentic estimation token", 4);
                             }
-                        } else {
+                        } else if (arg0.matches("^[a-fA-F0-9]{32}$")) {
                             final IVersionProfile profile = HostVersionManager.getCurrentProfile();
                             p.args[0] = profile.getOfficialSignatureHashUpper();
                             XposedEntry.log("[O3Patch] Normalized O3Report.d (sign_report official MD5: " + p.args[0] + ")");
@@ -2119,13 +2119,16 @@ public class QQ950PatchHook {
                 protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                     if (p.args != null && p.args.length >= 2 && p.args[1] instanceof java.util.List) {
                         java.util.List<Object> list = (java.util.List<Object>) p.args[1];
-                        for (int i = 0; i < list.size(); i++) {
-                            list.set(i, "0");
+                        if (!list.isEmpty()) {
+                            Object first = list.get(0);
+                            if (first != null && !"0".equals(first.toString())) {
+                                list.set(0, "0");
+                            }
                         }
                         io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
-                            "O3Report", "env_detect(00e00075618)", list.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), "Normalized env_detect", 4);
+                            "O3Report", "env_detect(00e00075618)", list.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), "Normalized env_detect fakeReason=0", 4);
                     }
-                    XposedEntry.log("[O3Patch] Normalized O3Report.b (env_detect clean values)");
+                    XposedEntry.log("[O3Patch] Normalized O3Report.b (fakeReason=0, preserved authentic coordinates)");
                 }
             });
 
@@ -2253,17 +2256,6 @@ public class QQ950PatchHook {
                             }
                             p.setResult(null);
                             XposedEntry.log("[O3Patch] Fulfilled GetSocialLockStatus with safe is_locked=false");
-                            return;
-                        }
-                        if (params.contains("display_report")) {
-                            try {
-                                org.json.JSONObject jobj = new org.json.JSONObject(params);
-                                org.json.JSONObject inner = new org.json.JSONObject();
-                                inner.put("data", "0,0,0,0");
-                                jobj.put("data", inner);
-                                p.args[1] = jobj.toString();
-                            } catch (Throwable ignored) {}
-                            XposedEntry.log("[O3Patch] Normalized display_report payload (0,0,0,0) and allowed delivery");
                             return;
                         }
                         if (params.contains("FullSocialLockPunish") || params.contains("socialError")) {
@@ -3654,12 +3646,11 @@ public class QQ950PatchHook {
                     // Check str7 (eventCodeExt) at index 8
                     String eventCodeExt = p.args[8] != null ? p.args[8].toString() : null;
 
-                    if (!eventSuccess || (eventCode != null && eventCode.contains("FAIL")) ||
-                        "-8".equals(eventCodeExt) || "LOAD_RESULT_PATCH_LOADER_FAIL".equals(eventCode)) {
+                    if ("LOAD_RESULT_PATCH_LOADER_FAIL".equals(eventCode) || "-8".equals(eventCodeExt)) {
                         p.args[6] = true;
                         p.args[7] = "LOAD_RESULT_SUCCESS";
                         p.args[8] = "0";
-                        XposedEntry.log("[RFixPatch] Normalized RFix failure telemetry report to SUCCESS");
+                        XposedEntry.log("[RFixPatch] Normalized RFix patch loader failure telemetry to SUCCESS");
                     }
                 } catch (Throwable t) {
                     XposedEntry.log("[RFixPatch] Error filtering RFix reporter: " + t.getMessage());
@@ -3669,43 +3660,43 @@ public class QQ950PatchHook {
         hookSafe("com.tencent.rfix.lib.reporter.e", "d", lpparam, normalizeFailureReportHook);
         hookSafe("com.tencent.rfix.lib.reporter.e", "e", lpparam, normalizeFailureReportHook);
 
-        // 2. RFix ATTASwitch: Keep RFix ATTA/WeData network reporting pipeline OPEN (Rule 4.2)
-        hookSafe("com.tencent.rfix.lib.atta.RFixATTASwitch", "a", lpparam, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(true);
-            }
-        });
-
-        // 3. RFix ATTA Database & Upload Helper (com.tencent.rfix.lib.atta.e): normalize records to SUCCESS
+        // 2. RFix ATTA Database & Upload Helper (com.tencent.rfix.lib.atta.e): normalize patch loader records to SUCCESS
         hookSafe("com.tencent.rfix.lib.atta.e", "d", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                 if (p.args != null && p.args.length > 0 && p.args[0] instanceof java.util.Map) {
                     java.util.Map map = (java.util.Map) p.args[0];
-                    Object eventCode = map.get("event_code");
-                    Object eventSuccess = map.get("event_success");
-                    if ("0".equals(eventSuccess) || (eventCode != null && eventCode.toString().contains("FAIL"))) {
-                        map.put("event_success", "1");
-                        map.put("event_code", "LOAD_RESULT_SUCCESS");
-                        XposedEntry.log("[RFixPatch] Normalized ATTA telemetry record to SUCCESS");
+                    Object atId = map.get("attaid");
+                    if ("0ac00056535".equals(atId)) {
+                        Object eventCode = map.get("event_code");
+                        Object eventCodeExt = map.get("event_code_ext");
+                        if ("LOAD_RESULT_PATCH_LOADER_FAIL".equals(eventCode) || "-8".equals(eventCodeExt)) {
+                            map.put("event_success", "1");
+                            map.put("event_code", "LOAD_RESULT_SUCCESS");
+                            map.put("event_code_ext", "0");
+                            XposedEntry.log("[RFixPatch] Normalized ATTA patch loader failure record to SUCCESS");
+                        }
                     }
                 }
             }
         });
 
-        // 4. WeData Reporter (com.tencent.rfix.lib.wedata.base.d): normalize records to SUCCESS
+        // 3. WeData Reporter (com.tencent.rfix.lib.wedata.base.d): normalize patch loader records to SUCCESS
         hookSafe("com.tencent.rfix.lib.wedata.base.d", "c", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
                 if (p.args != null && p.args.length > 0 && p.args[0] instanceof java.util.Map) {
                     java.util.Map map = (java.util.Map) p.args[0];
-                    Object eventCode = map.get("event_code");
-                    Object eventSuccess = map.get("event_success");
-                    if ("0".equals(eventSuccess) || (eventCode != null && eventCode.toString().contains("FAIL"))) {
-                        map.put("event_success", "1");
-                        map.put("event_code", "LOAD_RESULT_SUCCESS");
-                        XposedEntry.log("[RFixPatch] Normalized WeData telemetry record to SUCCESS");
+                    Object atId = map.get("attaid");
+                    if ("0ac00056535".equals(atId)) {
+                        Object eventCode = map.get("event_code");
+                        Object eventCodeExt = map.get("event_code_ext");
+                        if ("LOAD_RESULT_PATCH_LOADER_FAIL".equals(eventCode) || "-8".equals(eventCodeExt)) {
+                            map.put("event_success", "1");
+                            map.put("event_code", "LOAD_RESULT_SUCCESS");
+                            map.put("event_code_ext", "0");
+                            XposedEntry.log("[RFixPatch] Normalized WeData patch loader failure record to SUCCESS");
+                        }
                     }
                 }
             }
@@ -5085,8 +5076,14 @@ public class QQ950PatchHook {
                             if (sdt == null || sdt.isEmpty() || "nil".equals(sdt)) {
                                 props.setProperty("vs_sdtfrom", "1");
                             }
-                            props.setProperty("guard_so_version", "V1.0.002");
-                            props.setProperty("vs_so_version", "V3.0.000");
+                            String guardVer = props.getProperty("guard_so_version");
+                            if (guardVer == null || guardVer.isEmpty() || "nil".equals(guardVer)) {
+                                props.setProperty("guard_so_version", "V1.0.002");
+                            }
+                            String vsVer = props.getProperty("vs_so_version");
+                            if (vsVer == null || vsVer.isEmpty() || "nil".equals(vsVer)) {
+                                props.setProperty("vs_so_version", "V3.0.000");
+                            }
                             String pkg = props.getProperty("vs_pkgmame");
                             if (pkg == null || pkg.isEmpty() || "nil".equals(pkg)) {
                                 props.setProperty("vs_pkgmame", "com.tencent.mobileqq");
@@ -5385,6 +5382,11 @@ public class QQ950PatchHook {
                 } else {
                     break;
                 }
+            }
+
+            // Strictly only sanitize FEKit A2/ECDH failure reports (attaId = "02800075562")
+            if (!"02800075562".equals(attaId) || items.isEmpty()) {
+                return raw;
             }
 
             boolean modified = false;

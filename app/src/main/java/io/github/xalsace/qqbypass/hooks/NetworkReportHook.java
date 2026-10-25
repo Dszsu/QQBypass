@@ -34,6 +34,7 @@ public class NetworkReportHook {
     // Strict Whitelist: never block or intercept critical protocol, session, and key-exchange commands
     private static final String[] SAFE_WHITELIST = {
         "trpc.msg.",
+        "trpc.qq_new_tech.status_svc.",
         "trpc.o3.ecdh_access.",
         "trpc.o3.full_social_lock_punish.",
         "trpc.o3.mobile_security.",
@@ -51,6 +52,8 @@ public class NetworkReportHook {
     public static boolean isCoreProtocolCommand(String command) {
         if (command == null || command.isEmpty()) return false;
         return command.startsWith("trpc.msg.") ||
+               command.startsWith("trpc.qq_new_tech.status_svc.") ||
+               command.startsWith("trpc.o3.ecdh_access.") ||
                command.startsWith("MessageSvc.") ||
                command.startsWith("RegPrxySvc.") ||
                command.startsWith("Heartbeat.") ||
@@ -205,7 +208,7 @@ public class NetworkReportHook {
                     }
 
                     // Transparently sanitize trpc.o3.report.Report.SsoReport failure telemetry (Rule 4.2 compliant)
-                    if (command != null && (command.equals("trpc.o3.report.Report.SsoReport") || command.contains("SsoReport"))) {
+                    if ("trpc.o3.report.Report.SsoReport".equals(command)) {
                         byte[] sanitized = io.github.xalsace.qqbypass.hooks.QQ950PatchHook.sanitizeSsoReportPayload(data);
                         if (sanitized != data) {
                             param.args[1] = sanitized;
@@ -267,7 +270,7 @@ public class NetworkReportHook {
                     }
 
                     // Transparently sanitize trpc.o3.report.Report.SsoReport failure telemetry (Rule 4.2 compliant)
-                    if (command != null && (command.equals("trpc.o3.report.Report.SsoReport") || command.contains("SsoReport"))) {
+                    if ("trpc.o3.report.Report.SsoReport".equals(command)) {
                         byte[] sanitized = io.github.xalsace.qqbypass.hooks.QQ950PatchHook.sanitizeSsoReportPayload(data);
                         if (sanitized != data) {
                             param.args[1] = sanitized;
@@ -461,7 +464,7 @@ public class NetworkReportHook {
                         }
 
                         // Transparently sanitize trpc.o3.report.Report.SsoReport if it carries failure telemetry (Rule 4.2 compliant)
-                        if (command != null && (command.equals("trpc.o3.report.Report.SsoReport") || command.contains("SsoReport"))) {
+                        if ("trpc.o3.report.Report.SsoReport".equals(command)) {
                             byte[] sanitized = io.github.xalsace.qqbypass.hooks.QQ950PatchHook.sanitizeSsoReportPayload(wup);
                             if (sanitized != wup) {
                                 try {
