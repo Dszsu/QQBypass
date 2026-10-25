@@ -60,14 +60,6 @@ public class ReportAuditManager {
     private static final File EXTERNAL_CACHE_DIR = new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/cache/qblogs");
     private static final File TERTIARY_DIR = new File("/storage/emulated/0/0_TM/qblogs");
 
-    // Legacy / internal directories to sweep and delete during cleanup
-    private static final File[] LEGACY_DIRS = new File[] {
-        new File("/data/user/0/com.tencent.mobileqq/cache/qblogs"),
-        new File("/data/user/0/com.tencent.mobileqq/files"),
-        new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files"),
-        new File("/storage/emulated/0/0_TM")
-    };
-
     public static final String PREFIX_ALL = "report_audit_";
     public static final String PREFIX_SEC = "security_environment_audit_";
 
@@ -280,36 +272,9 @@ public class ReportAuditManager {
                 cleanBinaryPacketDirectory(new File(dir, "outbound_packets"), 50);
                 cleanBinaryPacketDirectory(new File(dir, "inbound_packets"), 50);
             }
-
-            // 5. Sweep and purge all residual audit logs from legacy non-cache directories and internal storage
-            for (File legacyDir : LEGACY_DIRS) {
-                if (legacyDir == null || !legacyDir.exists()) continue;
-                if (legacyDir.getName().equals("qblogs") && legacyDir.getAbsolutePath().startsWith("/data/user/0")) {
-                    deleteRecursively(legacyDir);
-                } else if (legacyDir.isDirectory()) {
-                    cleanDirectoryByPrefix(legacyDir, PREFIX_ALL, 0);
-                    cleanDirectoryByPrefix(legacyDir, PREFIX_SEC, 0);
-                    cleanLegacyFiles(legacyDir);
-                }
-            }
         } catch (Throwable t) {
             Log.e(TAG, "Error in cleanExpiredLogsInternal: " + t.getMessage());
         }
-    }
-
-    private static void deleteRecursively(File fileOrDir) {
-        if (fileOrDir == null || !fileOrDir.exists()) return;
-        if (fileOrDir.isDirectory()) {
-            File[] children = fileOrDir.listFiles();
-            if (children != null) {
-                for (File child : children) {
-                    deleteRecursively(child);
-                }
-            }
-        }
-        try {
-            fileOrDir.delete();
-        } catch (Throwable ignored) {}
     }
 
     private static void cleanDirectoryByPrefix(File dir, final String prefix, int maxKeep) {
