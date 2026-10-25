@@ -48,6 +48,8 @@ import java.util.Locale;
 public class QQ950PatchHook {
 
     private static final long sProcessStartTime = android.os.SystemClock.elapsedRealtime();
+    private static volatile long sLastNtTicketRefreshTime = 0L;
+    private static final java.util.concurrent.atomic.AtomicBoolean sKeepAliveWorkerStarted = new java.util.concurrent.atomic.AtomicBoolean(false);
     private static volatile String sLastKnownDeviceToken = null;
     private static volatile String sLastKnownOpenIdTicket = null;
 
@@ -150,6 +152,9 @@ public class QQ950PatchHook {
 
         ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
 
+        // Tier 11.1: Proactive NT WTLogin Session KeepAlive (20m background renewal)
+        hookNTLoginTicketKeepAlive(cl);
+
         // Tier 12: QQ 9.3.75 SafeCenter & Push Repack Circuit Defenses
         hookQQ9375SafeCenterAndRepack(lpparam, cl);
 
@@ -200,26 +205,161 @@ public class QQ950PatchHook {
     }
 
     /**
-     * Defend checkWTSig in com.tencent.mobileqq.msf.core.auth.k:
-     * When checkWTSig runs (k.h(ToServiceMsg)), in NT login mode it may trigger
-     * k.a(ToServiceMsg, boolean) which dispatches CODE_NO_LOGIN (2001) kick.
-     * We surgically hook k.a(ToServiceMsg, boolean) to prevent CODE_NO_LOGIN,
-     * without swallowing k.h itself, ensuring message pipelines remain active.
+     * Defend checkWTSig & token destruction in com.tencent.mobileqq.msf.core.auth.k:
+     * 1. When checkWTSig runs (k.h(ToServiceMsg)), in NT login mode it may trigger
+     *    k.a(ToServiceMsg, boolean) which dispatches CODE_NO_LOGIN (2001) kick.
+     * 2. When TokenChecker runs changeTokenAfterLogin, in NT mode it triggers
+     *    k.a(ToServiceMsg, String) with "changeTokenAfterLogin", which invokes
+     *    AccountCenter.p(uin) wiping all session keys and setting CODE_NO_LOGIN.
+     * We surgically neutralize both destructive paths to keep NT session keys intact.
+     * 3. Normalize WloginSigInfo.iSExpireA2 to avoid false wtSigLost triggers.
      */
     private static void hookMsfCheckWTSig(XC_LoadPackage.LoadPackageParam lpparam) {
         final String cls = "com.tencent.mobileqq.msf.core.auth.k";
         hookSafe(cls, "a", lpparam, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.args != null && p.args.length == 2 && p.args[0] != null && p.args[1] instanceof Boolean) {
-                    Object req = p.args[0];
-                    if ("com.tencent.qphone.base.remote.ToServiceMsg".equals(req.getClass().getName())) {
-                        p.setResult(null);
-                        XposedEntry.log("[MSFPatch] Defended against checkWTSig CODE_NO_LOGIN kick in k.a");
+                if (p.args != null && p.args.length == 2 && p.args[0] != null) {
+                    if (p.args[1] instanceof Boolean) {
+                        Object req = p.args[0];
+                        if ("com.tencent.qphone.base.remote.ToServiceMsg".equals(req.getClass().getName())) {
+                            p.setResult(null);
+                            XposedEntry.log("[MSFPatch] Defended against checkWTSig CODE_NO_LOGIN kick in k.a(ToServiceMsg, boolean)");
+                        }
+                    } else if (p.args[1] instanceof String) {
+                        String action = (String) p.args[1];
+                        if ("changeTokenAfterLogin".equals(action)) {
+                            p.setResult(null);
+                            XposedEntry.log("[MSFPatch] Defended against destructive createNeedLoginRespByWt on changeTokenAfterLogin in k.a(ToServiceMsg, String)");
+                        }
                     }
                 }
             }
         });
+
+        // WloginSigInfo.iSExpireA2 normalization: prevent premature ticket expiration flagging
+        hookSafe("oicq.wlogin_sdk.sharemem.WloginSigInfo", "iSExpireA2", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                Object thisObj = p.thisObject;
+                if (thisObj != null) {
+                    try {
+                        byte[] tgt = (byte[]) XposedHelpers.getObjectField(thisObj, "_TGT");
+                        if (tgt != null && tgt.length > 0) {
+                            p.setResult(Boolean.FALSE);
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            }
+        });
+    }
+
+    private static boolean isMainProcess() {
+        if (HookConfig.loadPackageParam != null && HookConfig.loadPackageParam.packageName != null) {
+            return HookConfig.loadPackageParam.packageName.equals(HookConfig.loadPackageParam.processName);
+        }
+        return false;
+    }
+
+    /**
+     * Proactive NT WTLogin Session KeepAlive:
+     * Tencent WTLogin tickets (D2 session key) have a server-side TTL of ~3600 seconds (1 hour).
+     * In NT QQ architecture, ticket refresh is primarily dispatched from the main process
+     * (com.tencent.mobileqq.login.ntlogin.ao -> ILoginService.refreshLoginTicketsByUin -> injectSigToMsf).
+     * During idle background periods, ao$a only listens to onApplicationForeground, so tickets
+     * can expire without proactive renewal, triggering StatSvc.ReqMSFOffline (CODE_NO_LOGIN / w21).
+     * This keepalive ensures tickets are proactively renewed every 20-25 minutes in the background,
+     * maintaining continuous valid session keys without ever intercepting kick packets.
+     */
+    private static void hookNTLoginTicketKeepAlive(final ClassLoader cl) {
+        if (!isMainProcess() || cl == null) {
+            return;
+        }
+
+        // 1. Hook ao$a.onApplicationForeground to update last refresh timestamp
+        hookSafe("com.tencent.mobileqq.login.ntlogin.ao$a", "onApplicationForeground", cl, new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                sLastNtTicketRefreshTime = android.os.SystemClock.elapsedRealtime();
+                XposedEntry.log("[NTLoginKeepAlive] onApplicationForeground: reset refresh timer");
+            }
+        });
+
+        // 2. Hook ao$a.onBackgroundTimeTick and onLiteTimeTick to trigger refresh during GuardManager background cycles
+        XC_MethodHook tickHook = new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                long now = android.os.SystemClock.elapsedRealtime();
+                if (sLastNtTicketRefreshTime > 0 && (now - sLastNtTicketRefreshTime) >= 20 * 60 * 1000L) {
+                    sLastNtTicketRefreshTime = now;
+                    triggerNtTicketRefresh(cl, "GuardManagerTick");
+                }
+            }
+        };
+        hookSafe("com.tencent.mobileqq.login.ntlogin.ao$a", "onBackgroundTimeTick", cl, tickHook);
+        hookSafe("com.tencent.mobileqq.login.ntlogin.ao$a", "onLiteTimeTick", cl, tickHook);
+
+        // 3. Start background periodic daemon thread (checks every 5 minutes, triggers if >= 20 mins)
+        if (sKeepAliveWorkerStarted.compareAndSet(false, true)) {
+            Thread worker = new Thread(() -> {
+                try {
+                    Thread.sleep(60 * 1000L); // 1 minute initial grace period after app launch
+                } catch (InterruptedException ignored) {}
+
+                sLastNtTicketRefreshTime = android.os.SystemClock.elapsedRealtime();
+                XposedEntry.log("[NTLoginKeepAlive] Background keepalive worker initialized (20m cadence)");
+
+                while (true) {
+                    try {
+                        Thread.sleep(5 * 60 * 1000L); // 5 minutes check interval
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+
+                    try {
+                        long now = android.os.SystemClock.elapsedRealtime();
+                        if (sLastNtTicketRefreshTime > 0 && (now - sLastNtTicketRefreshTime) >= 20 * 60 * 1000L) {
+                            sLastNtTicketRefreshTime = now;
+                            triggerNtTicketRefresh(cl, "PeriodicDaemon");
+                        }
+                    } catch (Throwable t) {
+                        XposedEntry.logError("[NTLoginKeepAlive] Worker cycle error: " + t.getMessage(), t);
+                    }
+                }
+            }, "QB-NTLoginKeepAlive");
+            worker.setDaemon(true);
+            worker.start();
+        }
+    }
+
+    private static void triggerNtTicketRefresh(ClassLoader cl, String reason) {
+        try {
+            Class<?> mobileQQCls = de.robv.android.xposed.XposedHelpers.findClassIfExists("mqq.app.MobileQQ", cl);
+            if (mobileQQCls != null) {
+                Object sMobileQQ = de.robv.android.xposed.XposedHelpers.getStaticObjectField(mobileQQCls, "sMobileQQ");
+                if (sMobileQQ != null) {
+                    Object appRuntime = de.robv.android.xposed.XposedHelpers.callMethod(sMobileQQ, "peekAppRuntime");
+                    if (appRuntime != null && Boolean.TRUE.equals(de.robv.android.xposed.XposedHelpers.callMethod(appRuntime, "isLogin"))) {
+                        Class<?> aoClass = de.robv.android.xposed.XposedHelpers.findClassIfExists("com.tencent.mobileqq.login.ntlogin.ao", cl);
+                        if (aoClass == null && sMobileQQ instanceof android.content.Context) {
+                            ClassLoader appCl = ((android.content.Context) sMobileQQ).getClassLoader();
+                            if (appCl != null) {
+                                aoClass = de.robv.android.xposed.XposedHelpers.findClassIfExists("com.tencent.mobileqq.login.ntlogin.ao", appCl);
+                            }
+                        }
+                        if (aoClass != null) {
+                            Object aoInst = de.robv.android.xposed.XposedHelpers.getStaticObjectField(aoClass, "a");
+                            if (aoInst != null) {
+                                de.robv.android.xposed.XposedHelpers.callMethod(aoInst, "g", true);
+                                XposedEntry.log("[NTLoginKeepAlive] Proactively refreshed NT WTLogin ticket (source=" + reason + ", forceRefresh=true)");
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            XposedEntry.logError("[NTLoginKeepAlive] Failed to trigger NT ticket refresh (" + reason + "): " + t.getMessage(), t);
+        }
     }
 
     /**
@@ -1174,6 +1314,7 @@ public class QQ950PatchHook {
             hookTuringBerryAndThisWithClassLoader(cl);
             hookTuringOutboundRiskMapWithClassLoader(cl);
             hookCKeyAndTVKSecurity(cl);
+            hookNTLoginTicketKeepAlive(cl);
         } catch (Throwable t) {
             XposedEntry.logError("[LateStage] hookLateStage error: " + t.getMessage(), t);
         }
