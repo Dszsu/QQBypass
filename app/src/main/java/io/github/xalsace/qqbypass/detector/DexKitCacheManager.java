@@ -17,6 +17,7 @@ import java.util.Map;
 
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import io.github.xalsace.qqbypass.config.CompileHookConfig;
 import io.github.xalsace.qqbypass.config.HookConfig;
 
 /**
@@ -66,7 +67,7 @@ public class DexKitCacheManager {
         try {
             File cacheFile = getCacheFile(lpparam);
             if (cacheFile == null || !cacheFile.exists() || cacheFile.length() == 0) {
-                XposedBridge.log("[" + TAG + "] No disk cache found at: " + (cacheFile != null ? cacheFile.getAbsolutePath() : "null"));
+                logInfo("[" + TAG + "] No disk cache found at: " + (cacheFile != null ? cacheFile.getAbsolutePath() : "null"));
                 return null;
             }
 
@@ -92,7 +93,7 @@ public class DexKitCacheManager {
             // 1. Validate schema version (compatible across module revisions)
             int schemaVersion = root.optInt("schemaVersion", 0);
             if (schemaVersion != HookConfig.CACHE_SCHEMA_VERSION) {
-                XposedBridge.log("[" + TAG + "] Cache schema version mismatch: cached=" + schemaVersion + ", current=" + HookConfig.CACHE_SCHEMA_VERSION);
+                logInfo("[" + TAG + "] Cache schema version mismatch: cached=" + schemaVersion + ", current=" + HookConfig.CACHE_SCHEMA_VERSION);
                 return null;
             }
 
@@ -101,19 +102,19 @@ public class DexKitCacheManager {
             long cachedApkLength = root.optLong("apkLength", 0L);
 
             if (cachedApkModified != 0 && currentApkModified != 0 && (cachedApkModified != currentApkModified || cachedApkLength != currentApkLength)) {
-                XposedBridge.log("[" + TAG + "] Cache invalidated: Target APK updated (time: " + cachedApkModified + " -> " + currentApkModified + ", size: " + cachedApkLength + " -> " + currentApkLength + ")");
+                logInfo("[" + TAG + "] Cache invalidated: Target APK updated (time: " + cachedApkModified + " -> " + currentApkModified + ", size: " + cachedApkLength + " -> " + currentApkLength + ")");
                 return null;
             }
 
             // 3. Parse methods map
             JSONObject methodsObj = root.optJSONObject("methods");
             if (methodsObj == null) {
-                XposedBridge.log("[" + TAG + "] Cache invalid: missing 'methods' object");
+                logInfo("[" + TAG + "] Cache invalid: missing 'methods' object");
                 return null;
             }
 
             Map<String, List<DexMethodData>> resultMap = parseMethodsMap(methodsObj);
-            XposedBridge.log("[" + TAG + "] Disk Cache HIT! Loaded " + resultMap.size() + " categories from disk cache: " + cacheFile.getAbsolutePath());
+            logInfo("[" + TAG + "] Disk Cache HIT! Loaded " + resultMap.size() + " categories from disk cache: " + cacheFile.getAbsolutePath());
             return resultMap;
 
         } catch (Throwable t) {
@@ -186,7 +187,7 @@ public class DexKitCacheManager {
 
             if (tempFile.renameTo(cacheFile)) {
                 cacheFile.setReadable(true, false);
-                XposedBridge.log("[" + TAG + "] Saved " + totalCount + " methods to disk cache successfully: " + cacheFile.getAbsolutePath());
+                logInfo("[" + TAG + "] Saved " + totalCount + " methods to disk cache successfully: " + cacheFile.getAbsolutePath());
                 return true;
             } else {
                 // If rename fails across filesystems or Android security profiles, fallback to direct write
@@ -196,12 +197,18 @@ public class DexKitCacheManager {
                 }
                 tempFile.delete();
                 cacheFile.setReadable(true, false);
-                XposedBridge.log("[" + TAG + "] Saved " + totalCount + " methods to disk cache (direct write): " + cacheFile.getAbsolutePath());
+                logInfo("[" + TAG + "] Saved " + totalCount + " methods to disk cache (direct write): " + cacheFile.getAbsolutePath());
                 return true;
             }
         } catch (Throwable t) {
             XposedBridge.log("[" + TAG + "] Failed to save disk cache: " + t.getMessage());
             return false;
+        }
+    }
+
+    private static void logInfo(String message) {
+        if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+            XposedBridge.log(message);
         }
     }
 }

@@ -3,12 +3,13 @@ package io.github.xalsace.qqbypass.config;
 /**
  * 编译期 Hook 条件编译配置 (Compile-Time Conditional Hook Configuration)
  *
- * 保留 5 个受管理的编译期条件编译开关：
+ * 保留 6 个受管理的编译期条件编译开关：
  * 1. 拦截下线 (ENABLE_KICK_INTERCEPT，默认关闭且严禁开启)
  * 2. 设备修改 (ENABLE_DEVICE_SPOOF，附带设备参数)
  * 3. 模拟器伪装 (ENABLE_EMULATOR_SPOOF)
  * 4. 记录 QQ 上报 (ENABLE_RECORD_QQ_REPORT，默认开启)
  * 5. QAuxiliary 文件处理报错兼容 (ENABLE_QAUXILIARY_FILE_COMPAT)
+ * 6. 完整输出到 LSPosed 日志 (ENABLE_VERBOSE_LSPOSED_LOG，默认关闭)
  *
  * 采用 public static final 编译期常量实现条件编译（JLS §14.21）：
  * 设置为 false 时，Javac 与 R8 编译器在构建时直接将死代码完全裁剪剔除，
@@ -95,4 +96,17 @@ public final class CompileHookConfig {
      * 设置为 true 时，挂载该兼容补丁并安全处理 BaseApk 异常与 APK 文件名规范化。
      */
     public static final boolean ENABLE_QAUXILIARY_FILE_COMPAT = true;
+
+
+    // =========================================================================
+    // 6. 完整输出到 LSPosed 日志 (Verbose LSPosed Logging)
+    // =========================================================================
+    /**
+     * 是否完整输出所有遥测审计日志到 LSPosed 系统日志。
+     * 【默认关闭 (false)】：
+     * 为关时，LSPosed 日志仅输出 Hook 安装汇总情况和真实严重报错，常规遥测、信令与环境审计日志
+     * 仅异步写入磁盘外部存储缓存目录，避免高频 Binder 调用导致 LSPosed 缓冲区溢出；
+     * 为开时才完整将所有遥测审计日志输出到 LSPosed 日志。
+     */
+    public static final boolean ENABLE_VERBOSE_LSPOSED_LOG = false;
 }

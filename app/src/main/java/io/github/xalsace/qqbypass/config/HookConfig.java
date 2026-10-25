@@ -11,12 +11,12 @@ public class HookConfig {
     public static ClassLoader classLoader;
 
     // 模块版本信息与缓存版本
-    public static final int MODULE_VERSION_CODE = 123;
-    public static final String MODULE_VERSION_NAME = "1.0.123";
+    public static final int MODULE_VERSION_CODE = 124;
+    public static final String MODULE_VERSION_NAME = "1.0.124";
     public static final int CACHE_SCHEMA_VERSION = 3;
 
     // =========================================================================
-    // 5 个受管理的编译期条件编译开关 (委托至 CompileHookConfig)
+    // 6 个受管理的编译期条件编译开关 (委托至 CompileHookConfig)
     // =========================================================================
     /** 1. 拦截下线开关 (默认关闭且严禁开启) */
     public static final boolean ENABLE_KICK_INTERCEPT = CompileHookConfig.ENABLE_KICK_INTERCEPT;
@@ -33,6 +33,9 @@ public class HookConfig {
     /** 5. QAuxiliary 文件处理报错兼容开关 */
     public static final boolean ENABLE_QAUXILIARY_FILE_COMPAT = CompileHookConfig.ENABLE_QAUXILIARY_FILE_COMPAT;
 
+    /** 6. 完整输出到 LSPosed 日志开关 (默认关闭) */
+    public static final boolean ENABLE_VERBOSE_LSPOSED_LOG = CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG;
+
     /** 判断当前是否开启拦截下线 */
     public static boolean isKickInterceptEnabled() {
         return ENABLE_KICK_INTERCEPT;
@@ -46,6 +49,11 @@ public class HookConfig {
     /** 判断当前是否开启 QAuxiliary 文件处理报错兼容 */
     public static boolean isQAuxiliaryFileCompatEnabled() {
         return ENABLE_QAUXILIARY_FILE_COMPAT;
+    }
+
+    /** 判断当前是否开启完整输出到 LSPosed 日志 */
+    public static boolean isVerboseLsposedLogEnabled() {
+        return ENABLE_VERBOSE_LSPOSED_LOG;
     }
 
     // 核心固定开关（模块默认防御基础，始终激活）

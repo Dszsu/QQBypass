@@ -258,7 +258,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
     }
 
     public static void log(String message) {
-        if (!HookConfig.VERBOSE_LOGGING) return;
+        if (!HookConfig.VERBOSE_LOGGING && !CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) return;
         if (message == null) return;
         try {
             String lower = message.toLowerCase(java.util.Locale.US);
@@ -268,8 +268,7 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
             if (isErr) {
                 android.util.Log.e(TAG, message);
                 de.robv.android.xposed.XposedBridge.log("[" + TAG + "] [ERROR] " + message);
-            } else {
-                android.util.Log.i(TAG, message);
+            } else if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
                 de.robv.android.xposed.XposedBridge.log("[" + TAG + "] " + message);
             }
         } catch (Throwable ignored) {

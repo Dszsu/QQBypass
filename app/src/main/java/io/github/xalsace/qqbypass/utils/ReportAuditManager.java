@@ -36,14 +36,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * Responsibilities:
  * 1. Asynchronously captures and writes outgoing telemetry / report events to disk:
- *    - All traffic:
- *        * /data/user/0/com.tencent.mobileqq/cache/qblogs/report_audit_yyyyMMdd_HHmm.log
+ *    - Strictly written to external storage cache directory ONLY:
  *        * /storage/emulated/0/Android/data/com.tencent.mobileqq/cache/qblogs/report_audit_yyyyMMdd_HHmm.log
- *        * /storage/emulated/0/0_TM/qblogs/report_audit_yyyyMMdd_HHmm.log (when writable)
+ *        * /storage/emulated/0/0_TM/qblogs/report_audit_yyyyMMdd_HHmm.log (optional fallback)
  *    - Pure Security & Environment Telemetry (Filtered, Noise-Free):
- *        * /data/user/0/com.tencent.mobileqq/cache/qblogs/security_environment_audit_yyyyMMdd_HHmm.log
  *        * /storage/emulated/0/Android/data/com.tencent.mobileqq/cache/qblogs/security_environment_audit_yyyyMMdd_HHmm.log
- *        * /storage/emulated/0/0_TM/qblogs/security_environment_audit_yyyyMMdd_HHmm.log (when writable)
+ *        * /storage/emulated/0/0_TM/qblogs/security_environment_audit_yyyyMMdd_HHmm.log (optional fallback)
  * 2. Deep decoding of Kick / ForceOffline events:
  *    - Decodes RequestMSFForceOffline / RequestPushForceOffline WUP & JCE structures
  *    - Analyzes bSigKick, strTitle, strInfo, strTips, failCode, failMsg
@@ -57,13 +55,14 @@ public class ReportAuditManager {
     private static final String TAG = "QQReportAudit";
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB rolling limit
 
-    // Base directories for report audit logs: unified in cache/qblogs
-    private static final File PRIMARY_DIR = new File("/data/user/0/com.tencent.mobileqq/cache/qblogs");
-    private static final File SECONDARY_DIR = new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/cache/qblogs");
+    // Base directories for report audit logs: strictly external storage cache directory ONLY.
+    // NEVER write to internal storage (/data/user/0/com.tencent.mobileqq/cache/qblogs).
+    private static final File EXTERNAL_CACHE_DIR = new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/cache/qblogs");
     private static final File TERTIARY_DIR = new File("/storage/emulated/0/0_TM/qblogs");
 
-    // Legacy directories to sweep during cleanup
+    // Legacy / internal directories to sweep and delete during cleanup
     private static final File[] LEGACY_DIRS = new File[] {
+        new File("/data/user/0/com.tencent.mobileqq/cache/qblogs"),
         new File("/data/user/0/com.tencent.mobileqq/files"),
         new File("/storage/emulated/0/Android/data/com.tencent.mobileqq/files"),
         new File("/storage/emulated/0/0_TM")
@@ -200,15 +199,13 @@ public class ReportAuditManager {
         String allFileName = PREFIX_ALL + timeTag + ".log";
         String secFileName = PREFIX_SEC + timeTag + ".log";
 
-        // 1. Write to All-Events files (30-minute bucket)
-        writeToSingleFile(new File(PRIMARY_DIR, allFileName), entry.text);
-        writeToOptionalFile(new File(SECONDARY_DIR, allFileName), entry.text);
+        // 1. Write to All-Events files (30-minute bucket) strictly in external cache
+        writeToSingleFile(new File(EXTERNAL_CACHE_DIR, allFileName), entry.text);
         writeToOptionalFile(new File(TERTIARY_DIR, allFileName), entry.text);
 
         // 2. If it's a security/environment event, route to dedicated noise-free security log (30-minute bucket)
         if (entry.isSecurity) {
-            writeToSingleFile(new File(PRIMARY_DIR, secFileName), entry.text);
-            writeToOptionalFile(new File(SECONDARY_DIR, secFileName), entry.text);
+            writeToSingleFile(new File(EXTERNAL_CACHE_DIR, secFileName), entry.text);
             writeToOptionalFile(new File(TERTIARY_DIR, secFileName), entry.text);
         }
     }
@@ -263,8 +260,7 @@ public class ReportAuditManager {
     private static synchronized void cleanExpiredLogsInternal() {
         try {
             File[] searchDirs = new File[] {
-                PRIMARY_DIR,
-                SECONDARY_DIR,
+                EXTERNAL_CACHE_DIR,
                 TERTIARY_DIR
             };
 
@@ -285,16 +281,35 @@ public class ReportAuditManager {
                 cleanBinaryPacketDirectory(new File(dir, "inbound_packets"), 50);
             }
 
-            // 4. Sweep and purge all residual audit logs from legacy non-cache directories
+            // 5. Sweep and purge all residual audit logs from legacy non-cache directories and internal storage
             for (File legacyDir : LEGACY_DIRS) {
-                if (legacyDir == null || !legacyDir.exists() || !legacyDir.isDirectory()) continue;
-                cleanDirectoryByPrefix(legacyDir, PREFIX_ALL, 0);
-                cleanDirectoryByPrefix(legacyDir, PREFIX_SEC, 0);
-                cleanLegacyFiles(legacyDir);
+                if (legacyDir == null || !legacyDir.exists()) continue;
+                if (legacyDir.getName().equals("qblogs") && legacyDir.getAbsolutePath().startsWith("/data/user/0")) {
+                    deleteRecursively(legacyDir);
+                } else if (legacyDir.isDirectory()) {
+                    cleanDirectoryByPrefix(legacyDir, PREFIX_ALL, 0);
+                    cleanDirectoryByPrefix(legacyDir, PREFIX_SEC, 0);
+                    cleanLegacyFiles(legacyDir);
+                }
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in cleanExpiredLogsInternal: " + t.getMessage());
         }
+    }
+
+    private static void deleteRecursively(File fileOrDir) {
+        if (fileOrDir == null || !fileOrDir.exists()) return;
+        if (fileOrDir.isDirectory()) {
+            File[] children = fileOrDir.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursively(child);
+                }
+            }
+        }
+        try {
+            fileOrDir.delete();
+        } catch (Throwable ignored) {}
     }
 
     private static void cleanDirectoryByPrefix(File dir, final String prefix, int maxKeep) {
@@ -377,7 +392,7 @@ public class ReportAuditManager {
     public static void saveBinaryPayload(String subDirName, String cmd, int seq, byte[] payload) {
         if (payload == null || payload.length == 0) return;
         try {
-            File baseDir = new File(PRIMARY_DIR, subDirName);
+            File baseDir = new File(EXTERNAL_CACHE_DIR, subDirName);
             if (!baseDir.exists()) {
                 baseDir.mkdirs();
             }
@@ -659,10 +674,8 @@ public class ReportAuditManager {
             boolean isError = isErrorLevel(channel, eventOrCmd, extraDetail, params);
             sLogQueue.offer(new AuditEntry(fullLog, isSecurity || isError, isError));
 
-            if (isError) {
-                Log.e(TAG, "[ERROR_AUDIT] " + fullLog);
-            } else if (isSecurity) {
-                Log.w(TAG, "[ENV_AUDIT] " + fullLog);
+            if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+                XposedBridge.log(fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordReport: " + t.getMessage());
@@ -725,10 +738,8 @@ public class ReportAuditManager {
             String fullLog = sb.toString();
             boolean isError = isErrorLevel("ProtoBufSecurity", packetName, actionSummary, null);
             sLogQueue.offer(new AuditEntry(fullLog, true, isError));
-            if (isError) {
-                Log.e(TAG, "[ERROR_AUDIT] " + fullLog);
-            } else {
-                Log.w(TAG, "[ENV_AUDIT] " + fullLog);
+            if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+                XposedBridge.log(fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordProtoBufSecurity: " + t.getMessage());
@@ -993,10 +1004,8 @@ public class ReportAuditManager {
             String fullLog = sb.toString();
             boolean isError = isErrorLevel(channel, cmd, extraInfo, null);
             sLogQueue.offer(new AuditEntry(fullLog, true, isError));
-            if (isError) {
-                Log.e(TAG, fullLog);
-            } else {
-                Log.w(TAG, fullLog);
+            if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+                XposedBridge.log(fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordOutboundRiskPayload: " + t.getMessage());
@@ -1080,10 +1089,8 @@ public class ReportAuditManager {
             String fullLog = sb.toString();
             boolean isError = (retCode != 0 && retCode != 1000) || isErrorLevel(channel, cmd, errMsg, null);
             sLogQueue.offer(new AuditEntry(fullLog, true, isError));
-            if (isError) {
-                Log.e(TAG, fullLog);
-            } else {
-                Log.w(TAG, fullLog);
+            if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+                XposedBridge.log(fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordInboundResponse: " + t.getMessage());
@@ -1134,7 +1141,9 @@ public class ReportAuditManager {
 
             String fullLog = sb.toString();
             sLogQueue.offer(new AuditEntry(fullLog, true, false));
-            Log.w(TAG, fullLog);
+            if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+                XposedBridge.log(fullLog);
+            }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordPlaintextSecurityDispatch: " + t.getMessage());
         }
@@ -1161,8 +1170,8 @@ public class ReportAuditManager {
             boolean isError = "E".equalsIgnoreCase(level) || "W".equalsIgnoreCase(level) ||
                     (msg != null && (msg.contains("kick") || msg.contains("fail") || msg.contains("error") || msg.contains("offline") || msg.contains("ban")));
             sLogQueue.offer(new AuditEntry(fullLog, true, isError));
-            if (isError) {
-                Log.e(TAG, fullLog);
+            if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+                XposedBridge.log(fullLog);
             }
         } catch (Throwable ignored) {}
     }
@@ -1410,10 +1419,8 @@ public class ReportAuditManager {
             String fullLog = sb.toString();
             boolean isError = isErrorLevel(channel, operation, null, riskMap);
             sLogQueue.offer(new AuditEntry(fullLog, true, isError));
-            if (isError) {
-                Log.e(TAG, fullLog);
-            } else {
-                Log.w(TAG, fullLog);
+            if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+                XposedBridge.log(fullLog);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordOutboundRiskMap: " + t.getMessage());
@@ -1449,7 +1456,9 @@ public class ReportAuditManager {
 
             String fullLog = sb.toString();
             sLogQueue.offer(new AuditEntry(fullLog, true, false));
-            Log.i(TAG, fullLog);
+            if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+                XposedBridge.log(fullLog);
+            }
         } catch (Throwable t) {
             Log.e(TAG, "Error in recordSanitizationEvent: " + t.getMessage(), t);
         }
@@ -1602,7 +1611,9 @@ public class ReportAuditManager {
         if (CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
             sLogQueue.offer(new AuditEntry(fullLog, true, true));
         }
-        Log.e(TAG, fullLog);
+        if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+            XposedBridge.log(fullLog);
+        }
 
         return sensitive;
     }

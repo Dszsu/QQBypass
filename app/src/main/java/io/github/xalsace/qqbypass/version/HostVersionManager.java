@@ -12,6 +12,7 @@ import java.lang.reflect.Method;
 
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import io.github.xalsace.qqbypass.config.CompileHookConfig;
 
 /**
  * Manages host version detection and coordinates with VersionProfileRegistry
@@ -73,12 +74,12 @@ public class HostVersionManager {
                         if (pi != null) {
                             versionCode = (int) (Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : getLegacyVersionCode(pi));
                             versionName = pi.versionName;
-                            XposedBridge.log("[" + TAG + "] Detected via IPackageManager: " + versionName + " (" + versionCode + ")");
+                            logInfo("[" + TAG + "] Detected via IPackageManager: " + versionName + " (" + versionCode + ")");
                         }
                     }
                 }
             } catch (Throwable t) {
-                XposedBridge.log("[" + TAG + "] IPackageManager detection failed: " + t.getMessage());
+                logInfo("[" + TAG + "] IPackageManager detection failed: " + t.getMessage());
             }
 
             // Strategy 2: Context PackageManager query if available
@@ -92,7 +93,7 @@ public class HostVersionManager {
                         if (pi != null) {
                             versionCode = (int) (Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : getLegacyVersionCode(pi));
                             versionName = pi.versionName;
-                            XposedBridge.log("[" + TAG + "] Detected via Context PackageManager: " + versionName + " (" + versionCode + ")");
+                            logInfo("[" + TAG + "] Detected via Context PackageManager: " + versionName + " (" + versionCode + ")");
                         }
                     }
                 } catch (Throwable ignored) {}
@@ -116,10 +117,10 @@ public class HostVersionManager {
                     }
                     parser.close();
                     if (versionCode != 0 || versionName != null) {
-                        XposedBridge.log("[" + TAG + "] Detected via AssetManager Manifest: " + versionName + " (" + versionCode + ")");
+                        logInfo("[" + TAG + "] Detected via AssetManager Manifest: " + versionName + " (" + versionCode + ")");
                     }
                 } catch (Throwable t) {
-                    XposedBridge.log("[" + TAG + "] AssetManager manifest detection failed: " + t.getMessage());
+                    logInfo("[" + TAG + "] AssetManager manifest detection failed: " + t.getMessage());
                 }
             }
 
@@ -127,14 +128,20 @@ public class HostVersionManager {
             if (versionCode == 0 && versionName == null) {
                 versionCode = QQ9375Profile.VERSION_CODE;
                 versionName = QQ9375Profile.VERSION_NAME;
-                XposedBridge.log("[" + TAG + "] Using baseline fallback: " + versionName + " (" + versionCode + ")");
+                logInfo("[" + TAG + "] Using baseline fallback: " + versionName + " (" + versionCode + ")");
             }
 
             sHostVersion = HostVersion.parse(versionCode, versionName);
             sCurrentProfile = VersionProfileRegistry.resolve(sHostVersion, apkPath);
-            XposedBridge.log("[" + TAG + "] Active Version Profile: " + sCurrentProfile.getClass().getSimpleName()
+            logInfo("[" + TAG + "] Active Version Profile: " + sCurrentProfile.getClass().getSimpleName()
                 + " for QQ " + sHostVersion.getVersionName() + " (VC: " + sHostVersion.getVersionCode()
                 + ", Official MD5: " + sCurrentProfile.getOfficialApkMd5Upper() + ")");
+        }
+    }
+
+    private static void logInfo(String message) {
+        if (CompileHookConfig.ENABLE_VERBOSE_LSPOSED_LOG) {
+            XposedBridge.log(message);
         }
     }
 
