@@ -377,8 +377,10 @@ public class DynamicRootDetectionHook {
         try {
             XC_MethodHook falseHook = new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult(false);
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.getResult() == Boolean.TRUE) {
+                        param.setResult(false);
+                    }
                 }
             };
 
@@ -412,8 +414,10 @@ public class DynamicRootDetectionHook {
         try {
             HookUtils.hookAllMethods(beaconDevInfo, "m", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult(false);
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.getResult() == Boolean.TRUE) {
+                        param.setResult(false);
+                    }
                 }
             });
             XposedEntry.log("[BeaconRoot] Neutralized com.tencent.beacon.a.c.e.m root check");

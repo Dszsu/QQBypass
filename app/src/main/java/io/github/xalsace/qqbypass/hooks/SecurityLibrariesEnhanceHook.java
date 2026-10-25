@@ -99,73 +99,60 @@ public class SecurityLibrariesEnhanceHook {
      *     dtcSendMessage(String cmd, byte[] data, long callbackId) -> intercept SSO reports and synthesize 1000 ACK!
      */
     private static void hookFEKitAndDtc(ClassLoader cl) {
-        final String feUtilsA = "com.tencent.mobileqq.fe.utils.a";
-        hookSafe(cl, feUtilsA, new ClassHookCallback() {
-            @Override
-            public void onClassFound(Class<?> clazz) {
-                // Hook boolean anomaly detection methods in fe.utils.a to return false (normal)
-                // DO NOT hook String methods to return "" because c(String) is the internal string decryptor!
-                for (Method m : clazz.getDeclaredMethods()) {
-                    Class<?> retType = m.getReturnType();
-                    if (retType == boolean.class) {
-                        HookUtils.hookMethod(m, new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult(false);
-                            }
-                        });
-                    }
-                }
-            }
-        });
+        // Delegate fe.utils.a to transparent normalization in QQ950PatchHook
+        QQ950PatchHook.hookFeUtilsAWithClassLoader(cl);
 
         final String dtcCls = "com.tencent.mobileqq.dt.app.Dtc";
         hookSafe(cl, dtcCls, new ClassHookCallback() {
             @Override
             public void onClassFound(Class<?> clazz) {
-                // 1. isAbnormalConfig -> false
+                // 1. isAbnormalConfig -> normalize to false in afterHookedMethod
                 HookUtils.hookAllMethods(clazz, "isAbnormalConfig", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProbe("Dtc.isAbnormalConfig", "called", "returned false");
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == Boolean.TRUE) {
+                            param.setResult(false);
                         }
-                        param.setResult(false);
                     }
                 });
 
-                // 2. checkAppInstalled -> false only for suspicious packages (allows normal apps like WeChat/QQBrowser)
+                // 2. checkAppInstalled -> sanitize in afterHookedMethod if suspicious package queried
                 HookUtils.hookAllMethods(clazz, "checkAppInstalled", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (DynamicRootDetectionHook.isCallerQAuxv()) return;
                         if (param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
                             String pkg = (String) param.args[0];
                             if (DynamicRootDetectionHook.isSuspiciousPackage(pkg)) {
-                                if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-                                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordProbe("Dtc.checkAppInstalled", pkg, "blocked suspicious package");
-                                }
                                 param.setResult(false);
                             }
                         }
                     }
                 });
 
-                // 3. getAccessibilityServiceList & getAccessibilityEnabledServiceList -> "[]" (never empty string "")
-                XC_MethodHook emptyListStringHook = new XC_MethodHook() {
+                // 3. getAccessibilityServiceList & getAccessibilityEnabledServiceList
+                XC_MethodHook assistListHook = new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("[]");
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res instanceof String) {
+                            String s = (String) res;
+                            if (DynamicRootDetectionHook.isSuspiciousPackage(s) || s.contains("xposed")) {
+                                param.setResult("-1");
+                            }
+                        }
                     }
                 };
-                HookUtils.hookAllMethods(clazz, "getAccessibilityServiceList", emptyListStringHook);
-                HookUtils.hookAllMethods(clazz, "getAccessibilityEnabledServiceList", emptyListStringHook);
+                HookUtils.hookAllMethods(clazz, "getAccessibilityServiceList", assistListHook);
+                HookUtils.hookAllMethods(clazz, "getAccessibilityEnabledServiceList", assistListHook);
 
-                // 4. getAccessibilityEnabledStatus -> 0 (disabled)
+                // 4. getAccessibilityEnabledStatus
                 HookUtils.hookAllMethods(clazz, "getAccessibilityEnabledStatus", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(0);
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() instanceof Number && ((Number) param.getResult()).intValue() > 0) {
+                            param.setResult(0);
+                        }
                     }
                 });
 

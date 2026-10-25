@@ -392,23 +392,29 @@ public class QQ950PatchHook {
             }
         });
 
-        // 2. TenPay & CameraSDK & LightDevice Root Checks
+        // 2. TenPay & CameraSDK & LightDevice Root Checks: allow natural execution and normalize in afterHookedMethod
         hookSafe("com.tenpay.charge.v2.util.ChargeV2Utils", "isDeviceRooted", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.getResult() == Boolean.TRUE) {
+                    p.setResult(false);
+                }
             }
         });
         hookSafe("com.tencent.camerasdk.avreport.DeviceInfo", "isDeviceRooted", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.getResult() == Boolean.TRUE) {
+                    p.setResult(false);
+                }
             }
         });
         hookSafe("org.light.device.LightDeviceUtils", "isRooted", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.getResult() == Boolean.TRUE) {
+                    p.setResult(false);
+                }
             }
         });
 
@@ -709,37 +715,39 @@ public class QQ950PatchHook {
         });
         hookSafe(dtcCls, "getAccessibilityEnabledStatus", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(0);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.getResult() instanceof Number && ((Number) p.getResult()).intValue() > 0) {
+                    p.setResult(0);
+                }
             }
         });
         hookSafe(dtcCls, "getAccessibilityEnabledServiceList", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult("[]");
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                Object res = p.getResult();
+                if (res instanceof String) {
+                    String s = (String) res;
+                    if (DynamicRootDetectionHook.isSuspiciousPackage(s) || s.contains("xposed") || s.contains("auto")) {
+                        p.setResult("-1");
+                    }
+                }
             }
         });
         hookSafe(dtcCls, "getAccessibilityServiceList", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult("[]");
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                Object res = p.getResult();
+                if (res instanceof String) {
+                    String s = (String) res;
+                    if (DynamicRootDetectionHook.isSuspiciousPackage(s) || s.contains("xposed") || s.contains("auto")) {
+                        p.setResult("-1");
+                    }
+                }
             }
         });
 
-        // Neutralize com.tencent.mobileqq.fe.utils.a (Obfuscated XOR 0x55 ClassLoader & dexElements scanner)
-        final String feUtilsA = "com.tencent.mobileqq.fe.utils.a";
-        XC_MethodHook falseHook = new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.method instanceof Method && ((Method) p.method).getReturnType() == boolean.class) {
-                    p.setResult(false);
-                }
-            }
-        };
-        hookSafe(feUtilsA, "g", lpparam, falseHook);
-        hookSafe(feUtilsA, "a", lpparam, falseHook);
-        hookSafe(feUtilsA, "b", lpparam, falseHook);
-        hookSafe(feUtilsA, "f", lpparam, falseHook);
+        // Delegate com.tencent.mobileqq.fe.utils.a to transparent normalization
+        hookFeUtilsAWithClassLoader(lpparam != null ? lpparam.classLoader : null);
 
         // Neutralize com.tencent.mobileqq.dt.app.h (Suspicious CA Certificate detector)
         final String dtHCls = "com.tencent.mobileqq.dt.app.h";
@@ -1180,20 +1188,75 @@ public class QQ950PatchHook {
         try {
             Class<?> feUtilsA = XposedHelpers.findClassIfExists("com.tencent.mobileqq.fe.utils.a", cl);
             if (feUtilsA != null && sHookedFeUtilsAClasses.add(feUtilsA)) {
-                Method[] methods = feUtilsA.getDeclaredMethods();
-                // Only hook boolean anomaly detection methods to return false (normal)
-                // DO NOT hook String methods to return "" because c(String) is the internal string decryptor!
-                for (Method m : methods) {
-                    Class<?> ret = m.getReturnType();
-                    if (ret == boolean.class) {
-                        HookUtils.hookMethod(m, new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult(false);
-                            }
-                        });
+                // Method g(Context) -> overall SecEnv check: normalize to false if flagged
+                HookUtils.hookIfMethodExists(feUtilsA, "g", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == Boolean.TRUE) {
+                            param.setResult(false);
+                            XposedEntry.log("[FEKitCensor] Normalized fe.utils.a.g -> false (no anomaly)");
+                        }
                     }
-                }
+                });
+
+                // Method a(Context, ClassLoader) -> ClassLoader hierarchy check: normalize to false if flagged
+                HookUtils.hookIfMethodExists(feUtilsA, "a", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == Boolean.TRUE) {
+                            param.setResult(false);
+                        }
+                    }
+                });
+
+                // Method b(Context, ClassLoader) -> dexElements scanner: normalize to false if flagged
+                HookUtils.hookIfMethodExists(feUtilsA, "b", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == Boolean.TRUE) {
+                            param.setResult(false);
+                        }
+                    }
+                });
+
+                // Method f(Object, String, String) -> single dexElement checker:
+                // If checking an injected module DEX, return false transparently so "Err Code: 103" is not emitted,
+                // while letting official QQ DEX files run through full inspection logging "Safe DEX".
+                HookUtils.hookIfMethodExists(feUtilsA, "f", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length >= 3 && param.args[0] != null) {
+                            try {
+                                Object elem = param.args[0];
+                                Field dfField = elem.getClass().getDeclaredField("dexFile");
+                                dfField.setAccessible(true);
+                                Object dexFile = dfField.get(elem);
+                                if (dexFile != null) {
+                                    String fn = null;
+                                    try {
+                                        Field fnField = dexFile.getClass().getDeclaredField("mFileName");
+                                        fnField.setAccessible(true);
+                                        fn = (String) fnField.get(dexFile);
+                                    } catch (Throwable ignored) {
+                                        fn = dexFile.toString();
+                                    }
+                                    if (fn != null && (fn.contains("qqbypass") || fn.contains("xalsace") ||
+                                        DynamicRootDetectionHook.isSuspiciousPath(fn) || !fn.contains("com.tencent.mobileqq"))) {
+                                        param.setResult(false);
+                                        return;
+                                    }
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == Boolean.TRUE) {
+                            param.setResult(false);
+                        }
+                    }
+                });
+                XposedEntry.log("[FEKitCensor] Installed transparent normalization hooks on fe.utils.a");
             }
         } catch (Throwable t) {
             XposedEntry.logError("[FEKitCensor] Error hooking fe.utils.a in LateStage: " + t.getMessage(), t);
@@ -4498,20 +4561,41 @@ public class QQ950PatchHook {
         for (String bClsName : berryClasses) {
             Class<?> bCls = XposedHelpers.findClassIfExists(bClsName, cl);
             if (bCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + bClsName)) {
-                // Berry.b() -> listens to open ports/tcp -> return standard non-root "v4;-1_v6;-1"
+                // Berry.b() -> listens to open ports/tcp -> allow real execution so Key 118 elapsed time is authentic!
+                // In afterHookedMethod: sanitize "-1" or suspicious ports to clean "v4;0_v6;0"
                 HookUtils.hookIfMethodExists(bCls, "b", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("v4;-1_v6;-1");
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res == null || "".equals(res) || !(res instanceof String)) {
+                            param.setResult("v4;0_v6;0");
+                            return;
+                        }
+                        String s = (String) res;
+                        if (s.contains(";-1") || s.contains(";27042") || s.contains(";5555")) {
+                            param.setResult("v4;0_v6;0");
+                        }
                     }
                 });
-                // Berry.a() -> scans /proc for suspicious non-system process names -> return empty list
+                // Berry.a() -> scans /proc for suspicious processes -> allow real execution, filter suspicious entries
                 HookUtils.hookIfMethodExists(bCls, "a", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.method instanceof java.lang.reflect.Method &&
-                            ((java.lang.reflect.Method) param.method).getReturnType() == java.util.ArrayList.class) {
-                            param.setResult(new java.util.ArrayList<>());
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res instanceof java.util.List) {
+                            java.util.List<?> list = (java.util.List<?>) res;
+                            java.util.Iterator<?> it = list.iterator();
+                            while (it.hasNext()) {
+                                Object item = it.next();
+                                if (item != null) {
+                                    String str = item.toString();
+                                    if (DynamicRootDetectionHook.isSuspiciousPath(str) ||
+                                        str.contains("magisk") || str.contains("xposed") ||
+                                        str.contains("frida") || str.contains("su")) {
+                                        it.remove();
+                                    }
+                                }
+                            }
                         }
                     }
                 });
@@ -4525,25 +4609,35 @@ public class QQ950PatchHook {
         for (String tClsName : thisClasses) {
             Class<?> tCls = XposedHelpers.findClassIfExists(tClsName, cl);
             if (tCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + tClsName)) {
-                // this.a(Context) -> returns accessibility inspection string -> clean baseline "0,0,,0,,"
+                // this.a(Context) -> returns accessibility inspection string -> allow real execution (authentic Key 140 elapsed time)
+                // Normalize to unassisted baseline "0,0,,0,," only if anomalous/enabled
                 HookUtils.hookIfMethodExists(tCls, "a", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args != null && param.args.length == 1 &&
                             param.args[0] instanceof android.content.Context) {
-                            param.setResult("0,0,,0,,");
-                        } else if (param.args != null && param.args.length == 1 &&
-                            param.args[0] != null &&
-                            "android.accessibilityservice.AccessibilityServiceInfo".equals(param.args[0].getClass().getName())) {
-                            param.setResult(true);
+                            Object res = param.getResult();
+                            if (res == null || (res instanceof String && !((String) res).startsWith("0,0,"))) {
+                                param.setResult("0,0,,0,,");
+                            }
                         }
                     }
                 });
-                // this.b(Context) -> returns enabled accessibility component list -> empty list
+                // this.b(Context) -> returns enabled accessibility component list -> filter suspicious items
                 HookUtils.hookIfMethodExists(tCls, "b", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(new java.util.ArrayList<>());
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res instanceof java.util.List) {
+                            java.util.List<?> list = (java.util.List<?>) res;
+                            java.util.Iterator<?> it = list.iterator();
+                            while (it.hasNext()) {
+                                Object item = it.next();
+                                if (item != null && DynamicRootDetectionHook.isSuspiciousPackage(item.toString())) {
+                                    it.remove();
+                                }
+                            }
+                        }
                     }
                 });
                 XposedEntry.log("[TuringPatch] Sanitized accessibility inspectors on " + tClsName);
@@ -4551,6 +4645,7 @@ public class QQ950PatchHook {
         }
 
         // Bennet: scans /proc/self/maps for third-party injected DSOs/JARs outside QQ's package -> Key 250
+        // Allows real execution over build_filtered_maps() so Key 100 elapsed time is authentic!
         String[] bennetClasses = {
             "com.tencent.turingfd.sdk.xq.Bennet",
             "com.tencent.tfd.sdk.wxa.Bennet"
@@ -4560,12 +4655,13 @@ public class QQ950PatchHook {
             if (bnCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + bnClsName)) {
                 HookUtils.hookIfMethodExists(bnCls, "a", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args == null || param.args.length == 0 ||
-                            (param.args.length == 1 && param.args[0] instanceof android.content.Context)) {
-                            param.setResult("");
-                        } else if (param.args.length >= 4) {
-                            param.setResult(null);
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res instanceof String) {
+                            String s = (String) res;
+                            if (!s.isEmpty()) {
+                                param.setResult("");
+                            }
                         }
                     }
                 });
@@ -4574,6 +4670,7 @@ public class QQ950PatchHook {
         }
 
         // Bergamot: scans /proc/self/maps for non-/data/ executable-writable memory (rwxp) -> Key 279
+        // Over build_filtered_maps(), memory mappings are cleanly non-rwxp; Key 121 elapsed time is authentic!
         String[] bergamotClasses = {
             "com.tencent.turingfd.sdk.xq.Bergamot",
             "com.tencent.tfd.sdk.wxa.Bergamot"
@@ -4583,8 +4680,10 @@ public class QQ950PatchHook {
             if (bgCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + bgClsName)) {
                 HookUtils.hookIfMethodExists(bgCls, "a", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(null);
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() != null) {
+                            param.setResult(null);
+                        }
                     }
                 });
                 XposedEntry.log("[TuringPatch] Sanitized Bergamot RWXP memory scanner on " + bgClsName);
@@ -4592,6 +4691,7 @@ public class QQ950PatchHook {
         }
 
         // Quarenden: checks network proxy / VPN settings -> Key 259
+        // Allow real execution so Key 114 elapsed time is authentic!
         String[] quarendenClasses = {
             "com.tencent.turingfd.sdk.xq.Quarenden",
             "com.tencent.tfd.sdk.wxa.Quarenden"
@@ -4601,8 +4701,10 @@ public class QQ950PatchHook {
             if (qCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + qClsName)) {
                 HookUtils.hookIfMethodExists(qCls, "a", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(false);
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == Boolean.TRUE) {
+                            param.setResult(false);
+                        }
                     }
                 });
                 XposedEntry.log("[TuringPatch] Sanitized Quarenden proxy/VPN detector on " + qClsName);
@@ -4636,6 +4738,7 @@ public class QQ950PatchHook {
         }
 
         // Rambutan: reflection helper used for mPM dynamic proxy inspection -> Key 2019
+        // Allow reflection to run; in afterHookedMethod, normalize if foreign proxy ClassLoader detected
         String[] rambutanClasses = {
             "com.tencent.turingfd.sdk.xq.Rambutan",
             "com.tencent.tfd.sdk.wxa.Rambutan"
@@ -4645,22 +4748,28 @@ public class QQ950PatchHook {
             if (rCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + rClsName)) {
                 HookUtils.hookIfMethodExists(rCls, "a", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args != null && param.args.length >= 2 && "mPM".equals(param.args[1])) {
-                            try {
-                                Class<?> smClass = Class.forName("android.os.ServiceManager");
-                                Method getService = smClass.getMethod("getService", String.class);
-                                android.os.IBinder binder = (android.os.IBinder) getService.invoke(null, "package");
-                                if (binder != null) {
-                                    Class<?> stubClass = Class.forName("android.content.pm.IPackageManager$Stub");
-                                    Method asInterface = stubClass.getMethod("asInterface", android.os.IBinder.class);
-                                    Object cleanPM = asInterface.invoke(null, binder);
-                                    if (cleanPM != null) {
-                                        param.setResult(cleanPM);
-                                        return;
-                                    }
+                            Object res = param.getResult();
+                            if (res != null) {
+                                ClassLoader objCl = res.getClass().getClassLoader();
+                                if (objCl != null && !objCl.getClass().getName().startsWith("java.") &&
+                                    !objCl.getClass().getName().startsWith("dalvik.system.")) {
+                                    try {
+                                        Class<?> smClass = Class.forName("android.os.ServiceManager");
+                                        Method getService = smClass.getMethod("getService", String.class);
+                                        android.os.IBinder binder = (android.os.IBinder) getService.invoke(null, "package");
+                                        if (binder != null) {
+                                            Class<?> stubClass = Class.forName("android.content.pm.IPackageManager$Stub");
+                                            Method asInterface = stubClass.getMethod("asInterface", android.os.IBinder.class);
+                                            Object cleanPM = asInterface.invoke(null, binder);
+                                            if (cleanPM != null) {
+                                                param.setResult(cleanPM);
+                                            }
+                                        }
+                                    } catch (Throwable ignored) {}
                                 }
-                            } catch (Throwable ignored) {}
+                            }
                         }
                     }
                 });
@@ -4669,6 +4778,7 @@ public class QQ950PatchHook {
         }
 
         // c2: class/field scan list for dynamic proxy / ClassLoader anomaly detection -> Key 289
+        // Allow c2.a() to return its legitimate scan dictionary so reflection runs naturally (authentic Key 154 elapsed time)
         String[] c2Classes = {
             "com.tencent.turingfd.sdk.xq.c2",
             "com.tencent.tfd.sdk.wxa.c2"
@@ -4676,18 +4786,8 @@ public class QQ950PatchHook {
         for (String c2ClsName : c2Classes) {
             Class<?> c2Cls = XposedHelpers.findClassIfExists(c2ClsName, cl);
             if (c2Cls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + c2ClsName)) {
-                HookUtils.hookIfMethodExists(c2Cls, "a", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args == null || param.args.length == 0) {
-                            if (param.method instanceof Method &&
-                                java.util.HashMap.class.isAssignableFrom(((Method) param.method).getReturnType())) {
-                                param.setResult(new java.util.HashMap<>());
-                            }
-                        }
-                    }
-                });
-                XposedEntry.log("[TuringPatch] Sanitized c2 ClassLoader anomaly scanner on " + c2ClsName);
+                // Keep legitimate scan map; clean PM stub and environment ensure no anomaly is flagged
+                XposedEntry.log("[TuringPatch] Passed through c2 ClassLoader anomaly scanner dictionary on " + c2ClsName);
             }
         }
     }
@@ -4860,6 +4960,32 @@ public class QQ950PatchHook {
                                                         putRiskValue(map, 289, "");
                                                         sanitized = true;
                                                         sanitizedDetails.add("289(ClassLoader)");
+                                                    }
+                                                }
+
+                                                // Key 272: Open ports / listening sockets -> clean baseline "v4;0_v6;0"
+                                                if (hasRiskKey(map, 272)) {
+                                                    Object v = getRiskValue(map, 272);
+                                                    if (v != null) {
+                                                        String s = v.toString();
+                                                        if (s.contains(";-1") || s.contains(";27042") || s.contains(";5555")) {
+                                                            putRiskValue(map, 272, "v4;0_v6;0");
+                                                            sanitized = true;
+                                                            sanitizedDetails.add("272(PortsSanitized)");
+                                                        }
+                                                    }
+                                                }
+
+                                                // Key 2021: Accessibility inspection string -> unassisted baseline "0,0,,0,,"
+                                                if (hasRiskKey(map, 2021)) {
+                                                    Object v = getRiskValue(map, 2021);
+                                                    if (v != null) {
+                                                        String s = v.toString();
+                                                        if (!s.isEmpty() && !s.equals("0,0,,0,,")) {
+                                                            putRiskValue(map, 2021, "0,0,,0,,");
+                                                            sanitized = true;
+                                                            sanitizedDetails.add("2021(Accessibility)");
+                                                        }
                                                     }
                                                 }
 

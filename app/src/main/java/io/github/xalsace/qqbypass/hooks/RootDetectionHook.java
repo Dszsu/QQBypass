@@ -90,8 +90,10 @@ public class RootDetectionHook {
         HookUtils.hookMethod("org.light.device.LightDeviceUtils", "isRooted",
             new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult(false);
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.getResult() == Boolean.TRUE) {
+                        param.setResult(false);
+                    }
                     try {
                         Class<?> clazz = param.thisObject != null ? param.thisObject.getClass() :
                             HookUtils.findClass("org.light.device.LightDeviceUtils", null);
@@ -101,7 +103,6 @@ public class RootDetectionHook {
                             field.set(null, Boolean.FALSE);
                         }
                     } catch (Throwable ignored) {}
-                    XposedEntry.log("LightDevice isRooted: false (cache cleared)");
                 }
             });
     }
@@ -110,9 +111,10 @@ public class RootDetectionHook {
         HookUtils.hookMethod("com.tenpay.charge.v2.util.ChargeV2Utils", "isDeviceRooted",
             new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult(false);
-                    XposedEntry.log("Tenpay isDeviceRooted: false");
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.getResult() == Boolean.TRUE) {
+                        param.setResult(false);
+                    }
                 }
             });
     }
