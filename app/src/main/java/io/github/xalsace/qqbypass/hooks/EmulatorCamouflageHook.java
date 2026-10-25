@@ -50,12 +50,12 @@ public class EmulatorCamouflageHook {
                         } else if ("ro.product.board".equals(key)) {
                             String res = (String) param.getResult();
                             if (res != null && (res.contains("goldfish") || res.contains("vbox"))) {
-                                param.setResult("msm8998");
+                                param.setResult("taro");
                             }
                         } else if ("ro.bootloader".equals(key)) {
                             String res = (String) param.getResult();
                             if (res != null && (res.contains("unknown") || res.contains("vbox"))) {
-                                param.setResult("s-on");
+                                param.setResult("c1-00000");
                             }
                         } else if ("ro.arch".equals(key)) {
                             param.setResult("arm64");

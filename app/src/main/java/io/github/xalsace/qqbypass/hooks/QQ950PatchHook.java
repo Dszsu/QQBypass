@@ -261,24 +261,28 @@ public class QQ950PatchHook {
      * - ApkExternalInfoTool (com.tencent.securitysdk.utils.a.f(File)): getSecurityCodeV1
      */
     private static void hookSignatureAndIntegrity(XC_LoadPackage.LoadPackageParam lpparam) {
-        // ApkSignatureSchemeV2Verifier.g(String apkPath)
+        // ApkSignatureSchemeV2Verifier.g(String apkPath): normalize in afterHookedMethod
         final String v2Cls = "com.tencent.securitysdk.utils.ApkSignatureSchemeV2Verifier";
         hookSafe(v2Cls, "g", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(true);
-                XposedEntry.log("[SignaturePatch] Neutralized ApkSignatureSchemeV2Verifier.g");
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.hasThrowable() || Boolean.FALSE.equals(p.getResult())) {
+                    p.setThrowable(null);
+                    p.setResult(true);
+                    XposedEntry.log("[SignaturePatch] Normalized ApkSignatureSchemeV2Verifier.g -> true");
+                }
             }
         });
 
         // ApkExternalInfoTool: getSecurityCodeV1(File)
+        // Keep authentic return value without injecting fabricated mock string
         final String extCls = "com.tencent.securitysdk.utils.a";
         hookSafe(extCls, "f", lpparam, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.getResult() == null) {
-                    p.setResult("qq_security_verified");
-                    XposedEntry.log("[SignaturePatch] Fallback ApkExternalInfoTool security code");
+                if (p.hasThrowable()) {
+                    p.setThrowable(null);
+                    p.setResult(null);
                 }
             }
         });
@@ -2156,27 +2160,58 @@ public class QQ950PatchHook {
             });
             HookUtils.hookAllMethods(qsecAClazz, "n", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult("none");
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    Object res = p.getResult();
+                    if (res instanceof String) {
+                        String s = (String) res;
+                        if (s.contains("adb")) {
+                            String cleaned = s.replace(",adb", "").replace("adb,", "").replace("adb", "");
+                            p.setResult(cleaned.isEmpty() ? "none" : cleaned);
+                        }
+                    } else if (res == null) {
+                        p.setResult("none");
+                    }
                 }
             });
             HookUtils.hookAllMethods(qsecAClazz, "f", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult("[]");
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    Object res = p.getResult();
+                    if (res instanceof String) {
+                        String s = (String) res;
+                        if (DynamicRootDetectionHook.isSuspiciousPackage(s) || s.contains("xposed")) {
+                            p.setResult("[]");
+                        }
+                    }
                 }
             });
             HookUtils.hookAllMethods(qsecAClazz, "g", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult("[]");
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    Object res = p.getResult();
+                    if (res instanceof String) {
+                        String s = (String) res;
+                        if (DynamicRootDetectionHook.isSuspiciousPackage(s) || s.contains("xposed")) {
+                            p.setResult("[]");
+                        }
+                    }
                 }
             });
             HookUtils.hookAllMethods(qsecAClazz, "o", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                     if (p.getResult() instanceof Number && ((Number) p.getResult()).longValue() <= 0L) {
-                        p.setResult(1727000000000L);
+                        long ts = 0L;
+                        if (p.args != null && p.args.length > 0 && p.args[0] instanceof android.content.Context) {
+                            try {
+                                android.content.Context ctx = (android.content.Context) p.args[0];
+                                ts = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).lastUpdateTime;
+                            } catch (Throwable ignored) {}
+                        }
+                        if (ts <= 0L) {
+                            ts = System.currentTimeMillis() - 86400000L * 14;
+                        }
+                        p.setResult(ts);
                     }
                 }
             });
@@ -2507,8 +2542,14 @@ public class QQ950PatchHook {
         // 3. Screen / Display & Remote Control Detection Source: Display & Ganliang
         HookUtils.hookAllMethods("android.view.Display", "getOwnerPackageName", new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(null);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                Object res = p.getResult();
+                if (res != null) {
+                    String pkg = res.toString().toLowerCase();
+                    if (DynamicRootDetectionHook.isSuspiciousPackage(pkg) || pkg.contains("scrcpy") || pkg.contains("minicap")) {
+                        p.setResult(null);
+                    }
+                }
             }
         });
 
@@ -2556,17 +2597,6 @@ public class QQ950PatchHook {
                     }
                 }
                 XposedEntry.log("[DetectionSource] Normalized Ganliang.f (0 mirror apps, screenCnt=1) and allowed report");
-            }
-        });
-
-        // 4. SourceDir LastModified Detection Source
-        final String qsecACls = "com.tencent.qqprotect.qsec.a";
-        hookSafe(qsecACls, "o", lpparam, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.getResult() instanceof Number && ((Number) p.getResult()).longValue() <= 0L) {
-                    p.setResult(1727000000000L);
-                }
             }
         });
 
@@ -2635,33 +2665,9 @@ public class QQ950PatchHook {
         });
 
         final String dtcCls = "com.tencent.mobileqq.dt.app.Dtc";
-        hookSafe(dtcCls, "getAccessibilityServiceList", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult("[]");
-            }
-        });
-        hookSafe(dtcCls, "getAccessibilityEnabledServiceList", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult("[]");
-            }
-        });
-        hookSafe(dtcCls, "getAccessibilityEnabledStatus", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(0);
-            }
-        });
-        hookSafe(dtcCls, "checkRiskPermission", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(0);
-            }
-        });
         hookSafe(dtcCls, "checkAppInstalled", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 if (p.args != null && p.args.length > 0 && p.args[0] instanceof String) {
                     String pkg = ((String) p.args[0]).toLowerCase();
                     for (String kw : suspiciousAssistKeywords) {

@@ -231,8 +231,7 @@ public class RootDetectionHook {
                             (command.contains("mount") && command.contains("grep"))) {
 
                             XposedEntry.log("Blocked Runtime.exec: " + command);
-                            // Return a dummy process that exits immediately
-                            param.setResult(new ProcessBuilder("echo").start());
+                            throw new java.io.IOException("Cannot run program \"" + command + "\": error=2, No such file or directory");
                         }
                     }
                 }

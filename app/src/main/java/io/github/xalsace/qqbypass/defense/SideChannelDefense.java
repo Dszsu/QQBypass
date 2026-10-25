@@ -277,7 +277,7 @@ public class SideChannelDefense {
                                 param.setResult(getBatteryCurrentNow());
                                 break;
                             case BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER:
-                                param.setResult(3850000);
+                                param.setResult(getBatteryLevel() * 45000);
                                 break;
                             case BatteryManager.BATTERY_PROPERTY_STATUS:
                                 param.setResult(BatteryManager.BATTERY_STATUS_DISCHARGING);
@@ -337,10 +337,18 @@ public class SideChannelDefense {
         HookUtils.hookAllMethods("android.net.wifi.WifiInfo", "getRssi", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                // If not connected to Wi-Fi, preserve Android's genuine disconnected RSSI (-127)
+                if (param.thisObject instanceof android.net.wifi.WifiInfo) {
+                    android.net.wifi.WifiInfo info = (android.net.wifi.WifiInfo) param.thisObject;
+                    String ssid = info.getSSID();
+                    if (ssid == null || ssid.isEmpty() || "<unknown ssid>".equals(ssid) || "0x".equals(ssid)) {
+                        return;
+                    }
+                }
                 Object res = param.getResult();
                 if (res instanceof Integer) {
                     int r = (Integer) res;
-                    // If 0 or error sentinel (-127), supply realistic dynamic RSSI
+                    // If connected to Wi-Fi but RSSI is 0 or invalid, supply realistic dynamic RSSI
                     if (r == 0 || r <= -127 || r > -10) {
                         param.setResult(getDynamicRssi());
                     }
@@ -351,9 +359,17 @@ public class SideChannelDefense {
         HookUtils.hookAllMethods("android.net.wifi.WifiInfo", "getLinkSpeed", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                // If not connected to Wi-Fi, preserve Android's genuine disconnected sentinel (-1)
+                if (param.thisObject instanceof android.net.wifi.WifiInfo) {
+                    android.net.wifi.WifiInfo info = (android.net.wifi.WifiInfo) param.thisObject;
+                    String ssid = info.getSSID();
+                    if (ssid == null || ssid.isEmpty() || "<unknown ssid>".equals(ssid) || "0x".equals(ssid)) {
+                        return;
+                    }
+                }
                 Object res = param.getResult();
                 if (res instanceof Integer && ((Integer) res) <= 0) {
-                    param.setResult(866); // 866 Mbps standard 5GHz AC link speed
+                    param.setResult(866); // 866 Mbps standard 5GHz AC link speed when connected
                 }
             }
         });

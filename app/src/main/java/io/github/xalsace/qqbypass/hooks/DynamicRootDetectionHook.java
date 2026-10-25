@@ -934,7 +934,7 @@ public class DynamicRootDetectionHook {
                 // 1. isAppInstalled(Context, String) -> false
                 HookUtils.hookAllMethods(pkgUtilClass, "isAppInstalled", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args != null && param.args.length > 1 && param.args[1] instanceof String) {
                             String pkg = (String) param.args[1];
                             if (isCallerQAuxv()) return;
@@ -948,7 +948,7 @@ public class DynamicRootDetectionHook {
                 // 2. checkAppInstalled(Context, String) -> "0"
                 HookUtils.hookAllMethods(pkgUtilClass, "checkAppInstalled", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args != null && param.args.length > 1 && param.args[1] instanceof String) {
                             String pkg = (String) param.args[1];
                             if (isCallerQAuxv()) return;
@@ -1266,27 +1266,32 @@ public class DynamicRootDetectionHook {
         try {
             HookUtils.hookAllMethods("android.os.SystemProperties", "get", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args == null || param.args.length == 0 || !(param.args[0] instanceof String)) return;
                     String key = (String) param.args[0];
+                    Object raw = param.getResult();
+                    String res = raw instanceof String ? (String) raw : "";
                     if ("ro.debuggable".equals(key)) {
-                        param.setResult("0");
+                        if (!"0".equals(res)) param.setResult("0");
                     } else if ("ro.secure".equals(key)) {
-                        param.setResult("1");
+                        if (!"1".equals(res)) param.setResult("1");
                     } else if ("ro.build.tags".equals(key)) {
-                        param.setResult("release-keys");
+                        if (res.contains("test-keys")) param.setResult("release-keys");
                     } else if ("ro.boot.flash.locked".equals(key)) {
-                        param.setResult("1");
+                        if (!"1".equals(res)) param.setResult("1");
                     } else if ("ro.boot.vbmeta.device_state".equals(key)) {
-                        param.setResult("locked");
+                        if (!"locked".equals(res)) param.setResult("locked");
                     } else if ("ro.boot.verifiedbootstate".equals(key)) {
-                        param.setResult("green");
+                        if (!"green".equals(res)) param.setResult("green");
                     } else if ("persist.sys.adb.engineermode".equals(key)) {
-                        param.setResult("0");
+                        if (!"0".equals(res)) param.setResult("0");
                     } else if ("sys.usb.config".equals(key) || "sys.usb.state".equals(key) || "persist.sys.usb.config".equals(key)) {
-                        param.setResult("none");
+                        if (res.contains("adb")) {
+                            String cleaned = res.replace(",adb", "").replace("adb,", "").replace("adb", "");
+                            param.setResult(cleaned.isEmpty() ? "none" : cleaned);
+                        }
                     } else if ("init.svc.adbd".equals(key)) {
-                        param.setResult("stopped");
+                        if (!"stopped".equals(res)) param.setResult("stopped");
                     } else if (key.contains("magisk") || key.contains("kernelsu") || key.contains("ksud") || key.contains("ro.boot.ksu") || key.contains("ro.apatch") || key.contains("apatchd")) {
                         String def = param.args.length > 1 && param.args[1] instanceof String ? (String) param.args[1] : "";
                         param.setResult(def);
@@ -1296,36 +1301,38 @@ public class DynamicRootDetectionHook {
 
             HookUtils.hookAllMethods("android.os.SystemProperties", "getInt", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args == null || param.args.length == 0 || !(param.args[0] instanceof String)) return;
                     String key = (String) param.args[0];
+                    Object raw = param.getResult();
                     if ("ro.debuggable".equals(key)) {
-                        param.setResult(0);
+                        if (raw instanceof Integer && ((Integer) raw) != 0) param.setResult(0);
                     } else if ("ro.secure".equals(key)) {
-                        param.setResult(1);
+                        if (raw instanceof Integer && ((Integer) raw) != 1) param.setResult(1);
                     } else if ("ro.boot.flash.locked".equals(key)) {
-                        param.setResult(1);
+                        if (raw instanceof Integer && ((Integer) raw) != 1) param.setResult(1);
                     } else if ("persist.sys.adb.engineermode".equals(key)) {
-                        param.setResult(0);
+                        if (raw instanceof Integer && ((Integer) raw) != 0) param.setResult(0);
                     } else if ("sys.usb.config".equals(key) || "sys.usb.state".equals(key)) {
-                        param.setResult(0);
+                        if (raw instanceof Integer && ((Integer) raw) != 0) param.setResult(0);
                     }
                 }
             });
 
             HookUtils.hookAllMethods("android.os.SystemProperties", "getBoolean", new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args == null || param.args.length == 0 || !(param.args[0] instanceof String)) return;
                     String key = (String) param.args[0];
+                    Object raw = param.getResult();
                     if ("ro.debuggable".equals(key)) {
-                        param.setResult(false);
+                        if (Boolean.TRUE.equals(raw)) param.setResult(false);
                     } else if ("ro.secure".equals(key)) {
-                        param.setResult(true);
+                        if (Boolean.FALSE.equals(raw)) param.setResult(true);
                     } else if ("persist.sys.adb.engineermode".equals(key)) {
-                        param.setResult(false);
+                        if (Boolean.TRUE.equals(raw)) param.setResult(false);
                     } else if ("sys.usb.config".equals(key) || "sys.usb.state".equals(key)) {
-                        param.setResult(false);
+                        if (Boolean.TRUE.equals(raw)) param.setResult(false);
                     }
                 }
             });
@@ -1405,34 +1412,25 @@ public class DynamicRootDetectionHook {
         try {
             XC_MethodHook adbSettingsHook = new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args != null && param.args.length > 1 && param.args[1] instanceof String) {
                         String name = (String) param.args[1];
                         if ("adb_enabled".equals(name) || "development_settings_enabled".equals(name)) {
-                            Class<?> returnType = param.method instanceof java.lang.reflect.Method ?
-                                ((java.lang.reflect.Method) param.method).getReturnType() : int.class;
-                            if (returnType == int.class) {
+                            Object res = param.getResult();
+                            if (res instanceof Integer && ((Integer) res) != 0) {
                                 param.setResult(0);
-                            } else if (returnType == String.class) {
+                            } else if (res instanceof String && !"0".equals(res)) {
                                 param.setResult("0");
-                            } else if (returnType == float.class) {
-                                param.setResult(0f);
-                            } else if (returnType == long.class) {
+                            } else if (res instanceof Number && ((Number) res).longValue() != 0L) {
                                 param.setResult(0L);
                             }
                         } else if ("enabled_accessibility_services".equals(name)) {
-                            Class<?> returnType = param.method instanceof java.lang.reflect.Method ?
-                                ((java.lang.reflect.Method) param.method).getReturnType() : String.class;
-                            if (returnType == String.class) {
-                                param.setResult("");
-                            }
-                        } else if ("accessibility_enabled".equals(name)) {
-                            Class<?> returnType = param.method instanceof java.lang.reflect.Method ?
-                                ((java.lang.reflect.Method) param.method).getReturnType() : int.class;
-                            if (returnType == int.class) {
-                                param.setResult(0);
-                            } else if (returnType == String.class) {
-                                param.setResult("0");
+                            Object res = param.getResult();
+                            if (res instanceof String && !((String) res).isEmpty()) {
+                                String s = (String) res;
+                                if (isSuspiciousPackage(s)) {
+                                    param.setResult("");
+                                }
                             }
                         }
                     }
