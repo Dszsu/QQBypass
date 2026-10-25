@@ -4695,6 +4695,50 @@ public class QQ950PatchHook {
     private static final java.util.Set<String> sHookedTuringMapClasses =
         java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    private static boolean hasRiskKey(Map<?, ?> map, int key) {
+        if (map == null) return false;
+        return map.containsKey(key) || map.containsKey(String.valueOf(key)) || map.containsKey((long) key);
+    }
+
+    private static Object getRiskValue(Map<?, ?> map, int key) {
+        if (map == null) return null;
+        if (map.containsKey(key)) return map.get(key);
+        if (map.containsKey(String.valueOf(key))) return map.get(String.valueOf(key));
+        if (map.containsKey((long) key)) return map.get((long) key);
+        return null;
+    }
+
+    private static void putRiskValue(Map<Object, Object> map, int key, Object val) {
+        if (map == null) return;
+        boolean replaced = false;
+        if (map.containsKey(key)) {
+            map.put(key, val);
+            replaced = true;
+        }
+        if (map.containsKey(String.valueOf(key))) {
+            map.put(String.valueOf(key), val);
+            replaced = true;
+        }
+        if (map.containsKey((long) key)) {
+            map.put((long) key, val);
+            replaced = true;
+        }
+        if (!replaced) {
+            boolean mapUsesStrings = false;
+            for (Object k : map.keySet()) {
+                if (k instanceof String) {
+                    mapUsesStrings = true;
+                    break;
+                }
+            }
+            if (mapUsesStrings) {
+                map.put(String.valueOf(key), val);
+            } else {
+                map.put(key, val);
+            }
+        }
+    }
+
     /**
      * Tier 19: Intercept and Deep-Audit Outbound TuringFD Risk Dictionary (map2).
      * Intercepts the entire compiled risk telemetry map (keys: 272 ports, 268/256 proc scan,
@@ -4754,20 +4798,20 @@ public class QQ950PatchHook {
                                                 java.util.List<String> sanitizedDetails = new java.util.ArrayList<>();
 
                                                 // Key 250: Bennet /proc/self/maps third-party DSO injection scanner
-                                                if (map.containsKey("250")) {
-                                                    Object v = map.get("250");
+                                                if (hasRiskKey(map, 250)) {
+                                                    Object v = getRiskValue(map, 250);
                                                     if (v != null && !v.toString().isEmpty()) {
-                                                        map.put("250", "");
+                                                        putRiskValue(map, 250, "");
                                                         sanitized = true;
                                                         sanitizedDetails.add("250(InjectedDSOs)");
                                                     }
                                                 }
 
                                                 // Key 279: Bergamot /proc/self/maps RWXP memory scanner
-                                                if (map.containsKey("279")) {
-                                                    Object v = map.get("279");
+                                                if (hasRiskKey(map, 279)) {
+                                                    Object v = getRiskValue(map, 279);
                                                     if (v != null && !v.toString().isEmpty()) {
-                                                        map.put("279", "");
+                                                        putRiskValue(map, 279, "");
                                                         sanitized = true;
                                                         sanitizedDetails.add("279(RWXP)");
                                                     }
@@ -4775,34 +4819,34 @@ public class QQ950PatchHook {
 
                                                 // Key 2019: PackageManager mPM dynamic proxy inspection
                                                 // Clean baseline: "android.content.pm.IPackageManager$Stub$Proxy,,"
-                                                if (map.containsKey("2019")) {
-                                                    Object v = map.get("2019");
+                                                if (hasRiskKey(map, 2019)) {
+                                                    Object v = getRiskValue(map, 2019);
                                                     if (v != null && !v.toString().equals("android.content.pm.IPackageManager$Stub$Proxy,,")) {
-                                                        map.put("2019", "android.content.pm.IPackageManager$Stub$Proxy,,");
+                                                        putRiskValue(map, 2019, "android.content.pm.IPackageManager$Stub$Proxy,,");
                                                         sanitized = true;
                                                         sanitizedDetails.add("2019(mPMProxy)");
                                                     }
                                                 }
 
                                                 // Key 259: Quarenden proxy/VPN detection flag
-                                                if (map.containsKey("259")) {
-                                                    Object v = map.get("259");
+                                                if (hasRiskKey(map, 259)) {
+                                                    Object v = getRiskValue(map, 259);
                                                     if ("1".equals(v) || (v != null && !"0".equals(v.toString()))) {
-                                                        map.put("259", "0");
+                                                        putRiskValue(map, 259, "0");
                                                         sanitized = true;
                                                         sanitizedDetails.add("259(Proxy)");
                                                     }
                                                 }
 
                                                 // Key 284: Marc network routing table & interfaces (tun0 leak)
-                                                if (map.containsKey("284")) {
-                                                    Object v = map.get("284");
+                                                if (hasRiskKey(map, 284)) {
+                                                    Object v = getRiskValue(map, 284);
                                                     if (v != null) {
                                                         String netStr = v.toString();
                                                         if (netStr.contains("tun") || netStr.contains("198.18.") || netStr.startsWith("17,")) {
                                                             String[] parts = netStr.split(",");
                                                             String caps = parts.length > 1 ? parts[1] : "137711415296";
-                                                            map.put("284", "1," + caps + ",rmnet_data0,10.0.0.2,10.0.0.1");
+                                                            putRiskValue(map, 284, "1," + caps + ",rmnet_data0,10.0.0.2,10.0.0.1");
                                                             sanitized = true;
                                                             sanitizedDetails.add("284(VPN_InterfaceScrubbed)");
                                                         }
@@ -4810,10 +4854,10 @@ public class QQ950PatchHook {
                                                 }
 
                                                 // Key 289: ClassLoader hierarchy anomaly
-                                                if (map.containsKey("289")) {
-                                                    Object v = map.get("289");
+                                                if (hasRiskKey(map, 289)) {
+                                                    Object v = getRiskValue(map, 289);
                                                     if (v != null && !v.toString().isEmpty()) {
-                                                        map.put("289", "");
+                                                        putRiskValue(map, 289, "");
                                                         sanitized = true;
                                                         sanitizedDetails.add("289(ClassLoader)");
                                                     }

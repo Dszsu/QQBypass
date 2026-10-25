@@ -142,9 +142,13 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
     private static final java.util.concurrent.ExecutorService sLateHookExecutor =
         java.util.concurrent.Executors.newSingleThreadExecutor();
 
+    private static final ThreadLocal<Boolean> sDispatching = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
     public static void dispatchLateStageHooks(ClassLoader cl) {
         if (cl == null) return;
+        if (sDispatching.get()) return;
         try {
+            sDispatching.set(Boolean.TRUE);
             NetworkReportHook.hookLateStage(cl);
             QQ950PatchHook.hookLateStage(cl);
             DynamicRootDetectionHook.hookLateStage(cl);
@@ -156,6 +160,8 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
             io.github.xalsace.qqbypass.version.HostVersionManager.getCurrentProfile().applyVersionSpecificHooks(HookConfig.loadPackageParam, cl);
         } catch (Throwable t) {
             logError("Error dispatching late-stage hooks: " + t.getMessage(), t);
+        } finally {
+            sDispatching.set(Boolean.FALSE);
         }
     }
 
@@ -231,14 +237,16 @@ public class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                             String clStr = cl.toString().toLowerCase();
                             if (clStr.contains("moe.ono") || clStr.contains("lzlnb") || clStr.contains("libcnm") || clStr.contains("cnm0") ||
                                 clStr.contains("qauxv") || clStr.contains("org.lsposed") || clStr.contains("dexkit") ||
-                                clStr.contains("cn.jesse") || clStr.contains("lspatch")) {
+                                clStr.contains("cn.jesse") || clStr.contains("lspatch") ||
+                                clStr.contains("vas_") || clStr.contains("ai_") || clStr.contains("pet_") ||
+                                clStr.contains("gamecenter") || clStr.contains("mini_game") || clStr.contains("novel") ||
+                                clStr.contains("tianxuan") || clStr.contains("ams") || clStr.contains("profile")) {
                                 return;
                             }
                             if (sObservedLoaders.add(cl)) {
-                                // Synchronously dispatch critical late-stage hooks immediately
-                                // to guarantee source probes (Bennet, Marc, Quarenden, etc.) are hooked
-                                // before any background thread can execute classes from this DEX
-                                dispatchLateStageHooks(cl);
+                                // Asynchronously dispatch late-stage hooks for dynamic DEXes on dedicated background executor.
+                                // Prevents blocking Android main UI thread or causing ClassNotFoundException storms during BaseDexClassLoader.<init>.
+                                sLateHookExecutor.execute(() -> dispatchLateStageHooks(cl));
                             }
                         }
                     }
