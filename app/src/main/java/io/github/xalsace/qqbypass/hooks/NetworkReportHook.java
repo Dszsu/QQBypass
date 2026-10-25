@@ -641,12 +641,9 @@ public class NetworkReportHook {
                             int cmd2 = param.args[1] instanceof Number ? ((Number) param.args[1]).intValue() : 0;
                             int cmd3 = param.args[2] instanceof Number ? ((Number) param.args[2]).intValue() : 0;
                             byte[] bArr = (byte[]) param.args[3];
-                            boolean scrubbed = QQ950PatchHook.scrubPackedRiskPayload(bArr);
-                            if (scrubbed) {
-                                XposedEntry.log("[NetworkReport] Scrubbed leaked risk signatures in d1.a payload");
-                            }
+                            // Strictly read-only audit: do NOT corrupt packed Turing binary payloads with in-place byte scrubbing
                             long timeout = param.args.length >= 5 && param.args[4] instanceof Number ? ((Number) param.args[4]).longValue() : 0L;
-                            String extra = "cmd=" + cmd1 + "/" + cmd2 + "/" + cmd3 + ", timeout=" + timeout + "ms" + (scrubbed ? " (scrubbed)" : "");
+                            String extra = "cmd=" + cmd1 + "/" + cmd2 + "/" + cmd3 + ", timeout=" + timeout + "ms";
                             io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
                                 "TuringFD.Network", "d1.a", bArr, extra, 6);
                         }

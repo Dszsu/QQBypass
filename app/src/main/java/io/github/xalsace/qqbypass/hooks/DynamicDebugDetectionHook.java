@@ -210,11 +210,24 @@ public class DynamicDebugDetectionHook {
                             XposedEntry.log(type + " detection code zeroed: " + className);
                         }
 
-                        // Normalize detection result strings to genuine device string (never empty string)
+                        // Normalize detection result strings to genuine device string (never suspicious literal like "unknown")
                         if (result instanceof String) {
                             String str = (String) result;
                             if (isSuspiciousString(str)) {
-                                param.setResult("unknown");
+                                String lower = str.toLowerCase();
+                                if (lower.contains("tracer")) {
+                                    if (str.contains("TracerPid")) {
+                                        param.setResult("TracerPid:\t0");
+                                    } else {
+                                        param.setResult("0");
+                                    }
+                                } else if (lower.contains("goldfish") || lower.contains("qemu") || lower.contains("genymotion") || lower.contains("emulator")) {
+                                    param.setResult("qcom");
+                                } else if (lower.contains("debug")) {
+                                    param.setResult("release-keys");
+                                } else {
+                                    param.setResult("0");
+                                }
                                 XposedEntry.log(type + " result string normalized: " + className);
                             }
                         }
@@ -233,8 +246,16 @@ public class DynamicDebugDetectionHook {
         if (str == null || str.isEmpty()) return false;
         String lower = str.toLowerCase();
 
-        return lower.contains("debug") || lower.contains("tracer")
-            || lower.contains("goldfish") || lower.contains("qemu")
-            || lower.contains("emulator") || lower.contains("genymotion");
+        if (lower.contains("tracer")) {
+            // "TracerPid:\t0" or "0" is clean and normal
+            if (lower.contains("tracerpid:\t0") || lower.contains("tracerpid: 0") || "0".equals(str.trim())) {
+                return false;
+            }
+            return true;
+        }
+
+        return lower.contains("goldfish") || lower.contains("qemu")
+            || lower.contains("emulator") || lower.contains("genymotion")
+            || (lower.contains("debug") && !lower.contains("nodebug") && !lower.contains("non-debug"));
     }
 }
