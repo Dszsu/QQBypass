@@ -49,7 +49,9 @@ public class SecurityLibrariesEnhanceHook {
     }
 
     public static void hookLateStage(ClassLoader cl) {
-        if (cl == null || sPendingClassHooks.isEmpty()) return;
+        if (cl == null) return;
+        QQ950PatchHook.hookFeUtilsAWithClassLoader(cl);
+        if (sPendingClassHooks.isEmpty()) return;
         resolvePendingHooks(cl);
     }
 

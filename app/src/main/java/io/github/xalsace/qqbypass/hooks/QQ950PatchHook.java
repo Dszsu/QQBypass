@@ -941,18 +941,15 @@ public class QQ950PatchHook {
                                 // h2 holds t1 field 'a'
                                 Object t1 = XposedHelpers.getObjectField(result, "a");
                                 if (t1 != null) {
-                                    // int c is errorCode
+                                    // int c is errorCode: sanitize to 0 if non-zero
                                     int err = XposedHelpers.getIntField(t1, "c");
                                     if (err != 0) {
                                         XposedHelpers.setIntField(t1, "c", 0);
                                         XposedEntry.log("[TuringPatch] Sanitized t1.c errorCode: " + err + " -> 0");
                                     }
-                                    // long b is expiredTimestamp; ensure never expired
-                                    long exp = XposedHelpers.getLongField(t1, "b");
-                                    if (exp <= System.currentTimeMillis()) {
-                                        XposedHelpers.setLongField(t1, "b", System.currentTimeMillis() + 86400000L);
-                                        XposedEntry.log("[TuringPatch] Refreshed expired timestamp in t1.b -> +24h");
-                                    }
+                                    // Do NOT overwrite t1.b (expiredTimestamp in seconds). Overwriting it with milliseconds
+                                    // caused Turing SDK's expiration check (nowSec >= t1.b) to never trigger, breaking
+                                    // authentic ticket renewal and causing server-side session expiration disconnects.
                                     // String a is openIdTicket
                                     String ticket = (String) XposedHelpers.getObjectField(t1, "a");
                                     if (ticket != null && !ticket.isEmpty()) {
@@ -1002,15 +999,6 @@ public class QQ950PatchHook {
                     }
                 }
             });
-            HookUtils.hookAllMethods(clazz, "getExpiredTimestamp", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    Object res = p.getResult();
-                    if (res instanceof Number && ((Number) res).longValue() <= System.currentTimeMillis()) {
-                        p.setResult(System.currentTimeMillis() + 86400000L);
-                    }
-                }
-            });
             HookUtils.hookAllMethods(clazz, "getOpenIdTicket", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) throws Throwable {
@@ -1044,7 +1032,7 @@ public class QQ950PatchHook {
                     if ("getErrorCode".equals(name)) return 0;
                     if ("getOpenIdTicket".equals(name)) return getOrGenerateOpenIdTicket();
                     if ("getAIDCode".equals(name) || "getAIDTicket".equals(name) || "getTAIDTicket".equals(name)) return getOrGenerateOpenIdTicket();
-                    if ("getExpiredTimestamp".equals(name)) return System.currentTimeMillis() + 86400000L;
+                    if ("getExpiredTimestamp".equals(name)) return (System.currentTimeMillis() / 1000L) + 86400L;
 
                     Class<?> ret = method.getReturnType();
                     if (ret == boolean.class) return false;

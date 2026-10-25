@@ -301,13 +301,13 @@ public class ReportAuditManager {
         File[] files = dir.listFiles(new FilenameFilter() {
             @Override
             public boolean accept(File d, String name) {
-                return name.startsWith(prefix) && name.endsWith(".log");
+                return name.startsWith(prefix) && (name.endsWith(".log") || name.endsWith(".log.1"));
             }
         });
         if (files == null || files.length <= maxKeep) return;
 
         // Sort descending: newest files first.
-        // File names format: prefix_YYYYMMDD_HHmm.log
+        // File names format: prefix_YYYYMMDD_HHmm.log or prefix_YYYYMMDD_HHmm.log.1
         // Lexicographical sorting order strictly equals chronological order!
         Arrays.sort(files, new Comparator<File>() {
             @Override
@@ -337,7 +337,7 @@ public class ReportAuditManager {
                 String name = f.getName();
                 // If it's a legacy un-bucketed log or temporary prune file
                 if (name.equals("report_audit.log") || name.equals("security_environment_audit.log")
-                        || name.contains(".prune.tmp") || name.endsWith(".bak") || name.contains(".log.1")) {
+                        || name.contains(".prune.tmp") || name.endsWith(".bak")) {
                     f.delete();
                 }
             }
