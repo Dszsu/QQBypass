@@ -164,11 +164,14 @@ public class SecurityLibrariesEnhanceHook {
                 // DO NOT hook getNetworkInterfaceNames with static "wlan0,rmnet_data0" (NetworkInterface.getNetworkInterfaces is already cleanly filtered).
                 // DO NOT hook getLibraryList with fake "12345678" (authentic Dtc.getLibraryList computes genuine system shared libraries hash).
 
-                // 6. getGoogleCertsVerify -> empty
+                // 6. getGoogleCertsVerify -> allow authentic GoogleAttestationParser, sanitize only if abnormal
                 HookUtils.hookAllMethods(clazz, "getGoogleCertsVerify", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("");
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res == null || "".equals(res)) {
+                            param.setResult("STATUS_GOOGLE_HARDWARE_ROOT|" + android.os.Build.MANUFACTURER + "|" + android.os.Build.MODEL + "|" + android.os.Build.VERSION.RELEASE + "|normal");
+                        }
                     }
                 });
 
@@ -246,8 +249,11 @@ public class SecurityLibrariesEnhanceHook {
             public void onClassFound(Class<?> clazz) {
                 XC_MethodHook emptyListHook = new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(new java.util.ArrayList<>());
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res instanceof List && !((List<?>) res).isEmpty()) {
+                            param.setResult(new java.util.ArrayList<>());
+                        }
                     }
                 };
                 for (Method m : clazz.getDeclaredMethods()) {

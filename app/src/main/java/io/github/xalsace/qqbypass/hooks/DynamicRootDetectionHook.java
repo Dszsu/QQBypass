@@ -237,36 +237,6 @@ public class DynamicRootDetectionHook {
                     path = (String) first;
                 }
                 if (path != null) {
-                    if (path.contains("/proc/self/maps") || (path.contains("/proc/") && path.endsWith("/maps"))) {
-                        if (!isCallerQAuxv()) {
-                            StackTraceElement[] st = Thread.currentThread().getStackTrace();
-                            for (StackTraceElement ste : st) {
-                                String cn = ste.getClassName();
-                                if (cn != null && (cn.contains("Bennet") || cn.contains("Watermelon") ||
-                                                   cn.contains("turingfd") || cn.contains("tfd") ||
-                                                   cn.contains("qsec") || cn.contains("fe.FEKit"))) {
-                                    XposedEntry.log("File stream maps blocked for detection caller: " + cn);
-                                    throw new FileNotFoundException("No such file or directory: " + path);
-                                }
-                            }
-                        }
-                    }
-                    if (path.contains("/proc/mounts") || path.contains("/proc/self/mounts") ||
-                        path.contains("/proc/self/mountinfo") || (path.contains("/proc/") && path.contains("mount"))) {
-                        if (!isCallerQAuxv()) {
-                            StackTraceElement[] st = Thread.currentThread().getStackTrace();
-                            for (StackTraceElement ste : st) {
-                                String cn = ste.getClassName();
-                                if (cn != null && (cn.contains("Bennet") || cn.contains("Watermelon") ||
-                                                   cn.contains("turingfd") || cn.contains("tfd") ||
-                                                   cn.contains("qsec") || cn.contains("fe.FEKit") ||
-                                                   cn.contains("qimei"))) {
-                                    XposedEntry.log("File stream mounts blocked for detection caller: " + cn);
-                                    throw new FileNotFoundException("No such file or directory: " + path);
-                                }
-                            }
-                        }
-                    }
                     if (isSuspiciousPath(path)) {
                         if (isCallerQAuxv()) {
                             return;
@@ -321,22 +291,6 @@ public class DynamicRootDetectionHook {
                 "com.tencent.gathererga.core.internal.provider.impl.UserInfoImpl", lpparam.classLoader);
             if (userInfoImplClass != null) {
                 HookUtils.hookAllMethods(userInfoImplClass, "isRooted", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        Class<?> cClass = de.robv.android.xposed.XposedHelpers.findClassIfExists(
-                            "com.tencent.gathererga.core.internal.provider.c", lpparam.classLoader);
-                        if (cClass != null) {
-                            try {
-                                Object notRooted = de.robv.android.xposed.XposedHelpers.newInstance(cClass, 0L, Boolean.FALSE);
-                                param.setResult(notRooted);
-                                XposedEntry.log("[GathererPatch] UserInfoImpl.isRooted preempted with Boolean.FALSE");
-                                return;
-                            } catch (Throwable t) {
-                                XposedEntry.log("[GathererPatch] Failed to instantiate c: " + t.getMessage());
-                            }
-                        }
-                    }
-
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         Object result = param.getResult();

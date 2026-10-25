@@ -682,14 +682,19 @@ public class NetworkReportHook {
                             @Override
                             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                                 Object res = param.getResult();
-                                if (res == null || "".equals(res)) {
-                                    param.setResult(legitimateProcName);
-                                    return;
+                                if (param.args != null && param.args.length > 0 && param.args[0] instanceof Integer) {
+                                    int pid = (Integer) param.args[0];
+                                    if (pid == android.os.Process.myPid()) {
+                                        if (res == null || "".equals(res) || isSensitiveTuringPath(res.toString())) {
+                                            param.setResult(legitimateProcName);
+                                            return;
+                                        }
+                                    }
                                 }
                                 if (res instanceof String) {
                                     String str = (String) res;
                                     if (isSensitiveTuringPath(str)) {
-                                        param.setResult(legitimateProcName);
+                                        param.setResult("com.android.systemui");
                                     }
                                 }
                             }
@@ -752,50 +757,35 @@ public class NetworkReportHook {
 
                         if (isSensitiveTuringPath(path)) {
                             XposedEntry.log("[TuringEridanus] Blocked sensitive file read: " + path);
-                            param.setResult(null);
-                            return;
-                        }
-
-                        byte[] fakeBytes = null;
-                        if (path.contains("/status") && path.startsWith("/proc/")) {
-                            XposedEntry.log("[TuringEridanus] Sanitized status read: " + path);
-                            String fakeStatus = "Name:\tcom.tencent.mobileqq\nState:\tS (sleeping)\nTgid:\t" 
-                                + android.os.Process.myPid() + "\nPid:\t" + android.os.Process.myPid() 
-                                + "\nPPid:\t1\nTracerPid:\t0\nUid:\t10361\t10361\t10361\t10361\nGid:\t10361\t10361\t10361\t10361\n";
-                            fakeBytes = fakeStatus.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                        } else if (path.contains("/cmdline") && path.startsWith("/proc/")) {
-                            fakeBytes = "com.tencent.mobileqq\0".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                        } else if (path.contains("selinux/enforce")) {
-                            fakeBytes = "1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                        } else if (path.contains("net/unix")) {
-                            fakeBytes = "".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                        } else if (path.contains("net/tcp") || path.contains("net/tcp6")) {
-                            fakeBytes = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                        }
-
-                        if (fakeBytes != null) {
-                            int maxLen = -1;
-                            if (param.args.length >= 2 && param.args[1] instanceof Number) {
-                                maxLen = ((Number) param.args[1]).intValue();
-                            }
-                            if (maxLen > 0 && fakeBytes.length > maxLen) {
-                                fakeBytes = java.util.Arrays.copyOf(fakeBytes, maxLen);
-                            }
                             if (param.method instanceof java.lang.reflect.Method) {
                                 Class<?> ret = ((java.lang.reflect.Method) param.method).getReturnType();
-                                if (ret == byte[].class) {
-                                    param.setResult(fakeBytes);
-                                } else if (ret == String.class) {
-                                    param.setResult(new String(fakeBytes, java.nio.charset.StandardCharsets.UTF_8));
-                                } else if (ret == void.class) {
-                                    param.setResult(null);
+                                if (ret == boolean.class) {
+                                    param.setResult(false);
                                 } else {
-                                    param.setResult(fakeBytes);
+                                    param.setResult(null);
                                 }
                             } else {
-                                param.setResult(fakeBytes);
+                                param.setResult(null);
                             }
-                            return;
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res instanceof byte[] && param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
+                            String path = (String) param.args[0];
+                            byte[] data = (byte[]) res;
+                            if (path.contains("/status") && path.startsWith("/proc/")) {
+                                String s = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+                                if (s.contains("TracerPid:")) {
+                                    String cleaned = s.replaceAll("TracerPid:\\s+[1-9][0-9]*", "TracerPid:\t0");
+                                    if (!cleaned.equals(s)) {
+                                        param.setResult(cleaned.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                                        XposedEntry.log("[TuringEridanus] Sanitized TracerPid in status read: " + path);
+                                    }
+                                }
+                            }
                         }
                     }
                 };
@@ -826,8 +816,6 @@ public class NetworkReportHook {
                                         String fname = f.getName();
                                         if (fname.equals("c") || fname.equals("f1003c") || fname.equals("f1167c")) {
                                             f.setInt(res, 0); // TracerPid = 0
-                                        } else if (fname.equals("a")) {
-                                            f.setInt(res, 1); // PPid = 1
                                         }
                                     }
                                 }
@@ -853,9 +841,6 @@ public class NetworkReportHook {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args != null && param.args.length >= 4) {
-                            if (param.args[0] instanceof Integer) {
-                                param.args[0] = 1; // PPid = 1
-                            }
                             if (param.args[3] instanceof Integer) {
                                 param.args[3] = 0; // TracerPid = 0
                             }

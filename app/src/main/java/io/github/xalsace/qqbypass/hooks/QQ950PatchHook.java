@@ -2450,14 +2450,18 @@ public class QQ950PatchHook {
         for (String cls : tencentLocClasses) {
             hookSafe(cls, "getFakeReason", lpparam, new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(0); // 0 = genuine, zero anomaly
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    if (p.getResult() instanceof Number && ((Number) p.getResult()).intValue() != 0) {
+                        p.setResult(0); // 0 = genuine, zero anomaly
+                    }
                 }
             });
             hookSafe(cls, "isMockGps", lpparam, new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(0);
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    if (p.getResult() instanceof Number && ((Number) p.getResult()).intValue() != 0) {
+                        p.setResult(0);
+                    }
                 }
             });
         }
@@ -2499,17 +2503,21 @@ public class QQ950PatchHook {
             }
         });
 
-        // Framework Location: isFromMockProvider & isMock
+        // Framework Location: isFromMockProvider & isMock (pass-through normalization in afterHookedMethod)
         HookUtils.hookAllMethods("android.location.Location", "isFromMockProvider", new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (Boolean.TRUE.equals(p.getResult())) {
+                    p.setResult(false);
+                }
             }
         });
         HookUtils.hookAllMethods("android.location.Location", "isMock", new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (Boolean.TRUE.equals(p.getResult())) {
+                    p.setResult(false);
+                }
             }
         });
 
@@ -3776,35 +3784,28 @@ public class QQ950PatchHook {
             }
         });
 
-        // Socket detection neutralization (1 = cannot connect, clean status)
+        // Socket detection neutralization (0 = Connection refused / not found, clean status)
         hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.SocketStatus", "checkSocket", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(1);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.getResult() instanceof Integer && ((Integer) p.getResult()) != 0) {
+                    p.setResult(0);
+                }
             }
         });
 
-        // Certification status check (returns null on clean/unsupported device)
+        // Hardware Keystore BootStatus normalization: allow authentic BL crypto generation, ensure GREEN locked status
         hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.CertificationStatus", "BL", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(null);
-            }
-        });
-
-        // QSec detectMethod hook (anti-hook reflection check)
-        hookSafe("com.tencent.mobileqq.qsec.qsecurity.QSec", "detectMethod", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
-            }
-        });
-
-        // Main process check
-        hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.ProcessCheck", "isMainProcess", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(true);
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                Object res = p.getResult();
+                if (res instanceof Object[]) {
+                    Object[] arr = (Object[]) res;
+                    if (arr.length >= 5) {
+                        arr[3] = 0; // verifiedBootState = 0 (Verified / Green)
+                        arr[4] = 1; // isDeviceLocked = 1 (Locked)
+                    }
+                }
             }
         });
 
@@ -3824,8 +3825,10 @@ public class QQ950PatchHook {
         for (final String cn : cpuUtilClasses) {
             hookIfMethodExistsSafe(cn, "isX86Emulator", lpparam, new XC_MethodHook() {
                 @Override
-                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(false);
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    if (Boolean.TRUE.equals(p.getResult())) {
+                        p.setResult(false);
+                    }
                 }
             });
             ClassLoader cl = lpparam != null && lpparam.classLoader != null ? lpparam.classLoader : HookConfig.getClassLoader();
@@ -3856,9 +3859,10 @@ public class QQ950PatchHook {
 
         hookSafe("com.tencent.biz.richframework.util.RFWDeviceUtil", "isX86Emulator", lpparam, new XC_MethodHook() {
             @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                p.setResult(false);
-                XposedEntry.log("[EmulatorPatch] RFWDeviceUtil.isX86Emulator forced false");
+            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                if (Boolean.TRUE.equals(p.getResult())) {
+                    p.setResult(false);
+                }
             }
         });
     }
@@ -5222,8 +5226,10 @@ public class QQ950PatchHook {
                 });
                 HookUtils.hookAllMethods(facadeCls, "getVersion", new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("V3.0.000");
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() == null || "".equals(param.getResult())) {
+                            param.setResult("V3.0.000");
+                        }
                     }
                 });
                 HookUtils.hookAllMethods(facadeCls, "ckeyMoudleInit", new XC_MethodHook() {
