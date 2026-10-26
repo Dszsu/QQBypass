@@ -39,11 +39,6 @@
 
 namespace hook_libc {
 
-typedef int (*sigaction_func_t)(int, const struct sigaction*, struct sigaction*);
-typedef int (*timer_create_func_t)(clockid_t, struct sigevent*, timer_t*);
-typedef int (*timer_settime_func_t)(timer_t, int, const struct itimerspec*, struct itimerspec*);
-typedef int (*timer_delete_func_t)(timer_t);
-
 // 真实函数指针（支持 LSPosed inline hook backup 与 dlsym 回退）
 static FILE* (*real_fopen_ptr)(const char*, const char*) = nullptr;
 static char* (*real_fgets_ptr)(char*, int, FILE*) = nullptr;
@@ -90,10 +85,6 @@ typedef int (*prctl_func_t)(int, unsigned long, unsigned long, unsigned long, un
 static prctl_func_t real_prctl_ptr = nullptr;
 typedef long (*ptrace_func_t)(int, pid_t, void*, void*);
 static ptrace_func_t real_ptrace_ptr = nullptr;
-static sigaction_func_t real_sigaction_ptr = nullptr;
-static timer_create_func_t real_timer_create_ptr = nullptr;
-static timer_settime_func_t real_timer_settime_ptr = nullptr;
-static timer_delete_func_t real_timer_delete_ptr = nullptr;
 
 static void ensure_real_funcs() {
     if (!real_fopen_ptr) real_fopen_ptr = (FILE* (*)(const char*, const char*))dlsym(RTLD_DEFAULT, "fopen");
@@ -137,10 +128,6 @@ static void ensure_real_funcs() {
     if (!real_raise_ptr) real_raise_ptr = (int (*)(int))dlsym(RTLD_DEFAULT, "raise");
     if (!real_prctl_ptr) real_prctl_ptr = (prctl_func_t)dlsym(RTLD_DEFAULT, "prctl");
     if (!real_ptrace_ptr) real_ptrace_ptr = (ptrace_func_t)dlsym(RTLD_DEFAULT, "ptrace");
-    if (!real_sigaction_ptr) real_sigaction_ptr = (sigaction_func_t)dlsym(RTLD_DEFAULT, "sigaction");
-    if (!real_timer_create_ptr) real_timer_create_ptr = (timer_create_func_t)dlsym(RTLD_DEFAULT, "timer_create");
-    if (!real_timer_settime_ptr) real_timer_settime_ptr = (timer_settime_func_t)dlsym(RTLD_DEFAULT, "timer_settime");
-    if (!real_timer_delete_ptr) real_timer_delete_ptr = (timer_delete_func_t)dlsym(RTLD_DEFAULT, "timer_delete");
 }
 
 static bool is_caller_security_dso(void* return_address) {
@@ -2918,69 +2905,6 @@ static int fake_raise(int sig) {
     return fake_tgkill(getpid(), gettid(), sig);
 }
 
-static int fake_sigaction(int signum, const struct sigaction* act, struct sigaction* oldact) {
-    SAFE_BYTEHOOK_SCOPE();
-    ensure_real_funcs();
-    void* caller = __builtin_return_address(0);
-    if (is_caller_security_dso(caller)) {
-        if (signum == SIGTRAP) {
-            LOGI("fake_sigaction: Blocked SIGTRAP handler registration from security DSO");
-            if (oldact) {
-                memset(oldact, 0, sizeof(*oldact));
-                oldact->sa_handler = SIG_DFL;
-            }
-            return 0;
-        }
-    }
-    if (real_sigaction_ptr) return real_sigaction_ptr(signum, act, oldact);
-    if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_sigaction, signum, act, oldact);
-    return sigaction(signum, act, oldact);
-}
-
-#define DUMMY_QSEC_TIMER_ID ((timer_t)(uintptr_t)0x1337)
-
-static int fake_timer_create(clockid_t clockid, struct sigevent* sevp, timer_t* timerid) {
-    SAFE_BYTEHOOK_SCOPE();
-    ensure_real_funcs();
-    void* caller = __builtin_return_address(0);
-    if (is_caller_security_dso(caller)) {
-        Dl_info info;
-        if (dladdr(caller, &info) && info.dli_fname && (strstr(info.dli_fname, "libQSec") || strstr(info.dli_fname, "libfekit"))) {
-            LOGI("fake_timer_create: Neutralized timer_create from %s", info.dli_fname);
-            if (timerid) *timerid = DUMMY_QSEC_TIMER_ID;
-            return 0;
-        }
-    }
-    if (real_timer_create_ptr) return real_timer_create_ptr(clockid, sevp, timerid);
-    if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_timer_create, clockid, sevp, timerid);
-    return timer_create(clockid, sevp, timerid);
-}
-
-static int fake_timer_settime(timer_t timerid, int flags, const struct itimerspec* new_value, struct itimerspec* old_value) {
-    SAFE_BYTEHOOK_SCOPE();
-    ensure_real_funcs();
-    if (timerid == DUMMY_QSEC_TIMER_ID) {
-        LOGI("fake_timer_settime: Neutralized timer_settime for dummy security timer");
-        if (old_value) memset(old_value, 0, sizeof(*old_value));
-        return 0;
-    }
-    if (real_timer_settime_ptr) return real_timer_settime_ptr(timerid, flags, new_value, old_value);
-    if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_timer_settime, timerid, flags, new_value, old_value);
-    return timer_settime(timerid, flags, new_value, old_value);
-}
-
-static int fake_timer_delete(timer_t timerid) {
-    SAFE_BYTEHOOK_SCOPE();
-    ensure_real_funcs();
-    if (timerid == DUMMY_QSEC_TIMER_ID) {
-        LOGI("fake_timer_delete: Neutralized timer_delete for dummy security timer");
-        return 0;
-    }
-    if (real_timer_delete_ptr) return real_timer_delete_ptr(timerid);
-    if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_timer_delete, timerid);
-    return timer_delete(timerid);
-}
-
 extern "C" {
 int fake_bytehook_get_records(void* stub, void** records, size_t* len) {
     (void)stub;
@@ -3593,10 +3517,6 @@ void install_hooks() {
     HOOK_PARTIAL_LIBC("uname", fake_uname);
     HOOK_PARTIAL_LIBC("dlopen", fake_dlopen);
     HOOK_PARTIAL_LIBC("android_dlopen_ext", fake_android_dlopen_ext);
-    HOOK_PARTIAL_LIBC("sigaction", fake_sigaction);
-    HOOK_PARTIAL_LIBC("timer_create", fake_timer_create);
-    HOOK_PARTIAL_LIBC("timer_settime", fake_timer_settime);
-    HOOK_PARTIAL_LIBC("timer_delete", fake_timer_delete);
 }
 
 } // namespace hook_libc

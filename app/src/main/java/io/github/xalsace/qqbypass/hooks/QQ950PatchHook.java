@@ -4297,6 +4297,212 @@ public class QQ950PatchHook {
         java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
+     * Inspects whether a Marc network routing string contains VPN tunnel interfaces or subnets.
+     */
+    public static boolean isVpnNetworkRouting(String str) {
+        if (str == null || str.isEmpty()) {
+            return false;
+        }
+        if (str.contains("tun") || str.contains("198.18.") || str.contains("rmnet_data0") ||
+            str.contains("10.0.0.2") || str.contains("ppp") || str.contains("p2p-p2p0")) {
+            return true;
+        }
+        String[] parts = str.split(",");
+        if (parts.length > 0) {
+            try {
+                long transportMask = Long.parseLong(parts[0].trim());
+                // Bit 4 in Android NetworkCapabilities is TRANSPORT_VPN (1 << 4 = 16)
+                if ((transportMask & (1L << 4)) != 0) {
+                    return true;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return false;
+    }
+
+    /**
+     * Dynamically queries the real non-VPN network from ConnectivityManager (or NetworkInterface)
+     * and produces an authentic Key 284 routing record matching the device's actual network state.
+     */
+    public static String getCleanMarcNetworkRouting(android.content.Context context, String originalStr) {
+        try {
+            android.content.Context ctx = context;
+            if (ctx == null) {
+                try {
+                    ctx = (android.content.Context) Class.forName("android.app.ActivityThread")
+                            .getMethod("currentApplication").invoke(null);
+                } catch (Throwable ignored) {}
+            }
+            if (ctx == null) {
+                try {
+                    Class<?> baseAppCls = Class.forName("com.tencent.qphone.base.util.BaseApplication");
+                    ctx = (android.content.Context) XposedHelpers.callStaticMethod(baseAppCls, "getContext");
+                } catch (Throwable ignored) {}
+            }
+            if (ctx == null) {
+                try {
+                    Class<?> cthrowCls = Class.forName("com.tencent.turingfd.sdk.xq.Cthrow");
+                    Field f = cthrowCls.getDeclaredField("a");
+                    f.setAccessible(true);
+                    ctx = (android.content.Context) f.get(null);
+                } catch (Throwable ignored) {}
+            }
+
+            if (ctx != null) {
+                android.net.ConnectivityManager cm = (android.net.ConnectivityManager) ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+                if (cm != null) {
+                    android.net.Network[] networks = cm.getAllNetworks();
+                    if (networks != null) {
+                        android.net.Network chosenNetwork = null;
+                        // 1. Prefer active physical Wi-Fi (TRANSPORT_WIFI = 1)
+                        for (android.net.Network net : networks) {
+                            android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(net);
+                            if (nc != null && !nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) {
+                                if (nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) {
+                                    chosenNetwork = net;
+                                    break;
+                                }
+                            }
+                        }
+                        // 2. If no Wi-Fi, look for active Cellular (TRANSPORT_CELLULAR = 0)
+                        if (chosenNetwork == null) {
+                            for (android.net.Network net : networks) {
+                                android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(net);
+                                if (nc != null && !nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) {
+                                    if (nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) {
+                                        chosenNetwork = net;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // 3. Fallback: any active non-VPN network
+                        if (chosenNetwork == null) {
+                            for (android.net.Network net : networks) {
+                                android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(net);
+                                if (nc != null && !nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) {
+                                    chosenNetwork = net;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (chosenNetwork != null) {
+                            android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(chosenNetwork);
+                            android.net.LinkProperties lp = cm.getLinkProperties(chosenNetwork);
+                            if (nc != null && lp != null) {
+                                long j2 = 0;
+                                for (int i = 0; i < 64; i++) {
+                                    if (nc.hasTransport(i)) {
+                                        j2 |= (1L << i);
+                                    }
+                                }
+                                long j = 0;
+                                for (int i2 = 0; i2 < 64; i2++) {
+                                    if (nc.hasCapability(i2)) {
+                                        j |= (1L << i2);
+                                    }
+                                }
+                                String iface = lp.getInterfaceName();
+                                if (iface == null) iface = "";
+                                iface = iface.replace(",", "").replace("_", "");
+
+                                StringBuilder ipSb = new StringBuilder();
+                                java.util.List<android.net.LinkAddress> linkAddresses = lp.getLinkAddresses();
+                                if (linkAddresses != null && !linkAddresses.isEmpty()) {
+                                    for (int i3 = 0; i3 < linkAddresses.size(); i3++) {
+                                        ipSb.append(linkAddresses.get(i3).getAddress().getHostAddress());
+                                        if (i3 != linkAddresses.size() - 1) {
+                                            ipSb.append("_");
+                                        }
+                                    }
+                                }
+
+                                StringBuilder dnsSb = new StringBuilder();
+                                java.util.List<java.net.InetAddress> dnsServers = lp.getDnsServers();
+                                if (dnsServers != null && !dnsServers.isEmpty()) {
+                                    for (int i4 = 0; i4 < dnsServers.size(); i4++) {
+                                        dnsSb.append(dnsServers.get(i4).getHostAddress());
+                                        if (i4 != dnsServers.size() - 1) {
+                                            dnsSb.append("_");
+                                        }
+                                    }
+                                }
+
+                                String cleanResult = j2 + "," + j + "," + iface + "," + ipSb.toString() + "," + dnsSb.toString();
+                                XposedEntry.log("[TuringPatch] Resolved clean Marc physical routing: " + cleanResult);
+                                return cleanResult;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            XposedEntry.log("[TuringPatch] Failed to query ConnectivityManager for clean Marc routing: " + t.getMessage());
+        }
+
+        // Fallback: enumerate NetworkInterface for genuine physical interface (wlan0 / ccmni0)
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> nifs = java.net.NetworkInterface.getNetworkInterfaces();
+            if (nifs != null) {
+                java.net.NetworkInterface chosenNif = null;
+                boolean isWifi = false;
+                while (nifs.hasMoreElements()) {
+                    java.net.NetworkInterface nif = nifs.nextElement();
+                    if (nif == null || !nif.isUp() || nif.isLoopback()) continue;
+                    String name = nif.getName();
+                    if (name.startsWith("tun") || name.startsWith("dummy") || name.startsWith("ifb") ||
+                        name.startsWith("p2p") || name.startsWith("vgate") || name.startsWith("ovnet")) {
+                        continue;
+                    }
+                    if (name.startsWith("wlan")) {
+                        chosenNif = nif;
+                        isWifi = true;
+                        break;
+                    } else if (chosenNif == null) {
+                        chosenNif = nif;
+                        isWifi = name.startsWith("wlan");
+                    }
+                }
+
+                if (chosenNif != null) {
+                    StringBuilder ipSb = new StringBuilder();
+                    java.util.Enumeration<java.net.InetAddress> addrs = chosenNif.getInetAddresses();
+                    while (addrs.hasMoreElements()) {
+                        java.net.InetAddress addr = addrs.nextElement();
+                        if (addr != null && !addr.isLoopbackAddress()) {
+                            if (ipSb.length() > 0) ipSb.append("_");
+                            ipSb.append(addr.getHostAddress());
+                        }
+                    }
+
+                    long transportMask = isWifi ? (1L << 1) : (1L << 0);
+                    // Extract original capabilities if valid
+                    long capMask = 137711415296L;
+                    if (originalStr != null) {
+                        String[] parts = originalStr.split(",");
+                        if (parts.length > 1) {
+                            try {
+                                capMask = Long.parseLong(parts[1].trim());
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                    String iface = chosenNif.getName().replace(",", "").replace("_", "");
+                    String dns = isWifi ? "223.5.5.5_114.114.114.114" : "111.11.11.3";
+                    String cleanResult = transportMask + "," + capMask + "," + iface + "," + ipSb.toString() + "," + dns;
+                    XposedEntry.log("[TuringPatch] Fallback clean Marc physical routing: " + cleanResult);
+                    return cleanResult;
+                }
+            }
+        } catch (Throwable t) {
+            XposedEntry.log("[TuringPatch] Fallback Marc routing failed: " + t.getMessage());
+        }
+
+        // Final safe baseline (Wi-Fi)
+        return "2,137711415296,wlan0,172.16.110.60,223.5.5.5_114.114.114.114";
+    }
+
+    /**
      * Tier 18: TuringFD Port / Process & Accessibility Neutralization (Berry & this).
      */
     public static void hookTuringBerryAndThis(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
@@ -4477,10 +4683,8 @@ public class QQ950PatchHook {
                         Object result = param.getResult();
                         if (result instanceof String) {
                             String str = (String) result;
-                            if (str.contains("tun") || str.contains("198.18.") || str.startsWith("17,")) {
-                                String[] parts = str.split(",");
-                                String caps = parts.length > 1 ? parts[1] : "137711415296";
-                                param.setResult("1," + caps + ",rmnet_data0,10.0.0.2,10.0.0.1");
+                            if (isVpnNetworkRouting(str)) {
+                                param.setResult(getCleanMarcNetworkRouting(null, str));
                             }
                         }
                     }
@@ -4695,10 +4899,8 @@ public class QQ950PatchHook {
                                                     Object v = getRiskValue(map, 284);
                                                     if (v != null) {
                                                         String netStr = v.toString();
-                                                        if (netStr.contains("tun") || netStr.contains("198.18.") || netStr.startsWith("17,")) {
-                                                            String[] parts = netStr.split(",");
-                                                            String caps = parts.length > 1 ? parts[1] : "137711415296";
-                                                            putRiskValue(map, 284, "1," + caps + ",rmnet_data0,10.0.0.2,10.0.0.1");
+                                                        if (isVpnNetworkRouting(netStr)) {
+                                                            putRiskValue(map, 284, getCleanMarcNetworkRouting(null, netStr));
                                                             sanitized = true;
                                                             sanitizedDetails.add("284(VPN_InterfaceScrubbed)");
                                                         }
