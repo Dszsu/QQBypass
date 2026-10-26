@@ -908,7 +908,6 @@ public class NetworkReportHook {
                "StatSvc.RspMSFForceOffline".equals(cmd) ||
                "MessageSvc.PushForceOffline".equals(cmd) ||
                cmd.startsWith("trpc.login.ecdh.report") ||
-               "ConfigPushSvc.PushReq".equals(cmd) ||
                "cmd_forceLogout".equals(cmd);
     }
 

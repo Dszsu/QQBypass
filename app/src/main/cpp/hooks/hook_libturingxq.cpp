@@ -72,9 +72,19 @@ static FILE* xq_fake_fopen(const char* pathname, const char* mode) {
             LOGI("libturingxq: fopen mountinfo redirected to filtered mountinfo");
             return hook_libc::build_filtered_mountinfo();
         }
+        if (strstr(pathname, "smaps") != nullptr) {
+            LOGI("libturingxq: fopen smaps redirected to filtered smaps");
+            return hook_libc::build_filtered_smaps();
+        }
         if (strstr(pathname, "maps") != nullptr) {
             LOGI("libturingxq: fopen maps redirected to filtered maps");
             return hook_libc::build_filtered_maps();
+        }
+        if (strstr(pathname, "attr/current") != nullptr) {
+            return hook_libc::build_filtered_selinux_attr();
+        }
+        if (strstr(pathname, "cgroup") != nullptr) {
+            return hook_libc::build_filtered_cgroup();
         }
         if (strstr(pathname, "status") != nullptr) {
             return hook_libc::build_filtered_status();
@@ -102,25 +112,29 @@ static int xq_fake_open(const char* pathname, int flags, ...) {
     }
     if (pathname) {
         if (strstr(pathname, "mounts") != nullptr) {
-            FILE* fp = hook_libc::build_filtered_mounts();
-            return fp ? fileno(fp) : -1;
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_mounts());
         }
         if (strstr(pathname, "mountinfo") != nullptr) {
-            FILE* fp = hook_libc::build_filtered_mountinfo();
-            return fp ? fileno(fp) : -1;
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_mountinfo());
+        }
+        if (strstr(pathname, "smaps") != nullptr) {
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_smaps());
         }
         if (strstr(pathname, "maps") != nullptr) {
-            FILE* fp = hook_libc::build_filtered_maps();
-            return fp ? fileno(fp) : -1;
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_maps());
+        }
+        if (strstr(pathname, "attr/current") != nullptr) {
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_selinux_attr());
+        }
+        if (strstr(pathname, "cgroup") != nullptr) {
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_cgroup());
         }
         if (strstr(pathname, "status") != nullptr) {
-            FILE* fp = hook_libc::build_filtered_status();
-            return fp ? fileno(fp) : -1;
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_status());
         }
         if (strstr(pathname, "cmdline") != nullptr || hook_libc::is_proc_cmdline_path(pathname)) {
             LOGI("libturingxq: open cmdline redirected to virtual cmdline");
-            FILE* fp = hook_libc::build_virtual_cmdline(pathname);
-            return fp ? fileno(fp) : -1;
+            return hook_libc::open_virtual_file(hook_libc::build_virtual_cmdline(pathname));
         }
         if (hook_libc::is_sensitive_path(pathname)) {
             LOGD("libturingxq: open blocked sensitive path %s", pathname);
@@ -145,25 +159,29 @@ static int xq_fake_openat(int dirfd, const char* pathname, int flags, ...) {
     }
     if (pathname) {
         if (strstr(pathname, "mounts") != nullptr) {
-            FILE* fp = hook_libc::build_filtered_mounts();
-            return fp ? fileno(fp) : -1;
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_mounts());
         }
         if (strstr(pathname, "mountinfo") != nullptr) {
-            FILE* fp = hook_libc::build_filtered_mountinfo();
-            return fp ? fileno(fp) : -1;
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_mountinfo());
+        }
+        if (strstr(pathname, "smaps") != nullptr) {
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_smaps());
         }
         if (strstr(pathname, "maps") != nullptr) {
-            FILE* fp = hook_libc::build_filtered_maps();
-            return fp ? fileno(fp) : -1;
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_maps());
+        }
+        if (strstr(pathname, "attr/current") != nullptr) {
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_selinux_attr());
+        }
+        if (strstr(pathname, "cgroup") != nullptr) {
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_cgroup());
         }
         if (strstr(pathname, "status") != nullptr) {
-            FILE* fp = hook_libc::build_filtered_status();
-            return fp ? fileno(fp) : -1;
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_status());
         }
         if (strstr(pathname, "cmdline") != nullptr || hook_libc::is_proc_cmdline_path(pathname)) {
             LOGI("libturingxq: open cmdline redirected to virtual cmdline");
-            FILE* fp = hook_libc::build_virtual_cmdline(pathname);
-            return fp ? fileno(fp) : -1;
+            return hook_libc::open_virtual_file(hook_libc::build_virtual_cmdline(pathname));
         }
         if (hook_libc::is_sensitive_path(pathname)) {
             LOGD("libturingxq: openat blocked sensitive path %s", pathname);

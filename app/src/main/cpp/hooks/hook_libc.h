@@ -28,6 +28,7 @@ FILE* build_filtered_status();
 FILE* build_filtered_wchan();
 FILE* build_filtered_cgroup();
 FILE* build_virtual_cmdline(const char* pathname);
+int open_virtual_file(FILE* fake);
 bool is_proc_cmdline_path(const char* path);
 bool is_root_proc_path(const char* path);
 bool handle_virtual_stat(const char* pathname, struct stat* statbuf);

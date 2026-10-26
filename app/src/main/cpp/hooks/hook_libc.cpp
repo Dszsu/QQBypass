@@ -1348,7 +1348,7 @@ bool handle_virtual_stat(const char* pathname, struct stat* statbuf) {
     return false;
 }
 
-static inline int open_virtual_file(FILE* fake) {
+int open_virtual_file(FILE* fake) {
     if (!fake) return -1;
     int fd = dup(fileno(fake));
     fclose(fake);
