@@ -794,12 +794,6 @@ public class QQ950PatchHook {
                                 } catch (Throwable ignored) {}
                             }
                         } catch (Throwable ignored) {}
-                    } else {
-                        Object proxy = createSafeRiskDetectRespProxy();
-                        if (proxy != null) {
-                            p.setResult(proxy);
-                            XposedEntry.log("[TuringPatch] Fallback null reqRiskDetectV2 with safe proxy @ " + cls);
-                        }
                     }
                 }
             });
@@ -822,37 +816,6 @@ public class QQ950PatchHook {
                     }
                 }
             });
-        }
-    }
-
-    private static Object createSafeRiskDetectRespProxy() {
-        ClassLoader cl = HookConfig.getClassLoader();
-        Class<?> iface = XposedHelpers.findClassIfExists("com.tencent.turingfd.sdk.xq.RiskDetectResp", cl);
-        if (iface == null) {
-            iface = XposedHelpers.findClassIfExists("com.tencent.tfd.sdk.wxa.RiskDetectResp", cl);
-        }
-        if (iface == null) return null;
-
-        try {
-            return Proxy.newProxyInstance(cl, new Class<?>[]{iface}, new InvocationHandler() {
-                @Override
-                public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                    String name = method.getName();
-                    if ("getErrorCode".equals(name)) return -10001L;
-                    if ("getDeviceToken".equals(name)) return getOrGenerateDeviceToken();
-                    if ("isDowngrade".equals(name)) return false;
-                    if ("getStagePackTimeMillis".equals(name) || "getStageReqTimeMillis".equals(name)) return 0L;
-
-                    Class<?> ret = method.getReturnType();
-                    if (ret == boolean.class) return false;
-                    if (ret == int.class) return -10001;
-                    if (ret == long.class) return -10001L;
-                    if (ret == String.class) return getOrGenerateDeviceToken();
-                    return null;
-                }
-            });
-        } catch (Throwable t) {
-            return null;
         }
     }
 
@@ -896,11 +859,6 @@ public class QQ950PatchHook {
                                     }
                                 }
                             } catch (Throwable ignored) {}
-                        } else {
-                            Object proxy = createSafeTuringDIDProxy();
-                            if (proxy != null) {
-                                p.setResult(proxy);
-                            }
                         }
                     }
                 });
@@ -924,37 +882,6 @@ public class QQ950PatchHook {
                     }
                 }
             });
-        }
-    }
-
-    private static Object createSafeTuringDIDProxy() {
-        ClassLoader cl = HookConfig.getClassLoader();
-        Class<?> iface = XposedHelpers.findClassIfExists("com.tencent.turingfd.sdk.xq.ITuringDID", cl);
-        if (iface == null) {
-            iface = XposedHelpers.findClassIfExists("com.tencent.tfd.sdk.wxa.ITuringDID", cl);
-        }
-        if (iface == null) return null;
-
-        try {
-            return Proxy.newProxyInstance(cl, new Class<?>[]{iface}, new InvocationHandler() {
-                @Override
-                public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                    String name = method.getName();
-                    if ("getErrorCode".equals(name)) return 1;
-                    if ("getOpenIdTicket".equals(name)) return getOrGenerateOpenIdTicket();
-                    if ("getAIDCode".equals(name) || "getAIDTicket".equals(name) || "getTAIDTicket".equals(name)) return getOrGenerateOpenIdTicket();
-                    if ("getExpiredTimestamp".equals(name)) return 0L;
-
-                    Class<?> ret = method.getReturnType();
-                    if (ret == boolean.class) return false;
-                    if (ret == int.class) return 1;
-                    if (ret == long.class) return 0L;
-                    if (ret == String.class) return getOrGenerateOpenIdTicket();
-                    return null;
-                }
-            });
-        } catch (Throwable t) {
-            return null;
         }
     }
 
@@ -1559,83 +1486,6 @@ public class QQ950PatchHook {
             });
         }
 
-        // 3. TuringSdkImp$a: onException, onFinish, onFinishFrameCheck
-        final String callbackCls = "com.tencent.could.huiyansdk.turingmodule.TuringSdkImp$a";
-        Class<?> cbClass = XposedHelpers.findClassIfExists(callbackCls, cl);
-        if (cbClass != null && !sHookedFaceClasses.contains(cbClass)) {
-            sHookedFaceClasses.add(cbClass);
-            HookUtils.hookAllMethods(cbClass, "onException", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult(null); // void, suppress exception
-                    try {
-                        Object thisObj = param.thisObject;
-                        byte[] safeToken = new byte[64];
-                        java.util.Arrays.fill(safeToken, (byte) 1);
-                        XposedHelpers.callMethod(thisObj, "onFinish", 0L, safeToken);
-                        XposedEntry.log("[FacePatch] Recovered from TuringSdkImp$a.onException -> dispatched onFinish(0L, token)");
-                    } catch (Throwable t) {
-                        XposedEntry.log("[FacePatch] Failed to dispatch fallback onFinish: " + t.getMessage());
-                    }
-                }
-            });
-            HookUtils.hookAllMethods(cbClass, "onFinish", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length >= 2) {
-                        if (param.args[0] instanceof Number && ((Number) param.args[0]).longValue() != 0) {
-                            param.args[0] = 0L;
-                        }
-                        if (param.args[1] == null) {
-                            param.args[1] = new byte[32];
-                        }
-                        XposedEntry.log("[FacePatch] Sanitized TuringSdkImp$a.onFinish args -> 0L");
-                    }
-                }
-            });
-            HookUtils.hookAllMethods(cbClass, "onFinishFrameCheck", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length >= 2) {
-                        if (param.args[0] instanceof Number && ((Number) param.args[0]).longValue() != 0) {
-                            param.args[0] = 0L;
-                        }
-                        if (param.args[1] == null) {
-                            param.args[1] = new byte[32];
-                        }
-                        XposedEntry.log("[FacePatch] Sanitized TuringSdkImp$a.onFinishFrameCheck args -> 0L");
-                    }
-                }
-            });
-            XposedEntry.log("[FacePatch] Hooked TuringSdkImp$a callbacks");
-        }
-
-        // 4. Turing helper: com.tencent.could.huiyansdk.turing.d.a(long, byte[])
-        final String dCls = "com.tencent.could.huiyansdk.turing.d";
-        Class<?> dClass = XposedHelpers.findClassIfExists(dCls, cl);
-        if (dClass != null && !sHookedFaceClasses.contains(dClass)) {
-            sHookedFaceClasses.add(dClass);
-            HookUtils.hookAllMethods(dClass, "a", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length >= 2) {
-                        if (param.args[0] instanceof Number) {
-                            long code = ((Number) param.args[0]).longValue();
-                            if (code != 0) {
-                                param.args[0] = 0L;
-                                XposedEntry.log("[FacePatch] Sanitized HuiYan Turing retCode: " + code + " -> 0");
-                            }
-                        }
-                        if (param.args[1] == null) {
-                            param.args[1] = new byte[32];
-                            XposedEntry.log("[FacePatch] Provided fallback non-null Turing face token buffer");
-                        }
-                    }
-                }
-            });
-            XposedEntry.log("[FacePatch] Hooked HuiYan turing.d result consumer");
-        }
-
         // 5. TuringResultCacheEntity: setTuringEnvErrorStr & getTuringEnvErrorStr
         final String cacheCls = "com.tencent.could.huiyansdk.entity.TuringResultCacheEntity";
         Class<?> cacheClass = XposedHelpers.findClassIfExists(cacheCls, cl);
@@ -1667,94 +1517,6 @@ public class QQ950PatchHook {
                 }
             });
             XposedEntry.log("[FacePatch] Hooked TuringResultCacheEntity.setTuringEnvErrorStr, getTuringEnvErrorStr, isNeedFrameCheck");
-        }
-
-        // 6. TuringCam arWPM: a() status, b() so load & c() native init
-        final String arwpmCls = "com.tencent.turingcam.arWPM";
-        Class<?> arwpmClass = XposedHelpers.findClassIfExists(arwpmCls, cl);
-        if (arwpmClass != null && !sHookedFaceClasses.contains(arwpmClass)) {
-            sHookedFaceClasses.add(arwpmClass);
-            HookUtils.hookAllMethods(arwpmClass, "a", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.method instanceof java.lang.reflect.Method) {
-                        java.lang.reflect.Method m = (java.lang.reflect.Method) param.method;
-                        if (m.getReturnType() == int.class && (param.args == null || param.args.length == 0)) {
-                            if (param.getResult() instanceof Integer && ((Integer) param.getResult()) != 0) {
-                                param.setResult(0); // normalize error to 0 (initialized and healthy)
-                            }
-                        }
-                    }
-                }
-            });
-            HookUtils.hookAllMethods(arwpmClass, "b", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    try {
-                        java.util.concurrent.atomic.AtomicBoolean b = (java.util.concurrent.atomic.AtomicBoolean) XposedHelpers.getStaticObjectField(arwpmClass, "b");
-                        if (b != null) b.set(true);
-                    } catch (Throwable ignored) {}
-                    param.setResult(0);
-                }
-            });
-            HookUtils.hookAllMethods(arwpmClass, "c", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    try {
-                        java.util.concurrent.atomic.AtomicBoolean c = (java.util.concurrent.atomic.AtomicBoolean) XposedHelpers.getStaticObjectField(arwpmClass, "f1141c");
-                        if (c != null) c.set(true);
-                    } catch (Throwable ignored) {}
-                    param.setResult(0);
-                }
-            });
-            XposedEntry.log("[FacePatch] Hooked arWPM.a, arWPM.b & arWPM.c -> 0");
-        }
-
-        // 7. TuringCam JD1Ej: a(TuringFaceBuilder) & b() SkEpO
-        final String jd1ejCls = "com.tencent.turingcam.JD1Ej";
-        Class<?> jd1ejClass = XposedHelpers.findClassIfExists(jd1ejCls, cl);
-        if (jd1ejClass != null && !sHookedFaceClasses.contains(jd1ejClass)) {
-            sHookedFaceClasses.add(jd1ejClass);
-            HookUtils.hookAllMethods(jd1ejClass, "a", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.method instanceof java.lang.reflect.Method) {
-                        java.lang.reflect.Method m = (java.lang.reflect.Method) param.method;
-                        // ONLY hook int a(TuringFaceBuilder) -> return 0
-                        // NEVER touch static JD1Ej a() or byte[] a(String)
-                        if (m.getReturnType() == int.class && param.args != null && param.args.length == 1) {
-                            param.setResult(0);
-                        }
-                    }
-                }
-            });
-            Class<?> skepoCls = XposedHelpers.findClassIfExists("com.tencent.turingcam.JD1Ej$SkEpO", cl);
-            if (skepoCls != null) {
-                HookUtils.hookAllMethods(jd1ejClass, "b", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Object result = param.getResult();
-                        if (result != null) {
-                            try {
-                                int code = XposedHelpers.getIntField(result, "a");
-                                if (code != 0) {
-                                    XposedHelpers.setIntField(result, "a", 0);
-                                    XposedEntry.log("[FacePatch] JD1Ej.b returned code " + code + " -> sanitized to 0");
-                                }
-                            } catch (Throwable ignored) {}
-                        } else {
-                            try {
-                                Object safeSkEpO = XposedHelpers.newInstance(skepoCls);
-                                XposedHelpers.setIntField(safeSkEpO, "a", 0);
-                                XposedHelpers.setObjectField(safeSkEpO, "b", "");
-                                param.setResult(safeSkEpO);
-                                XposedEntry.log("[FacePatch] Constructed safe SkEpO for null JD1Ej.b");
-                            } catch (Throwable ignored) {}
-                        }
-                    }
-                });
-            }
-            XposedEntry.log("[FacePatch] Hooked JD1Ej.a & JD1Ej.b");
         }
 
         // 8. HuiYanSdkImp: sendBuriedPointInfo & doOnFail
@@ -3818,52 +3580,6 @@ public class QQ950PatchHook {
                 }
             });
         }
-
-        // 4. Pre-warm SecSig SharedPreferences cache with authentic official PASS status
-        prewarmSecSigCache(cl, profile);
-
-        // 5. Backstop hook for signature$SignatureResult & signature$SignatureKickData:
-        // Ensure u32_check_result == 0 as fallback without arbitrarily clearing display text.
-        Class<?> sigResultCls = XposedHelpers.findClassIfExists("com.tencent.ims.signature$SignatureResult", cl);
-        if (sigResultCls != null && sHooked9375Classes.add(sigResultCls)) {
-            HookUtils.hookAllConstructors(sigResultCls, new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    sanitizeSignatureResult(p.thisObject);
-                }
-            });
-        }
-
-        Class<?> sigKickCls = XposedHelpers.findClassIfExists("com.tencent.ims.signature$SignatureKickData", cl);
-        if (sigKickCls != null && sHooked9375Classes.add(sigKickCls)) {
-            HookUtils.hookAllConstructors(sigKickCls, new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    sanitizeSignatureKickData(p.thisObject);
-                }
-            });
-        }
-    }
-
-    private static void prewarmSecSigCache(ClassLoader cl, IVersionProfile profile) {
-        try {
-            Class<?> baseAppCls = XposedHelpers.findClassIfExists("com.tencent.qphone.base.util.BaseApplication", cl);
-            if (baseAppCls != null) {
-                android.content.Context ctx = (android.content.Context) XposedHelpers.callStaticMethod(baseAppCls, "getContext");
-                if (ctx != null) {
-                    android.content.SharedPreferences sp = ctx.getSharedPreferences("SecSig", 0);
-                    android.content.SharedPreferences.Editor edit = sp.edit();
-                    edit.putString("SecMd5Entry", profile.getOfficialApkMd5Upper());
-                    edit.putInt("SecResEntry", 1 ^ 18); // 1 = PASS (1 ^ 18 = 19)
-                    edit.putLong("SecStampEntry", System.currentTimeMillis() ^ 18);
-                    edit.putInt("SecCacheTime", 604800); // 7 days official cache
-                    edit.apply();
-                    XposedEntry.log("[SecSigCache] Pre-warmed SecSig SharedPreferences with official PASS credentials for " + profile.getVersionName());
-                }
-            }
-        } catch (Throwable t) {
-            XposedEntry.log("[SecSigCache] Note on pre-warming: " + t.getMessage());
-        }
     }
 
     private static void sanitizeSignatureReport(Object obj) {
@@ -3917,39 +3633,6 @@ public class QQ950PatchHook {
         } catch (Throwable ignored) {}
     }
 
-    private static void sanitizeSignatureResult(Object obj) {
-        if (obj == null) return;
-        try {
-            Object u32CheckResult = XposedHelpers.getObjectField(obj, "u32_check_result");
-            if (u32CheckResult != null && (Integer) XposedHelpers.callMethod(u32CheckResult, "get") != 0) {
-                XposedHelpers.callMethod(u32CheckResult, "set", 0);
-                XposedEntry.log("[SignatureResult] Fallback: normalized SignatureResult.u32_check_result -> 0 (PASS)");
-            }
-        } catch (Throwable ignored) {}
-    }
-
-    private static void sanitizeSignatureKickData(Object obj) {
-        if (obj == null) return;
-        try {
-            Object u32CheckResult = XposedHelpers.getObjectField(obj, "u32_check_result");
-            if (u32CheckResult != null && (Integer) XposedHelpers.callMethod(u32CheckResult, "get") != 0) {
-                XposedHelpers.callMethod(u32CheckResult, "set", 0);
-                XposedEntry.log("[SignatureKickData] Fallback: normalized SignatureKickData.u32_check_result -> 0 (PASS)");
-            }
-        } catch (Throwable ignored) {}
-    }
-
-    private static void sanitizeIntChkReportRsp(Object obj) {
-        if (obj == null) return;
-        try {
-            Object needStrike = XposedHelpers.getObjectField(obj, "uint32_need_strike");
-            if (needStrike != null && (Integer) XposedHelpers.callMethod(needStrike, "get") == 1) {
-                XposedHelpers.callMethod(needStrike, "set", 2); // 2 = NO STRIKE
-                XposedEntry.log("[IntChkPB] Disarmed intchk strike response: uint32_need_strike -> 2 (NO STRIKE)");
-            }
-        } catch (Throwable ignored) {}
-    }
-
     private static final java.util.Set<ClassLoader> sHookedPbClassLoaders =
         java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
@@ -3987,23 +3670,7 @@ public class QQ950PatchHook {
                 }
             }
         });
-
-        // 2. Root mergeFrom() hook: sanitize incoming ProtoBuf responses after deserialization
-        HookUtils.hookAllMethods(messageMicroCls, "mergeFrom", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.thisObject == null) return;
-                String clsName = p.thisObject.getClass().getName();
-                if ("com.tencent.ims.signature$SignatureResult".equals(clsName)) {
-                    sanitizeSignatureResult(p.thisObject);
-                } else if ("com.tencent.ims.signature$SignatureKickData".equals(clsName)) {
-                    sanitizeSignatureKickData(p.thisObject);
-                } else if ("com.tencent.ims.intchk$ReportCheckResultRsp".equals(clsName)) {
-                    sanitizeIntChkReportRsp(p.thisObject);
-                }
-            }
-        });
-        XposedEntry.log("[MessageMicroPatch] Installed unified ProtoBuf root toByteArray & mergeFrom sanitizers");
+        XposedEntry.log("[MessageMicroPatch] Installed unified ProtoBuf root toByteArray sanitizer");
     }
 
     /**
@@ -4168,17 +3835,6 @@ public class QQ950PatchHook {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                     sanitizeIntChkCheckResult(p.thisObject);
-                }
-            });
-        }
-
-        // 3. Hook com.tencent.ims.intchk$ReportCheckResultRsp: Disarm server strike at PB level if present
-        Class<?> reportRspCls = XposedHelpers.findClassIfExists("com.tencent.ims.intchk$ReportCheckResultRsp", cl);
-        if (reportRspCls != null && sHooked9375Classes.add(reportRspCls)) {
-            HookUtils.hookAllConstructors(reportRspCls, new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    sanitizeIntChkReportRsp(p.thisObject);
                 }
             });
         }

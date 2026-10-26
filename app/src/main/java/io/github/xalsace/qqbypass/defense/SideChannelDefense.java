@@ -190,6 +190,13 @@ public class SideChannelDefense {
     // ==========================================================
 
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
+        // Strictly guard against spoofing side-channel data on real hardware.
+        // Faking link speed (866 Mbps), RSSI, battery, or motion sensors on a genuine device
+        // creates immediate statistical discrepancies with Beacon / MSF telemetry (e.g. cellular data).
+        if (!HookConfig.ENABLE_DEVICE_SPOOF) {
+            return;
+        }
+
         // 1. Hook BatteryManager query via Intent.ACTION_BATTERY_CHANGED
         hookBatteryReceiver();
 

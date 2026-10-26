@@ -120,18 +120,6 @@ static void* install_hooks_thread(void* arg) {
     g_bytehook_hooks_installed = true;
     sanitize_system_memory_permissions();
 
-    pthread_t patch_th;
-    pthread_create(&patch_th, nullptr, [](void*) -> void* {
-        for (int i = 0; i < 15; i++) {
-            usleep(400000); // 400ms interval for early startup DSO patching
-            hook_libfekit::patch_libfekit_in_memory();
-            hook_libqsec::patch_libqsec_in_memory();
-            sanitize_system_memory_permissions();
-        }
-        return nullptr;
-    }, nullptr);
-    pthread_detach(patch_th);
-
     pthread_mutex_unlock(&g_init_mutex);
 
     return nullptr;

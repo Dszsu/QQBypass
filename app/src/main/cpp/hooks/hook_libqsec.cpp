@@ -174,15 +174,9 @@ static int hooked_dladdr(const void* addr, Dl_info* info) {
             strcasestr(fname, "shamiko") ||
             strcasestr(fname, "lspatch") ||
             strcasestr(fname, "liblspatch")) {
-            LOGI("QSec dladdr spoofed: %s -> libc.so", info->dli_fname);
-#if defined(__aarch64__) || defined(__x86_64__)
-            info->dli_fname = "/system/lib64/libc.so";
-#else
-            info->dli_fname = "/system/lib/libc.so";
-#endif
-            info->dli_fbase = nullptr;
-            info->dli_sname = nullptr;
-            info->dli_saddr = nullptr;
+            LOGI("QSec dladdr masked: %s", info->dli_fname);
+            memset(info, 0, sizeof(*info));
+            return 0;
         }
     }
 
@@ -192,7 +186,7 @@ static int hooked_dladdr(const void* addr, Dl_info* info) {
 extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long a4, long a5, long syscall_num, void* caller_pc);
 
 #if defined(__aarch64__)
-static const uint32_t QSEC_TRAMPOLINE_TEMPLATE[] = {
+[[maybe_unused]] static const uint32_t QSEC_TRAMPOLINE_TEMPLATE[] = {
     0xd10383ff, // sub sp, sp, #0xe0
     0xa90d7bfd, // stp x29, x30, [sp, #0xd0]
     0xa9010be1, // stp x1, x2, [sp, #0x10]
@@ -236,7 +230,7 @@ struct QSecSearchInfo {
     size_t text_size;
 };
 
-static int find_qsec_callback(struct dl_phdr_info* info, size_t size, void* data) {
+[[maybe_unused]] static int find_qsec_callback(struct dl_phdr_info* info, size_t size, void* data) {
     (void)size;
     QSecSearchInfo* search = (QSecSearchInfo*)data;
     if (!info || !info->dlpi_name) return 0;
@@ -261,84 +255,9 @@ namespace hook_libqsec {
 static std::atomic<bool> s_qsec_patched{false};
 
 void patch_libqsec_in_memory() {
-#if defined(__aarch64__)
-    if (s_qsec_patched.load(std::memory_order_relaxed)) return;
-
-    QSecSearchInfo search{"libQSec.so", 0, 0, 0};
-    dl_iterate_phdr(find_qsec_callback, &search);
-
-    if (!search.base) {
-        FILE* fp = fopen("/proc/self/maps", "r");
-        if (fp) {
-            char line[1024];
-            while (fgets(line, sizeof(line), fp)) {
-                if (strstr(line, "libQSec.so") && strstr(line, "r-xp")) {
-                    uintptr_t start = 0, end = 0;
-                    if (sscanf(line, "%lx-%lx", &start, &end) == 2) {
-                        search.base = start;
-                        search.text_vaddr = 0;
-                        search.text_size = end - start;
-                        break;
-                    }
-                }
-            }
-            fclose(fp);
-        }
-    }
-
-    if (!search.base || !search.text_size) {
-        return;
-    }
-
-    uintptr_t text_start = search.base + search.text_vaddr;
-    uintptr_t text_end = text_start + search.text_size;
-
-    // Allocate 4KB proximity trampoline page in guard gap right after libQSec.so text
-    uintptr_t hint = search.base + ((search.text_size + 4095) & ~4095);
-    void* tramp_page = mmap((void*)hint, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
-
-    if (tramp_page == MAP_FAILED) {
-        LOGE("libQSec.so: Failed to allocate proximity trampoline page at %p (errno=%d)", (void*)hint, errno);
-        return;
-    }
-
-    hook_libc::register_trampoline_range((uintptr_t)tramp_page, (uintptr_t)tramp_page + 4096);
-
-    uint8_t* tp = (uint8_t*)tramp_page;
-    memcpy(tp, QSEC_TRAMPOLINE_TEMPLATE, sizeof(QSEC_TRAMPOLINE_TEMPLATE));
-    uint64_t target_fn = (uint64_t)&c_fekit_syscall_handler;
-    memcpy(tp + 136, &target_fn, sizeof(target_fn));
-
-    mprotect(tramp_page, 4096, PROT_READ | PROT_EXEC);
-    __builtin___clear_cache((char*)tramp_page, (char*)tramp_page + 4096);
-
-    size_t patched_count = 0;
-    uint32_t* p = (uint32_t*)text_start;
-    uint32_t* pend = (uint32_t*)(text_end - 4);
-
-    for (; p <= pend; p++) {
-        if (*p == 0xd4000001) { // svc #0
-            intptr_t delta = (intptr_t)tramp_page - (intptr_t)p;
-            if (delta >= -0x8000000 && delta <= 0x7fffffc) {
-                uint32_t imm26 = (uint32_t)((delta >> 2) & 0x03ffffff);
-                uint32_t bl_inst = 0x94000000 | imm26;
-                uintptr_t page_addr = ((uintptr_t)p) & ~4095;
-                mprotect((void*)page_addr, 4096 * 2, PROT_READ | PROT_WRITE | PROT_EXEC);
-                *p = bl_inst;
-                __builtin___clear_cache((char*)p, (char*)(p + 1));
-                mprotect((void*)page_addr, 4096 * 2, PROT_READ | PROT_EXEC);
-                patched_count++;
-                LOGI("libQSec.so: Patched inline svc #0 at %p (offset 0x%lx) -> bl trampoline",
-                     p, (unsigned long)((uintptr_t)p - search.base));
-            }
-        }
-    }
-
-    s_qsec_patched.store(true, std::memory_order_relaxed);
-    (void)patched_count;
-    LOGI("libQSec.so inline syscall patching complete: %zu stubs redirected to proximity trampoline at %p",
-         patched_count, tramp_page);
-#endif
+    // No-op: Do NOT patch .text segment or inject proximity trampolines into libQSec.so.
+    if (s_qsec_patched.exchange(true)) return;
+    LOGI("libQSec.so: Preserving authentic text segment & code integrity (in-memory patching disabled)");
 }
 
 /**
