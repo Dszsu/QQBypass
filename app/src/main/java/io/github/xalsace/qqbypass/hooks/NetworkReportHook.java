@@ -480,21 +480,6 @@ public class NetworkReportHook {
                                 } catch (Throwable ignored) {}
                             }
                         }
-
-                        // Prevent premature timeouts for ECDH, login refresh, and status keepalive during Android Doze / deep sleep
-                        if (command != null && (command.startsWith("trpc.o3.ecdh_access.") ||
-                                                command.startsWith("trpc.login.ecdh.") ||
-                                                command.startsWith("wtlogin.") ||
-                                                command.startsWith("trpc.qq_new_tech.status_svc.") ||
-                                                command.startsWith("ConfigService.ClientReq"))) {
-                            try {
-                                long curTimeout = ((Number) XposedHelpers.callMethod(toServiceMsg, "getTimeout")).longValue();
-                                if (curTimeout < 60000L) {
-                                    XposedHelpers.callMethod(toServiceMsg, "setTimeout", 90000L);
-                                    XposedEntry.log("[NetworkDefense] Extended " + command + " timeout to 90s (was " + curTimeout + "ms)");
-                                }
-                            } catch (Throwable ignored) {}
-                        }
                     } catch (Throwable ignored) {}
 
                     // Always audit outgoing SSO messages if enabled (excluding Heartbeat.Alive to prevent log flood)

@@ -3191,12 +3191,22 @@ public class QQ950PatchHook {
         // inconsistency between the certificate chain and parsed status, triggering session revocation.
         // Tencent server accepts authentic bootloader states on real unlocked devices.
 
-        // Socket detection neutralization (0 = Connection refused / not found, clean status)
+        // Socket detection neutralization: only filter suspicious hooks/debug sockets (0 = Connection refused / not found)
+        // Do NOT blindly return 0 for legitimate internal abstract sockets to avoid breaking IPC and telemetry
         hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.SocketStatus", "checkSocket", lpparam, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 if (p.getResult() instanceof Integer && ((Integer) p.getResult()) != 0) {
-                    p.setResult(0);
+                    Object arg0 = (p.args != null && p.args.length > 0) ? p.args[0] : null;
+                    if (arg0 instanceof String) {
+                        String sockName = ((String) arg0).toLowerCase();
+                        if (sockName.contains("frida") || sockName.contains("xposed") ||
+                            sockName.contains("magisk") || sockName.contains("lsp") ||
+                            sockName.contains("zygisk") || sockName.contains("edx") ||
+                            sockName.contains("substrate") || sockName.contains("cydia")) {
+                            p.setResult(0);
+                        }
+                    }
                 }
             }
         });

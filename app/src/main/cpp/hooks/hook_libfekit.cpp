@@ -566,9 +566,9 @@ void patch_libfekit_in_memory() {
 void install_hooks() {
     patch_libfekit_in_memory();
 
-    // 命令执行类：全局拦截（调用频率低，安全）
-    TRACK_NATIVE_HOOK_ALL(nullptr, "system", (void*)fake_system, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_ALL(nullptr, "popen", (void*)fake_popen, nullptr, nullptr);
+    // 命令执行类：仅针对 libfekit.so 拦截，严禁全局拦截干扰官方进程组件与命令查询
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "system", (void*)fake_system, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "popen", (void*)fake_popen, nullptr, nullptr);
 
     // 字符串匹配：仅对 libfekit.so 作为调用方拦截，避免全局性能损耗
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "strstr", (void*)fake_strstr, nullptr, nullptr);

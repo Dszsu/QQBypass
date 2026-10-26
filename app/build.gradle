@@ -42,8 +42,8 @@ android {
         applicationId "io.github.xalsace.qqbypass"
         minSdk 26
         targetSdk 37
-        versionCode 131
-        versionName "1.0.131"
+        versionCode 132
+        versionName "1.0.132"
 
         externalNativeBuild {
             cmake {

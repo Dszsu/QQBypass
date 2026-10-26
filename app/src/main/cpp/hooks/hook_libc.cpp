@@ -81,8 +81,6 @@ static int (*real_kill_ptr)(pid_t, int) = nullptr;
 static int (*real_tkill_ptr)(pid_t, int) = nullptr;
 static int (*real_tgkill_ptr)(pid_t, pid_t, int) = nullptr;
 static int (*real_raise_ptr)(int) = nullptr;
-typedef int (*prctl_func_t)(int, unsigned long, unsigned long, unsigned long, unsigned long);
-static prctl_func_t real_prctl_ptr = nullptr;
 typedef long (*ptrace_func_t)(int, pid_t, void*, void*);
 static ptrace_func_t real_ptrace_ptr = nullptr;
 
@@ -126,7 +124,6 @@ static void ensure_real_funcs() {
     if (!real_tkill_ptr) real_tkill_ptr = (int (*)(pid_t, int))dlsym(RTLD_DEFAULT, "tkill");
     if (!real_tgkill_ptr) real_tgkill_ptr = (int (*)(pid_t, pid_t, int))dlsym(RTLD_DEFAULT, "tgkill");
     if (!real_raise_ptr) real_raise_ptr = (int (*)(int))dlsym(RTLD_DEFAULT, "raise");
-    if (!real_prctl_ptr) real_prctl_ptr = (prctl_func_t)dlsym(RTLD_DEFAULT, "prctl");
     if (!real_ptrace_ptr) real_ptrace_ptr = (ptrace_func_t)dlsym(RTLD_DEFAULT, "ptrace");
 }
 
@@ -3248,23 +3245,6 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
             return 0;
         }
     }
-#if defined(__aarch64__)
-    else if (number == 167) {
-#elif defined(__arm__)
-    else if (number == 172) {
-#elif defined(__NR_prctl)
-    else if (number == __NR_prctl) {
-#else
-    else if (false) {
-#endif
-        int option = (int)(uintptr_t)a1;
-        if (option == PR_SET_DUMPABLE && (long)a2 == 0) {
-            LOGI("fake_syscall: prctl(PR_SET_DUMPABLE, 0) neutralized");
-            return 0;
-        } else if (option == PR_GET_DUMPABLE) {
-            return 1;
-        }
-    }
 #ifdef __NR_kill
     else if (number == __NR_kill) {
         pid_t pid = (pid_t)(uintptr_t)a1;
@@ -3315,20 +3295,6 @@ static long fake_ptrace(int request, pid_t pid, void* addr, void* data) {
     if (real_ptrace_ptr) return real_ptrace_ptr(request, pid, addr, data);
     if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_ptrace, request, pid, addr, data);
     return syscall(__NR_ptrace, request, pid, addr, data);
-}
-
-static int fake_prctl(int option, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5) {
-    SAFE_BYTEHOOK_SCOPE();
-    ensure_real_funcs();
-    if (option == PR_SET_DUMPABLE && arg2 == 0) {
-        LOGI("fake_prctl: PR_SET_DUMPABLE(0) neutralized");
-        return 0;
-    } else if (option == PR_GET_DUMPABLE) {
-        return 1;
-    }
-    if (real_prctl_ptr) return real_prctl_ptr(option, arg2, arg3, arg4, arg5);
-    if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_prctl, option, arg2, arg3, arg4, arg5);
-    return syscall(__NR_prctl, option, arg2, arg3, arg4, arg5);
 }
 
 static bool libc_caller_filter(const char* caller_path_name, void* arg) {
@@ -3499,7 +3465,6 @@ void install_hooks() {
     HOOK_PARTIAL_LIBC("fstatat64", fake_fstatat);
     HOOK_PARTIAL_LIBC("syscall", fake_syscall);
     HOOK_PARTIAL_LIBC("ptrace", fake_ptrace);
-    HOOK_PARTIAL_LIBC("prctl", fake_prctl);
     HOOK_PARTIAL_LIBC("kill", fake_kill);
     HOOK_PARTIAL_LIBC("tkill", fake_tkill);
     HOOK_PARTIAL_LIBC("tgkill", fake_tgkill);
