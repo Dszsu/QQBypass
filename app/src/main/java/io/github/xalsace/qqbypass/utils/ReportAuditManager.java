@@ -394,12 +394,22 @@ public class ReportAuditManager {
             }
         };
 
+    private static final java.util.LinkedHashMap<String, String> sRecentPayloadFileNames =
+        new java.util.LinkedHashMap<String, String>(128, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(java.util.Map.Entry<String, String> eldest) {
+                return size() > 500;
+            }
+        };
+
     /**
      * Saves raw uncompressed binary payloads directly to disk for offline reverse engineering.
      * Enforces empty payload rejection and 5-second CRC32 deduplication to eliminate junk/duplicate files.
+     *
+     * @return The dumped file name (relative to log directory) or null if payload is empty/failed.
      */
-    public static void saveBinaryPayload(String subDirName, String cmd, int seq, byte[] payload) {
-        if (isEmptyPayload(payload)) return;
+    public static String saveBinaryPayload(String subDirName, String cmd, int seq, byte[] payload) {
+        if (isEmptyPayload(payload)) return null;
         try {
             String safeCmd = (cmd == null ? "unknown" : cmd.replaceAll("[^a-zA-Z0-9._-]", "_"));
             if (safeCmd.length() > 60) {
@@ -415,7 +425,10 @@ public class ReportAuditManager {
             synchronized (sRecentPayloadDeduplication) {
                 Long lastTime = sRecentPayloadDeduplication.get(dedupKey);
                 if (lastTime != null && (now - lastTime < 5000L)) {
-                    return; // Suppress duplicate payload dump
+                    String existing = sRecentPayloadFileNames.get(dedupKey);
+                    if (existing != null) {
+                        return existing;
+                    }
                 }
                 sRecentPayloadDeduplication.put(dedupKey, now);
             }
@@ -426,12 +439,20 @@ public class ReportAuditManager {
             }
             String timeTag = get30MinTimeTag(System.currentTimeMillis());
             long rand = System.currentTimeMillis() % 100000;
-            File targetFile = new File(baseDir, safeCmd + "_" + timeTag + "_seq" + seq + "_" + rand + ".bin");
+            String fileName = safeCmd + "_" + timeTag + "_seq" + seq + "_" + rand + ".bin";
+            File targetFile = new File(baseDir, fileName);
             try (java.io.FileOutputStream fos = new java.io.FileOutputStream(targetFile)) {
                 fos.write(payload);
                 fos.flush();
             }
-        } catch (Throwable ignored) {}
+            String relPath = subDirName + "/" + fileName;
+            synchronized (sRecentPayloadDeduplication) {
+                sRecentPayloadFileNames.put(dedupKey, relPath);
+            }
+            return relPath;
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private static String getCurrentTimestamp() {
@@ -979,13 +1000,20 @@ public class ReportAuditManager {
             }
 
             if (payload != null && payloadLen > 0) {
-                // 1. Structural Protobuf Decoding
+                // 1. Raw binary disk dump & record dumped file name
+                String dumpedFile = saveBinaryPayload("outbound_packets", cmd, 0, payload);
+                if (dumpedFile != null) {
+                    sb.append("Dumped Binary File: ").append(dumpedFile)
+                      .append(" (").append(payloadLen).append(" bytes)\n");
+                }
+
+                // 2. Structural Protobuf Decoding
                 String pbTree = decodeProtobuf(payload);
                 if (pbTree != null && !pbTree.trim().isEmpty()) {
                     sb.append("Decoded Protobuf Tree:\n").append(pbTree).append("\n");
                 }
 
-                // 2. Extracted printable strings
+                // 3. Extracted printable strings
                 List<String> printable = extractPrintableStringsWithOffsets(payload, 3, 50);
                 if (!printable.isEmpty()) {
                     sb.append("Extracted Printable Strings (").append(printable.size()).append(" entries):\n");
@@ -994,19 +1022,18 @@ public class ReportAuditManager {
                     }
                 }
 
-                // 3. Extracted JSON
+                // 4. Extracted JSON
                 String jsonStr = tryExtractJson(printable);
                 if (jsonStr != null) {
                     sb.append("Decoded JSON Data:\n    ").append(jsonStr).append("\n");
                 }
 
-                // 4. Hex dump: cancel 256B cutoff, allow up to 4096 bytes (covers full security payloads)
-                int dumpLimit = Math.min(payloadLen, 4096);
-                sb.append("Hex Dump Preview (up to ").append(dumpLimit).append(" bytes):\n");
-                sb.append(formatHexDump(payload, dumpLimit));
-
-                // 5. Raw binary disk dump
-                saveBinaryPayload("outbound_packets", cmd, 0, payload);
+                // 5. Hex dump: complete output for small payloads (<= 256 bytes);
+                // for large binary payloads, avoid flooding log with incomplete truncated previews
+                if (payloadLen <= 256) {
+                    sb.append("Hex Dump (").append(payloadLen).append(" bytes):\n");
+                    sb.append(formatHexDump(payload, payloadLen));
+                }
             }
 
             if (stackDepth > 0) {
@@ -1069,11 +1096,20 @@ public class ReportAuditManager {
             }
 
             if (payload != null && payloadLen > 0) {
+                // 1. Raw binary disk dump & record dumped file name
+                String dumpedFile = saveBinaryPayload("inbound_packets", cmd, ssoSeq, payload);
+                if (dumpedFile != null) {
+                    sb.append("Dumped Binary File: ").append(dumpedFile)
+                      .append(" (").append(payloadLen).append(" bytes)\n");
+                }
+
+                // 2. Structural Protobuf Decoding
                 String pbTree = decodeProtobuf(payload);
                 if (pbTree != null && !pbTree.trim().isEmpty()) {
                     sb.append("Decoded Protobuf Tree:\n").append(pbTree).append("\n");
                 }
 
+                // 3. Extracted printable strings
                 List<String> printable = extractPrintableStringsWithOffsets(payload, 3, 50);
                 if (!printable.isEmpty()) {
                     sb.append("Extracted Printable Strings (").append(printable.size()).append(" entries):\n");
@@ -1082,16 +1118,18 @@ public class ReportAuditManager {
                     }
                 }
 
+                // 4. Extracted JSON
                 String jsonStr = tryExtractJson(printable);
                 if (jsonStr != null) {
                     sb.append("Decoded JSON Data:\n    ").append(jsonStr).append("\n");
                 }
 
-                int dumpLimit = Math.min(payloadLen, 4096);
-                sb.append("Hex Dump Preview (up to ").append(dumpLimit).append(" bytes):\n");
-                sb.append(formatHexDump(payload, dumpLimit));
-
-                saveBinaryPayload("inbound_packets", cmd, ssoSeq, payload);
+                // 5. Hex dump: complete output for small payloads (<= 256 bytes);
+                // for large binary payloads, avoid flooding log with incomplete truncated previews
+                if (payloadLen <= 256) {
+                    sb.append("Hex Dump (").append(payloadLen).append(" bytes):\n");
+                    sb.append(formatHexDump(payload, payloadLen));
+                }
             }
 
             if (stackDepth > 0) {
@@ -1130,9 +1168,10 @@ public class ReportAuditManager {
         if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
         try {
             // Save raw uncompressed binary payload to disk before encryption
+            String dumpedFile = null;
             if (plainData != null && !isEmptyPayload(plainData)) {
                 String cmdName = (event != null && !event.isEmpty()) ? event : channel;
-                saveBinaryPayload("outbound_packets", cmdName, 0, plainData);
+                dumpedFile = saveBinaryPayload("outbound_packets", cmdName, 0, plainData);
             }
 
             String time = getCurrentTimestamp();
@@ -1156,14 +1195,20 @@ public class ReportAuditManager {
             }
 
             if (plainData != null && plainData.length > 0) {
-                sb.append("Payload Size: ").append(plainData.length).append(" bytes\n");
+                int plainLen = plainData.length;
+                sb.append("Payload Size: ").append(plainLen).append(" bytes\n");
+                if (dumpedFile != null) {
+                    sb.append("Dumped Binary File: ").append(dumpedFile)
+                      .append(" (").append(plainLen).append(" bytes)\n");
+                }
                 String pbTree = decodeProtobuf(plainData);
                 if (pbTree != null && !pbTree.trim().isEmpty()) {
                     sb.append("Decoded Protobuf Tree:\n").append(pbTree).append("\n");
                 }
-                int dumpLimit = Math.min(plainData.length, 4096);
-                sb.append("Hex Dump Preview (up to ").append(dumpLimit).append(" bytes):\n");
-                sb.append(formatHexDump(plainData, dumpLimit));
+                if (plainLen <= 256) {
+                    sb.append("Hex Dump (").append(plainLen).append(" bytes):\n");
+                    sb.append(formatHexDump(plainData, plainLen));
+                }
             }
 
             sb.append("Caller: ").append(getCallerSummary(6)).append("\n");
