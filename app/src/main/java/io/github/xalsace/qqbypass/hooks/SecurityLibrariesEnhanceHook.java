@@ -140,7 +140,7 @@ public class SecurityLibrariesEnhanceHook {
                         if (res instanceof String) {
                             String s = (String) res;
                             if (DynamicRootDetectionHook.isSuspiciousPackage(s) || s.contains("xposed")) {
-                                param.setResult("-1");
+                                param.setResult("[]");
                             }
                         }
                     }
@@ -166,16 +166,9 @@ public class SecurityLibrariesEnhanceHook {
                 // DO NOT hook getNetworkInterfaceNames with static "wlan0,rmnet_data0" (NetworkInterface.getNetworkInterfaces is already cleanly filtered).
                 // DO NOT hook getLibraryList with fake "12345678" (authentic Dtc.getLibraryList computes genuine system shared libraries hash).
 
-                // 6. getGoogleCertsVerify -> allow authentic GoogleAttestationParser, sanitize only if abnormal
-                HookUtils.hookAllMethods(clazz, "getGoogleCertsVerify", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Object res = param.getResult();
-                        if (res == null || "".equals(res)) {
-                            param.setResult("STATUS_GOOGLE_HARDWARE_ROOT|" + android.os.Build.MANUFACTURER + "|" + android.os.Build.MODEL + "|" + android.os.Build.VERSION.RELEASE + "|normal");
-                        }
-                    }
-                });
+                // 6. getGoogleCertsVerify:
+                // Allow authentic GoogleAttestationParser.GetGoogleAttestation() to run naturally.
+                // DO NOT inject fake "STATUS_GOOGLE_HARDWARE_ROOT|...|normal"! Fake status strings trigger w21 server kicks.
 
                 // 7. getPropSafe & systemGetSafe -> sanitize sensitive keys in afterHookedMethod
                 HookUtils.hookAllMethods(clazz, "getPropSafe", new XC_MethodHook() {

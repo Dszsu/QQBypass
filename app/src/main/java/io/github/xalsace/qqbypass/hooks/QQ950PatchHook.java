@@ -728,7 +728,7 @@ public class QQ950PatchHook {
                 if (res instanceof String) {
                     String s = (String) res;
                     if (DynamicRootDetectionHook.isSuspiciousPackage(s) || s.contains("xposed") || s.contains("auto")) {
-                        p.setResult("-1");
+                        p.setResult("[]");
                     }
                 }
             }
@@ -740,7 +740,7 @@ public class QQ950PatchHook {
                 if (res instanceof String) {
                     String s = (String) res;
                     if (DynamicRootDetectionHook.isSuspiciousPackage(s) || s.contains("xposed") || s.contains("auto")) {
-                        p.setResult("-1");
+                        p.setResult("[]");
                     }
                 }
             }
@@ -838,15 +838,15 @@ public class QQ950PatchHook {
                 @Override
                 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
                     String name = method.getName();
-                    if ("getErrorCode".equals(name)) return 0L;
+                    if ("getErrorCode".equals(name)) return -10001L;
                     if ("getDeviceToken".equals(name)) return getOrGenerateDeviceToken();
                     if ("isDowngrade".equals(name)) return false;
                     if ("getStagePackTimeMillis".equals(name) || "getStageReqTimeMillis".equals(name)) return 0L;
 
                     Class<?> ret = method.getReturnType();
                     if (ret == boolean.class) return false;
-                    if (ret == int.class) return 0;
-                    if (ret == long.class) return 0L;
+                    if (ret == int.class) return -10001;
+                    if (ret == long.class) return -10001L;
                     if (ret == String.class) return getOrGenerateDeviceToken();
                     return null;
                 }
@@ -4273,19 +4273,8 @@ public class QQ950PatchHook {
         if (cl == null) cl = HookConfig.getClassLoader();
         if (cl == null) return;
 
-        Class<?> turingPhoneCls = XposedHelpers.findClassIfExists("com.tencent.turingfd.sdk.xq.TuringPhoneService", cl);
-        if (turingPhoneCls != null && sHooked9375Classes.add(turingPhoneCls)) {
-            HookUtils.hookAllMethods(turingPhoneCls, "reqPhoneToken", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    if (p.getResult() != null) {
-                        try {
-                            XposedHelpers.setLongField(p.getResult(), "a", 0L); // ErrorCode 0
-                        } catch (Throwable ignored) {}
-                    }
-                }
-            });
-        }
+        // Allow authentic TuringPhoneService.reqPhoneToken to run naturally without reflection tampering.
+        // reqPhoneToken returns l2 (field 'a' is Norma, not long). Tampering causes reflection exceptions and token renewal stalls.
 
         Set<String> turingBridgeNames = new LinkedHashSet<>();
         List<DexMethodData> dexTuringList = DexKitDetector.getTuringBridges();
