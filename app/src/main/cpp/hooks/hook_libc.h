@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/vfs.h>
+#include <sys/socket.h>
 #include <dirent.h>
 #include <sys/system_properties.h>
 
@@ -17,12 +18,26 @@ bool is_sensitive_name(const char* name);
 bool is_sensitive_link_target(const char* target);
 bool is_sensitive_proc_fd(const char* path);
 bool is_sensitive_proc_fd(int dirfd, const char* path);
+bool is_virtual_or_vpn_interface_name(const char* name);
+bool is_filtered_ifindex(int ifindex);
+void record_filtered_ifindex(int ifindex);
+void sanitize_netlink_routing_response(void* buf, size_t len);
+
 FILE* build_filtered_maps();
 FILE* build_filtered_smaps();
 FILE* build_filtered_mounts();
 FILE* build_filtered_mountinfo();
 FILE* build_filtered_net_unix();
 FILE* build_filtered_net_tcp(bool is_v6 = false);
+FILE* build_filtered_net_dev();
+FILE* build_filtered_net_route();
+FILE* build_filtered_net_if_inet6();
+FILE* build_filtered_net_ipv6_route();
+bool is_proc_net_dev_path(const char* path);
+bool is_proc_net_route_path(const char* path);
+bool is_proc_net_if_inet6_path(const char* path);
+bool is_proc_net_ipv6_route_path(const char* path);
+bool is_sys_class_net_virtual_path(const char* path);
 FILE* build_filtered_selinux_attr();
 FILE* build_filtered_status();
 FILE* build_filtered_wchan();
@@ -43,6 +58,9 @@ int fake_lstat(const char* pathname, struct stat* statbuf);
 int fake_fstatat(int dirfd, const char* pathname, struct stat* statbuf, int flags);
 int fake_access(const char* pathname, int mode);
 int fake_faccessat(int dirfd, const char* pathname, int mode, int flags);
+ssize_t fake_recvfrom(int fd, void* buf, size_t len, int flags, struct sockaddr* src_addr, socklen_t* addrlen);
+char* fake_if_indextoname(unsigned int ifindex, char* ifname);
+int fake_ioctl(int fd, unsigned long request, ...);
 char* fake_fgets(char* s, int size, FILE* stream);
 ssize_t fake_readlink(const char* pathname, char* buf, size_t bufsiz);
 ssize_t fake_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsiz);

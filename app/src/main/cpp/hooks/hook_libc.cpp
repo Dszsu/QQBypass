@@ -19,11 +19,19 @@
 #include <sys/utsname.h>
 #include <sys/vfs.h>
 #include <sys/prctl.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <net/if.h>
+#include <ifaddrs.h>
+#include <atomic>
 #include <time.h>
 #include "hook_libqimei.h"
 #include "hook_libfekit.h"
 #include "hook_libqsec.h"
 #include "hook_libturingxq.h"
+#include "hook_libturingmfa.h"
 
 #ifndef ST_RDONLY
 #define ST_RDONLY 1
@@ -83,6 +91,11 @@ static int (*real_tgkill_ptr)(pid_t, pid_t, int) = nullptr;
 static int (*real_raise_ptr)(int) = nullptr;
 typedef long (*ptrace_func_t)(int, pid_t, void*, void*);
 static ptrace_func_t real_ptrace_ptr = nullptr;
+static ssize_t (*real_recvfrom_ptr)(int, void*, size_t, int, struct sockaddr*, socklen_t*) = nullptr;
+static char* (*real_if_indextoname_ptr)(unsigned int, char*) = nullptr;
+static int (*real_ioctl_ptr)(int, unsigned long, ...) = nullptr;
+static int (*real_getifaddrs_ptr)(struct ifaddrs**) = nullptr;
+static void (*real_freeifaddrs_ptr)(struct ifaddrs*) = nullptr;
 
 static void ensure_real_funcs() {
     if (!real_fopen_ptr) real_fopen_ptr = (FILE* (*)(const char*, const char*))dlsym(RTLD_DEFAULT, "fopen");
@@ -125,6 +138,11 @@ static void ensure_real_funcs() {
     if (!real_tgkill_ptr) real_tgkill_ptr = (int (*)(pid_t, pid_t, int))dlsym(RTLD_DEFAULT, "tgkill");
     if (!real_raise_ptr) real_raise_ptr = (int (*)(int))dlsym(RTLD_DEFAULT, "raise");
     if (!real_ptrace_ptr) real_ptrace_ptr = (ptrace_func_t)dlsym(RTLD_DEFAULT, "ptrace");
+    if (!real_recvfrom_ptr) real_recvfrom_ptr = (ssize_t (*)(int, void*, size_t, int, struct sockaddr*, socklen_t*))dlsym(RTLD_DEFAULT, "recvfrom");
+    if (!real_if_indextoname_ptr) real_if_indextoname_ptr = (char* (*)(unsigned int, char*))dlsym(RTLD_DEFAULT, "if_indextoname");
+    if (!real_ioctl_ptr) real_ioctl_ptr = (int (*)(int, unsigned long, ...))dlsym(RTLD_DEFAULT, "ioctl");
+    if (!real_getifaddrs_ptr) real_getifaddrs_ptr = (int (*)(struct ifaddrs**))dlsym(RTLD_DEFAULT, "getifaddrs");
+    if (!real_freeifaddrs_ptr) real_freeifaddrs_ptr = (void (*)(struct ifaddrs*))dlsym(RTLD_DEFAULT, "freeifaddrs");
 }
 
 static bool is_caller_security_dso(void* return_address) {
@@ -480,7 +498,7 @@ static inline bool is_security_hidden_path(const char* path, void* return_addres
     }
 
     // 3. Sensitive root/xposed paths
-    if (is_sensitive_path(path)) {
+    if (is_sensitive_path(path) || is_sys_class_net_virtual_path(path)) {
         if (is_caller_qa(return_address)) {
             return false;
         }
@@ -1039,6 +1057,286 @@ static bool is_proc_net_tcp_path(const char* path) {
             (strncmp(path, "/proc/", 6) == 0 && (strstr(path, "/net/tcp") || strstr(path, "/net/tcp6"))));
 }
 
+// ==================== 网络接口透明过滤与虚拟路由虚拟化 ====================
+
+bool is_virtual_or_vpn_interface_name(const char* name) {
+    if (!name || !name[0]) return false;
+    while (*name == ' ' || *name == '\t') name++;
+    if (!name[0]) return false;
+
+    if (strncmp(name, "tun", 3) == 0 ||
+        strncmp(name, "ppp", 3) == 0 ||
+        strncmp(name, "p2p", 3) == 0 ||
+        strncmp(name, "tap", 3) == 0 ||
+        strncmp(name, "dummy", 5) == 0 ||
+        strncmp(name, "ifb", 3) == 0 ||
+        strncmp(name, "vgate", 5) == 0 ||
+        strncmp(name, "ovnet", 5) == 0 ||
+        strncmp(name, "ap", 2) == 0 ||
+        strncmp(name, "wlan-ap", 7) == 0 ||
+        strncmp(name, "softap", 6) == 0 ||
+        strncmp(name, "wondertap", 9) == 0 ||
+        strncmp(name, "veth", 4) == 0 ||
+        strncmp(name, "docker", 6) == 0 ||
+        strncmp(name, "virbr", 5) == 0 ||
+        strncmp(name, "br-", 3) == 0 ||
+        strncmp(name, "sit", 3) == 0 ||
+        strncmp(name, "ip6tnl", 6) == 0 ||
+        strncmp(name, "ip6gre", 6) == 0 ||
+        strncmp(name, "ip_vti", 6) == 0 ||
+        strncmp(name, "ip6_vti", 7) == 0 ||
+        strncmp(name, "gretap", 6) == 0 ||
+        strncmp(name, "erspan", 6) == 0) {
+        return true;
+    }
+    return false;
+}
+
+static std::atomic<bool> s_filtered_ifindices[1024]{};
+
+bool is_filtered_ifindex(int ifindex) {
+    if (ifindex >= 0 && ifindex < 1024) {
+        return s_filtered_ifindices[ifindex].load(std::memory_order_relaxed);
+    }
+    return false;
+}
+
+void record_filtered_ifindex(int ifindex) {
+    if (ifindex >= 0 && ifindex < 1024) {
+        s_filtered_ifindices[ifindex].store(true, std::memory_order_relaxed);
+    }
+}
+
+void sanitize_netlink_routing_response(void* buf, size_t len) {
+    if (!buf || len < sizeof(struct nlmsghdr)) return;
+
+    size_t remaining = len;
+    struct nlmsghdr* nlh = (struct nlmsghdr*)buf;
+    if (nlh->nlmsg_len > len) return;
+    if (nlh->nlmsg_type != RTM_NEWLINK && nlh->nlmsg_type != RTM_NEWADDR &&
+        nlh->nlmsg_type != NLMSG_DONE && nlh->nlmsg_type != NLMSG_NOOP) {
+        return;
+    }
+
+    for (; NLMSG_OK(nlh, remaining); nlh = NLMSG_NEXT(nlh, remaining)) {
+        if (nlh->nlmsg_type == NLMSG_DONE || nlh->nlmsg_type == NLMSG_ERROR) {
+            break;
+        }
+        if (nlh->nlmsg_type == RTM_NEWLINK) {
+            if (NLMSG_PAYLOAD(nlh, 0) < sizeof(struct ifinfomsg)) continue;
+            struct ifinfomsg* ifi = (struct ifinfomsg*)NLMSG_DATA(nlh);
+            int ifindex = ifi->ifi_index;
+            struct rtattr* rta = IFLA_RTA(ifi);
+            int rta_len = IFLA_PAYLOAD(nlh);
+            bool is_virt = false;
+            while (RTA_OK(rta, rta_len)) {
+                if (rta->rta_type == IFLA_IFNAME) {
+                    const char* ifname = (const char*)RTA_DATA(rta);
+                    if (is_virtual_or_vpn_interface_name(ifname)) {
+                        is_virt = true;
+                        break;
+                    }
+                }
+                rta = RTA_NEXT(rta, rta_len);
+            }
+            if (is_virt) {
+                record_filtered_ifindex(ifindex);
+                nlh->nlmsg_type = NLMSG_NOOP;
+            }
+        } else if (nlh->nlmsg_type == RTM_NEWADDR) {
+            if (NLMSG_PAYLOAD(nlh, 0) < sizeof(struct ifaddrmsg)) continue;
+            struct ifaddrmsg* ifa = (struct ifaddrmsg*)NLMSG_DATA(nlh);
+            int ifindex = ifa->ifa_index;
+            if (is_filtered_ifindex(ifindex)) {
+                nlh->nlmsg_type = NLMSG_NOOP;
+                continue;
+            }
+            struct rtattr* rta = IFA_RTA(ifa);
+            int rta_len = IFA_PAYLOAD(nlh);
+            while (RTA_OK(rta, rta_len)) {
+                if (rta->rta_type == IFA_LABEL) {
+                    const char* label = (const char*)RTA_DATA(rta);
+                    if (is_virtual_or_vpn_interface_name(label)) {
+                        record_filtered_ifindex(ifindex);
+                        nlh->nlmsg_type = NLMSG_NOOP;
+                        break;
+                    }
+                }
+                rta = RTA_NEXT(rta, rta_len);
+            }
+        }
+    }
+}
+
+FILE* build_filtered_net_dev() {
+    ensure_real_funcs();
+    if (!real_fopen_ptr || !real_fgets_ptr) return nullptr;
+
+    FILE* real = real_fopen_ptr("/proc/net/dev", "r");
+    if (!real) return nullptr;
+
+    FILE* fake = create_memory_file("net_dev");
+    if (!fake) {
+        fclose(real);
+        return nullptr;
+    }
+
+    char line[1024];
+    while (real_fgets_ptr(line, sizeof(line), real)) {
+        char* colon = strchr(line, ':');
+        if (colon) {
+            char ifname[64];
+            size_t name_len = colon - line;
+            if (name_len >= sizeof(ifname)) name_len = sizeof(ifname) - 1;
+            strncpy(ifname, line, name_len);
+            ifname[name_len] = '\0';
+            if (is_virtual_or_vpn_interface_name(ifname)) {
+                continue;
+            }
+        }
+        fputs(line, fake);
+    }
+    fclose(real);
+    rewind(fake);
+    return fake;
+}
+
+FILE* build_filtered_net_route() {
+    ensure_real_funcs();
+    if (!real_fopen_ptr || !real_fgets_ptr) return nullptr;
+
+    FILE* real = real_fopen_ptr("/proc/net/route", "r");
+    if (!real) return nullptr;
+
+    FILE* fake = create_memory_file("net_route");
+    if (!fake) {
+        fclose(real);
+        return nullptr;
+    }
+
+    char line[1024];
+    bool first_line = true;
+    while (real_fgets_ptr(line, sizeof(line), real)) {
+        if (first_line) {
+            first_line = false;
+            fputs(line, fake);
+            continue;
+        }
+        char ifname[64] = {0};
+        if (sscanf(line, "%63s", ifname) == 1) {
+            if (is_virtual_or_vpn_interface_name(ifname)) {
+                continue;
+            }
+        }
+        fputs(line, fake);
+    }
+    fclose(real);
+    rewind(fake);
+    return fake;
+}
+
+FILE* build_filtered_net_if_inet6() {
+    ensure_real_funcs();
+    if (!real_fopen_ptr || !real_fgets_ptr) return nullptr;
+
+    FILE* real = real_fopen_ptr("/proc/net/if_inet6", "r");
+    if (!real) return nullptr;
+
+    FILE* fake = create_memory_file("net_if_inet6");
+    if (!fake) {
+        fclose(real);
+        return nullptr;
+    }
+
+    char line[1024];
+    while (real_fgets_ptr(line, sizeof(line), real)) {
+        char addr[64], idx[16], plen[16], scope[16], flags[16], ifname[64];
+        if (sscanf(line, "%63s %15s %15s %15s %15s %63s", addr, idx, plen, scope, flags, ifname) == 6) {
+            if (is_virtual_or_vpn_interface_name(ifname)) {
+                continue;
+            }
+        }
+        fputs(line, fake);
+    }
+    fclose(real);
+    rewind(fake);
+    return fake;
+}
+
+FILE* build_filtered_net_ipv6_route() {
+    ensure_real_funcs();
+    if (!real_fopen_ptr || !real_fgets_ptr) return nullptr;
+
+    FILE* real = real_fopen_ptr("/proc/net/ipv6_route", "r");
+    if (!real) return nullptr;
+
+    FILE* fake = create_memory_file("net_ipv6_route");
+    if (!fake) {
+        fclose(real);
+        return nullptr;
+    }
+
+    char line[1024];
+    while (real_fgets_ptr(line, sizeof(line), real)) {
+        char dummy[10][64];
+        char ifname[64] = {0};
+        if (sscanf(line, "%63s %63s %63s %63s %63s %63s %63s %63s %63s %63s",
+                   dummy[0], dummy[1], dummy[2], dummy[3], dummy[4],
+                   dummy[5], dummy[6], dummy[7], dummy[8], ifname) == 10) {
+            if (is_virtual_or_vpn_interface_name(ifname)) {
+                continue;
+            }
+        }
+        fputs(line, fake);
+    }
+    fclose(real);
+    rewind(fake);
+    return fake;
+}
+
+bool is_proc_net_dev_path(const char* path) {
+    if (!path) return false;
+    return (strcmp(path, "/proc/net/dev") == 0 ||
+            strcmp(path, "/proc/self/net/dev") == 0 ||
+            strcmp(path, "/proc/thread-self/net/dev") == 0 ||
+            (strncmp(path, "/proc/", 6) == 0 && strstr(path, "/net/dev")));
+}
+
+bool is_proc_net_route_path(const char* path) {
+    if (!path) return false;
+    return (strcmp(path, "/proc/net/route") == 0 ||
+            strcmp(path, "/proc/self/net/route") == 0 ||
+            strcmp(path, "/proc/thread-self/net/route") == 0 ||
+            (strncmp(path, "/proc/", 6) == 0 && strstr(path, "/net/route")));
+}
+
+bool is_proc_net_if_inet6_path(const char* path) {
+    if (!path) return false;
+    return (strcmp(path, "/proc/net/if_inet6") == 0 ||
+            strcmp(path, "/proc/self/net/if_inet6") == 0 ||
+            strcmp(path, "/proc/thread-self/net/if_inet6") == 0 ||
+            (strncmp(path, "/proc/", 6) == 0 && strstr(path, "/net/if_inet6")));
+}
+
+bool is_proc_net_ipv6_route_path(const char* path) {
+    if (!path) return false;
+    return (strcmp(path, "/proc/net/ipv6_route") == 0 ||
+            strcmp(path, "/proc/self/net/ipv6_route") == 0 ||
+            strcmp(path, "/proc/thread-self/net/ipv6_route") == 0 ||
+            (strncmp(path, "/proc/", 6) == 0 && strstr(path, "/net/ipv6_route")));
+}
+
+bool is_sys_class_net_virtual_path(const char* path) {
+    if (!path) return false;
+    if (strncmp(path, "/sys/class/net/", 15) == 0) {
+        return is_virtual_or_vpn_interface_name(path + 15);
+    }
+    if (strncmp(path, "/sys/devices/virtual/net/", 25) == 0) {
+        return is_virtual_or_vpn_interface_name(path + 25);
+    }
+    return false;
+}
+
 // 构造沙箱默认 SELinux context 虚拟文件，防止 Turing 检测到 permissive 或 root domain
 FILE* build_filtered_selinux_attr() {
     FILE* fake = create_memory_file("attr_current");
@@ -1333,6 +1631,10 @@ bool handle_virtual_stat(const char* pathname, struct stat* statbuf) {
         is_cpufreq_path(pathname) ||
         is_proc_net_tcp_path(pathname) ||
         is_proc_net_unix_path(pathname) ||
+        is_proc_net_dev_path(pathname) ||
+        is_proc_net_route_path(pathname) ||
+        is_proc_net_if_inet6_path(pathname) ||
+        is_proc_net_ipv6_route_path(pathname) ||
         is_proc_cmdline_path(pathname)) {
         if (statbuf) {
             memset(statbuf, 0, sizeof(*statbuf));
@@ -1453,6 +1755,30 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
             LOGI("Intercepted fopen net/tcp: %s", pathname);
             bool is_v6 = strstr(pathname, "tcp6") != nullptr;
             FILE* fake = build_filtered_net_tcp(is_v6);
+            if (fake) return fake;
+        }
+        if (is_proc_net_dev_path(pathname)) {
+            audit_native_probe("libc", "fopen_net_dev", "redirected to clean net_dev");
+            LOGI("Intercepted fopen net/dev: %s", pathname);
+            FILE* fake = build_filtered_net_dev();
+            if (fake) return fake;
+        }
+        if (is_proc_net_route_path(pathname)) {
+            audit_native_probe("libc", "fopen_net_route", "redirected to clean net_route");
+            LOGI("Intercepted fopen net/route: %s", pathname);
+            FILE* fake = build_filtered_net_route();
+            if (fake) return fake;
+        }
+        if (is_proc_net_if_inet6_path(pathname)) {
+            audit_native_probe("libc", "fopen_net_if_inet6", "redirected to clean net_if_inet6");
+            LOGI("Intercepted fopen net/if_inet6: %s", pathname);
+            FILE* fake = build_filtered_net_if_inet6();
+            if (fake) return fake;
+        }
+        if (is_proc_net_ipv6_route_path(pathname)) {
+            audit_native_probe("libc", "fopen_net_ipv6_route", "redirected to clean net_ipv6_route");
+            LOGI("Intercepted fopen net/ipv6_route: %s", pathname);
+            FILE* fake = build_filtered_net_ipv6_route();
             if (fake) return fake;
         }
         if (is_proc_attr_current_path(pathname)) {
@@ -1640,6 +1966,22 @@ int fake_open(const char* pathname, int flags, ...) {
                 return fd;
             }
         }
+        if (is_proc_net_dev_path(pathname)) {
+            LOGI("Intercepted open net/dev: %s", pathname);
+            return open_virtual_file(build_filtered_net_dev());
+        }
+        if (is_proc_net_route_path(pathname)) {
+            LOGI("Intercepted open net/route: %s", pathname);
+            return open_virtual_file(build_filtered_net_route());
+        }
+        if (is_proc_net_if_inet6_path(pathname)) {
+            LOGI("Intercepted open net/if_inet6: %s", pathname);
+            return open_virtual_file(build_filtered_net_if_inet6());
+        }
+        if (is_proc_net_ipv6_route_path(pathname)) {
+            LOGI("Intercepted open net/ipv6_route: %s", pathname);
+            return open_virtual_file(build_filtered_net_ipv6_route());
+        }
         if (is_proc_attr_current_path(pathname)) {
             LOGI("Intercepted open attr/current: %s", pathname);
             FILE* fake = build_filtered_selinux_attr();
@@ -1812,6 +2154,22 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
                 fclose(fake);
                 return fd;
             }
+        }
+        if (is_proc_net_dev_path(pathname)) {
+            LOGI("Intercepted openat net/dev: %s", pathname);
+            return open_virtual_file(build_filtered_net_dev());
+        }
+        if (is_proc_net_route_path(pathname)) {
+            LOGI("Intercepted openat net/route: %s", pathname);
+            return open_virtual_file(build_filtered_net_route());
+        }
+        if (is_proc_net_if_inet6_path(pathname)) {
+            LOGI("Intercepted openat net/if_inet6: %s", pathname);
+            return open_virtual_file(build_filtered_net_if_inet6());
+        }
+        if (is_proc_net_ipv6_route_path(pathname)) {
+            LOGI("Intercepted openat net/ipv6_route: %s", pathname);
+            return open_virtual_file(build_filtered_net_ipv6_route());
         }
         if (is_proc_attr_current_path(pathname)) {
             LOGI("Intercepted openat attr/current: %s", pathname);
@@ -2751,6 +3109,9 @@ static void* fake_dlopen(const char* filename, int flags) {
             hook_libqimei::patch_libqimei_in_memory();
         } else if (filename && (strstr(filename, "libturingxq") || strstr(filename, "turingxq") || strstr(filename, "libtfd"))) {
             hook_libturingxq::patch_libturingxq_in_memory();
+            hook_libturingxq::install_hooks();
+        } else if (filename && (strstr(filename, "libturingmfa") || strstr(filename, "turingmfa"))) {
+            install_turingmfa_hooks();
         } else if (filename && strstr(filename, "libqauxv-core0")) {
             s_cached_qauxv_core0 = handle;
         } else if (filename && strstr(filename, "libcnm")) {
@@ -2797,6 +3158,9 @@ static void* fake_android_dlopen_ext(const char* filename, int flags, const void
             hook_libqimei::patch_libqimei_in_memory();
         } else if (filename && (strstr(filename, "libturingxq") || strstr(filename, "turingxq") || strstr(filename, "libtfd"))) {
             hook_libturingxq::patch_libturingxq_in_memory();
+            hook_libturingxq::install_hooks();
+        } else if (filename && (strstr(filename, "libturingmfa") || strstr(filename, "turingmfa"))) {
+            install_turingmfa_hooks();
         } else if (filename && strstr(filename, "libqauxv-core0")) {
             s_cached_qauxv_core0 = handle;
         } else if (filename && strstr(filename, "libcnm")) {
@@ -3055,6 +3419,22 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
                     return fd;
                 }
             }
+            if (is_proc_net_dev_path(path)) {
+                LOGI("fake_syscall: openat net/dev redirected: %s", path);
+                return open_virtual_file(build_filtered_net_dev());
+            }
+            if (is_proc_net_route_path(path)) {
+                LOGI("fake_syscall: openat net/route redirected: %s", path);
+                return open_virtual_file(build_filtered_net_route());
+            }
+            if (is_proc_net_if_inet6_path(path)) {
+                LOGI("fake_syscall: openat net/if_inet6 redirected: %s", path);
+                return open_virtual_file(build_filtered_net_if_inet6());
+            }
+            if (is_proc_net_ipv6_route_path(path)) {
+                LOGI("fake_syscall: openat net/ipv6_route redirected: %s", path);
+                return open_virtual_file(build_filtered_net_ipv6_route());
+            }
             if (is_proc_attr_current_path(path)) {
                 LOGI("fake_syscall: openat attr/current redirected: %s", path);
                 FILE* fake = build_filtered_selinux_attr();
@@ -3274,6 +3654,17 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
     }
 #endif
 
+#ifdef __NR_recvfrom
+    else if (number == __NR_recvfrom) {
+        long ret = real_syscall_ptr ? real_syscall_ptr(number, a1, a2, a3, a4, a5, a6)
+                                   : syscall(number, a1, a2, a3, a4, a5, a6);
+        if (ret > 0 && a2 != nullptr) {
+            sanitize_netlink_routing_response(a2, (size_t)ret);
+        }
+        return ret;
+    }
+#endif
+
     if (real_syscall_ptr) {
         return real_syscall_ptr(number, a1, a2, a3, a4, a5, a6);
     }
@@ -3295,6 +3686,98 @@ static long fake_ptrace(int request, pid_t pid, void* addr, void* data) {
     if (real_ptrace_ptr) return real_ptrace_ptr(request, pid, addr, data);
     if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_ptrace, request, pid, addr, data);
     return syscall(__NR_ptrace, request, pid, addr, data);
+}
+
+ssize_t fake_recvfrom(int fd, void* buf, size_t len, int flags, struct sockaddr* src_addr, socklen_t* addrlen) {
+    SAFE_BYTEHOOK_SCOPE();
+    ensure_real_funcs();
+    ssize_t ret = real_recvfrom_ptr ? real_recvfrom_ptr(fd, buf, len, flags, src_addr, addrlen)
+                                   : (g_bytehook_hooks_installed ? BYTEHOOK_CALL_PREV(fake_recvfrom, fd, buf, len, flags, src_addr, addrlen)
+                                                                 : recvfrom(fd, buf, len, flags, src_addr, addrlen));
+    if (ret > 0 && buf != nullptr) {
+        sanitize_netlink_routing_response(buf, (size_t)ret);
+    }
+    return ret;
+}
+
+char* fake_if_indextoname(unsigned int ifindex, char* ifname) {
+    SAFE_BYTEHOOK_SCOPE();
+    ensure_real_funcs();
+    if (!ifname) return nullptr;
+    if (is_filtered_ifindex((int)ifindex)) {
+        ifname[0] = '\0';
+        errno = ENODEV;
+        return nullptr;
+    }
+    char* res = real_if_indextoname_ptr ? real_if_indextoname_ptr(ifindex, ifname)
+                                        : (g_bytehook_hooks_installed ? BYTEHOOK_CALL_PREV(fake_if_indextoname, ifindex, ifname)
+                                                                      : if_indextoname(ifindex, ifname));
+    if (res && is_virtual_or_vpn_interface_name(res)) {
+        record_filtered_ifindex((int)ifindex);
+        ifname[0] = '\0';
+        errno = ENODEV;
+        return nullptr;
+    }
+    return res;
+}
+
+int fake_ioctl(int fd, unsigned long request, ...) {
+    SAFE_BYTEHOOK_SCOPE();
+    ensure_real_funcs();
+    va_list args;
+    va_start(args, request);
+    void* arg = va_arg(args, void*);
+    va_end(args);
+
+    if (request == SIOCGIFFLAGS || request == SIOCGIFADDR || request == SIOCGIFHWADDR ||
+        request == SIOCGIFNETMASK || request == SIOCGIFBRDADDR) {
+        if (arg) {
+            struct ifreq* ifr = (struct ifreq*)arg;
+            if (is_virtual_or_vpn_interface_name(ifr->ifr_name)) {
+                errno = ENODEV;
+                return -1;
+            }
+        }
+    }
+    return real_ioctl_ptr ? real_ioctl_ptr(fd, request, arg)
+                          : (g_bytehook_hooks_installed ? BYTEHOOK_CALL_PREV(fake_ioctl, fd, request, arg)
+                                                        : ioctl(fd, request, arg));
+}
+
+int fake_getifaddrs(struct ifaddrs** ifap) {
+    SAFE_BYTEHOOK_SCOPE();
+    ensure_real_funcs();
+    if (!ifap) return -1;
+    int res = real_getifaddrs_ptr ? real_getifaddrs_ptr(ifap)
+                                  : (g_bytehook_hooks_installed ? BYTEHOOK_CALL_PREV(fake_getifaddrs, ifap)
+                                                                : getifaddrs(ifap));
+    if (res != 0 || !*ifap) return res;
+
+    struct ifaddrs* prev = nullptr;
+    struct ifaddrs* curr = *ifap;
+    while (curr) {
+        if (curr->ifa_name && is_virtual_or_vpn_interface_name(curr->ifa_name)) {
+            struct ifaddrs* next = curr->ifa_next;
+            if (prev) {
+                prev->ifa_next = next;
+            } else {
+                *ifap = next;
+            }
+            curr = next;
+            continue;
+        }
+        prev = curr;
+        curr = curr->ifa_next;
+    }
+    return 0;
+}
+
+void fake_freeifaddrs(struct ifaddrs* ifa) {
+    SAFE_BYTEHOOK_SCOPE();
+    ensure_real_funcs();
+    if (real_freeifaddrs_ptr) real_freeifaddrs_ptr(ifa);
+    else if (g_bytehook_hooks_installed) BYTEHOOK_CALL_PREV(fake_freeifaddrs, ifa);
+    else freeifaddrs(ifa);
 }
 
 static bool libc_caller_filter(const char* caller_path_name, void* arg) {
@@ -3482,6 +3965,11 @@ void install_hooks() {
     HOOK_PARTIAL_LIBC("uname", fake_uname);
     HOOK_PARTIAL_LIBC("dlopen", fake_dlopen);
     HOOK_PARTIAL_LIBC("android_dlopen_ext", fake_android_dlopen_ext);
+    HOOK_PARTIAL_LIBC("recvfrom", fake_recvfrom);
+    HOOK_PARTIAL_LIBC("if_indextoname", fake_if_indextoname);
+    HOOK_PARTIAL_LIBC("ioctl", fake_ioctl);
+    HOOK_PARTIAL_LIBC("getifaddrs", fake_getifaddrs);
+    HOOK_PARTIAL_LIBC("freeifaddrs", fake_freeifaddrs);
 }
 
 } // namespace hook_libc

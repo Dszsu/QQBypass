@@ -15,6 +15,9 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/vfs.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
 #include <stdarg.h>
 #include <atomic>
 
@@ -89,6 +92,22 @@ static FILE* xq_fake_fopen(const char* pathname, const char* mode) {
         if (strstr(pathname, "status") != nullptr) {
             return hook_libc::build_filtered_status();
         }
+        if (hook_libc::is_proc_net_dev_path(pathname)) {
+            LOGI("libturingxq: fopen net/dev redirected to filtered net_dev");
+            return hook_libc::build_filtered_net_dev();
+        }
+        if (hook_libc::is_proc_net_route_path(pathname)) {
+            LOGI("libturingxq: fopen net/route redirected to filtered net_route");
+            return hook_libc::build_filtered_net_route();
+        }
+        if (hook_libc::is_proc_net_if_inet6_path(pathname)) {
+            LOGI("libturingxq: fopen net/if_inet6 redirected to filtered net_if_inet6");
+            return hook_libc::build_filtered_net_if_inet6();
+        }
+        if (hook_libc::is_proc_net_ipv6_route_path(pathname)) {
+            LOGI("libturingxq: fopen net/ipv6_route redirected to filtered net_ipv6_route");
+            return hook_libc::build_filtered_net_ipv6_route();
+        }
         if (strstr(pathname, "cmdline") != nullptr || hook_libc::is_proc_cmdline_path(pathname)) {
             LOGI("libturingxq: fopen cmdline redirected to virtual cmdline");
             return hook_libc::build_virtual_cmdline(pathname);
@@ -131,6 +150,22 @@ static int xq_fake_open(const char* pathname, int flags, ...) {
         }
         if (strstr(pathname, "status") != nullptr) {
             return hook_libc::open_virtual_file(hook_libc::build_filtered_status());
+        }
+        if (hook_libc::is_proc_net_dev_path(pathname)) {
+            LOGI("libturingxq: open net/dev redirected to filtered net_dev");
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_net_dev());
+        }
+        if (hook_libc::is_proc_net_route_path(pathname)) {
+            LOGI("libturingxq: open net/route redirected to filtered net_route");
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_net_route());
+        }
+        if (hook_libc::is_proc_net_if_inet6_path(pathname)) {
+            LOGI("libturingxq: open net/if_inet6 redirected to filtered net_if_inet6");
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_net_if_inet6());
+        }
+        if (hook_libc::is_proc_net_ipv6_route_path(pathname)) {
+            LOGI("libturingxq: open net/ipv6_route redirected to filtered net_ipv6_route");
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_net_ipv6_route());
         }
         if (strstr(pathname, "cmdline") != nullptr || hook_libc::is_proc_cmdline_path(pathname)) {
             LOGI("libturingxq: open cmdline redirected to virtual cmdline");
@@ -178,6 +213,22 @@ static int xq_fake_openat(int dirfd, const char* pathname, int flags, ...) {
         }
         if (strstr(pathname, "status") != nullptr) {
             return hook_libc::open_virtual_file(hook_libc::build_filtered_status());
+        }
+        if (hook_libc::is_proc_net_dev_path(pathname)) {
+            LOGI("libturingxq: open net/dev redirected to filtered net_dev");
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_net_dev());
+        }
+        if (hook_libc::is_proc_net_route_path(pathname)) {
+            LOGI("libturingxq: open net/route redirected to filtered net_route");
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_net_route());
+        }
+        if (hook_libc::is_proc_net_if_inet6_path(pathname)) {
+            LOGI("libturingxq: open net/if_inet6 redirected to filtered net_if_inet6");
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_net_if_inet6());
+        }
+        if (hook_libc::is_proc_net_ipv6_route_path(pathname)) {
+            LOGI("libturingxq: open net/ipv6_route redirected to filtered net_ipv6_route");
+            return hook_libc::open_virtual_file(hook_libc::build_filtered_net_ipv6_route());
         }
         if (strstr(pathname, "cmdline") != nullptr || hook_libc::is_proc_cmdline_path(pathname)) {
             LOGI("libturingxq: open cmdline redirected to virtual cmdline");
@@ -266,6 +317,54 @@ static ssize_t xq_fake_readlinkat(int dirfd, const char* pathname, char* buf, si
     return hook_libc::fake_readlinkat(dirfd, pathname, buf, bufsiz);
 }
 
+static ssize_t (*real_xq_recvfrom_ptr)(int, void*, size_t, int, struct sockaddr*, socklen_t*) = nullptr;
+static ssize_t xq_fake_recvfrom(int fd, void* buf, size_t len, int flags, struct sockaddr* src_addr, socklen_t* addrlen) {
+    ssize_t ret = real_xq_recvfrom_ptr ? real_xq_recvfrom_ptr(fd, buf, len, flags, src_addr, addrlen)
+                                       : recvfrom(fd, buf, len, flags, src_addr, addrlen);
+    if (ret > 0 && buf != nullptr) {
+        hook_libc::sanitize_netlink_routing_response(buf, (size_t)ret);
+    }
+    return ret;
+}
+
+static char* (*real_xq_if_indextoname_ptr)(unsigned int, char*) = nullptr;
+static char* xq_fake_if_indextoname(unsigned int ifindex, char* ifname) {
+    if (!ifname) return nullptr;
+    if (hook_libc::is_filtered_ifindex((int)ifindex)) {
+        ifname[0] = '\0';
+        errno = ENODEV;
+        return nullptr;
+    }
+    char* res = real_xq_if_indextoname_ptr ? real_xq_if_indextoname_ptr(ifindex, ifname)
+                                           : if_indextoname(ifindex, ifname);
+    if (res && hook_libc::is_virtual_or_vpn_interface_name(res)) {
+        hook_libc::record_filtered_ifindex((int)ifindex);
+        ifname[0] = '\0';
+        errno = ENODEV;
+        return nullptr;
+    }
+    return res;
+}
+
+static int (*real_xq_ioctl_ptr)(int, unsigned long, ...) = nullptr;
+static int xq_fake_ioctl(int fd, unsigned long request, ...) {
+    va_list args;
+    va_start(args, request);
+    void* arg = va_arg(args, void*);
+    va_end(args);
+
+    if (request == SIOCGIFFLAGS || request == SIOCGIFADDR || request == SIOCGIFHWADDR) {
+        if (arg) {
+            struct ifreq* ifr = (struct ifreq*)arg;
+            if (hook_libc::is_virtual_or_vpn_interface_name(ifr->ifr_name)) {
+                errno = ENODEV;
+                return -1;
+            }
+        }
+    }
+    return real_xq_ioctl_ptr ? real_xq_ioctl_ptr(fd, request, arg) : ioctl(fd, request, arg);
+}
+
 void patch_libturingxq_in_memory() {
     // No-op: Do NOT patch .text segment or GOT tables of libturingxq.so.
     // In-memory code patching triggers TuringFD internal code hash/integrity checks
@@ -284,6 +383,15 @@ void install_hooks() {
         (void*)hooked_syscall,
         nullptr,
         (void**)&original_syscall
+    );
+
+    TRACK_NATIVE_HOOK_SINGLE(
+        "libturingxq.so",
+        "libturingxq.so",
+        "real_syscall",
+        (void*)hooked_real_syscall,
+        nullptr,
+        (void**)&original_real_syscall
     );
 
     TRACK_NATIVE_HOOK_SINGLE(
@@ -322,6 +430,9 @@ void install_hooks() {
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "fgets", (void*)xq_fake_fgets, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "readlink", (void*)xq_fake_readlink, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "readlinkat", (void*)xq_fake_readlinkat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "recvfrom", (void*)xq_fake_recvfrom, nullptr, (void**)&real_xq_recvfrom_ptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "if_indextoname", (void*)xq_fake_if_indextoname, nullptr, (void**)&real_xq_if_indextoname_ptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "ioctl", (void*)xq_fake_ioctl, nullptr, (void**)&real_xq_ioctl_ptr);
 }
 
 } // namespace hook_libturingxq

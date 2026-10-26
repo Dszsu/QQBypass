@@ -86,6 +86,15 @@ void install_turingmfa_hooks() {
     // 2. Hook real_syscall in libturingmfa.so
     TRACK_NATIVE_HOOK_SINGLE(
         "libturingmfa.so",
+        "libturingmfa.so",
+        "real_syscall",
+        (void*)hooked_mfa_real_syscall,
+        nullptr,
+        (void**)&original_real_syscall_mfa
+    );
+
+    TRACK_NATIVE_HOOK_SINGLE(
+        "libturingmfa.so",
         nullptr,
         "real_syscall",
         (void*)hooked_mfa_real_syscall,
@@ -102,4 +111,9 @@ void install_turingmfa_hooks() {
         nullptr,
         nullptr
     );
+
+    // 4. Hook network routing and interface queries in libturingmfa.so
+    TRACK_NATIVE_HOOK_SINGLE("libturingmfa.so", nullptr, "recvfrom", (void*)hook_libc::fake_recvfrom, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingmfa.so", nullptr, "if_indextoname", (void*)hook_libc::fake_if_indextoname, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingmfa.so", nullptr, "ioctl", (void*)hook_libc::fake_ioctl, nullptr, nullptr);
 }

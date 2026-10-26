@@ -120,7 +120,13 @@ public class DynamicRootDetectionHook {
                             String lower = name.toLowerCase();
                             if (lower.startsWith("tun") || lower.startsWith("ppp") ||
                                 lower.startsWith("p2p") || lower.startsWith("tap") ||
-                                lower.startsWith("dummy")) {
+                                lower.startsWith("dummy") || lower.startsWith("ifb") ||
+                                lower.startsWith("vgate") || lower.startsWith("ovnet") ||
+                                lower.startsWith("ap") || lower.startsWith("wondertap") ||
+                                lower.startsWith("veth") || lower.startsWith("docker") ||
+                                lower.startsWith("virbr") || lower.startsWith("br-") ||
+                                lower.startsWith("sit") || lower.startsWith("gre") ||
+                                lower.startsWith("ip_vti") || lower.startsWith("ip6")) {
                                 continue;
                             }
                         }

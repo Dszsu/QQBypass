@@ -637,7 +637,18 @@ public class NetworkReportHook {
                             int cmd2 = param.args[1] instanceof Number ? ((Number) param.args[1]).intValue() : 0;
                             int cmd3 = param.args[2] instanceof Number ? ((Number) param.args[2]).intValue() : 0;
                             byte[] bArr = (byte[]) param.args[3];
-                            // Strictly read-only audit: do NOT corrupt packed Turing binary payloads with in-place byte scrubbing
+                            if (bArr != null && bArr.length > 0) {
+                                byte[] cleanBArr = QQ950PatchHook.sanitizeTuringJceNativePayload(bArr);
+                                if (cleanBArr != null && cleanBArr != bArr) {
+                                    param.args[3] = cleanBArr;
+                                    bArr = cleanBArr;
+                                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSanitizationEvent(
+                                        "TuringFD.Network", "d1.a",
+                                        java.util.Collections.singletonList("d1.a_Key129_Scrubbed(tun0/ap0/vgate/dummy/ifb)")
+                                    );
+                                    XposedEntry.log("[NetworkReport] Sanitized Key 129 network interface leak in d1.a payload");
+                                }
+                            }
                             long timeout = param.args.length >= 5 && param.args[4] instanceof Number ? ((Number) param.args[4]).longValue() : 0L;
                             String extra = "cmd=" + cmd1 + "/" + cmd2 + "/" + cmd3 + ", timeout=" + timeout + "ms";
                             io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(

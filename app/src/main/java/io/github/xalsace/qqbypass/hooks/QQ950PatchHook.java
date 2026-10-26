@@ -3857,8 +3857,10 @@ public class QQ950PatchHook {
         if (str == null || str.isEmpty()) {
             return false;
         }
-        if (str.contains("tun") || str.contains("198.18.") || str.contains("rmnet_data0") ||
-            str.contains("10.0.0.2") || str.contains("ppp") || str.contains("p2p-p2p0")) {
+        if (str.contains("tun") || str.contains("198.18.") || str.contains("vgate") ||
+            str.contains("ifb") || str.contains("dummy") || str.contains("ap0") ||
+            str.contains("wondertap") || str.contains("ovnet") ||
+            str.contains("10.0.0.2") || str.contains("ppp") || str.contains("p2p")) {
             return true;
         }
         String[] parts = str.split(",");
@@ -4054,6 +4056,153 @@ public class QQ950PatchHook {
 
         // Final safe baseline (Wi-Fi)
         return "2,137711415296,wlan0,172.16.110.60,223.5.5.5_114.114.114.114";
+    }
+
+    /**
+     * Cleans TuringFD native interface list string (Key 129):
+     * Format: <count>,<iface1>;<flags>;<ip_count>;<ip1>;...,<iface2>;...
+     * Strips virtual, VPN, proxy and container interfaces (tun0, ap0, vgate0, ifb, dummy, etc.)
+     */
+    public static String sanitizeNativeInterfaceListString(String originalStr) {
+        if (originalStr == null || originalStr.isEmpty()) return originalStr;
+        String[] parts = originalStr.split(",");
+        if (parts.length <= 1) return originalStr;
+
+        java.util.List<String> cleanParts = new java.util.ArrayList<>();
+        for (int i = 1; i < parts.length; i++) {
+            String item = parts[i];
+            if (item == null || item.isEmpty()) continue;
+            String iface = item.split(";")[0].toLowerCase(java.util.Locale.US);
+
+            boolean isVirt = iface.startsWith("tun") ||
+                             iface.startsWith("ap") ||
+                             iface.startsWith("vgate") ||
+                             iface.startsWith("ifb") ||
+                             iface.startsWith("dummy") ||
+                             iface.startsWith("ovnet") ||
+                             iface.startsWith("wondertap") ||
+                             iface.startsWith("veth") ||
+                             iface.startsWith("docker") ||
+                             iface.startsWith("virbr") ||
+                             iface.startsWith("br-") ||
+                             iface.startsWith("sit") ||
+                             iface.startsWith("gre") ||
+                             iface.startsWith("ip_vti") ||
+                             iface.startsWith("ip6");
+
+            if (!isVirt && !item.contains("198.18.")) {
+                cleanParts.add(item);
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(cleanParts.size()).append(",");
+        for (int i = 0; i < cleanParts.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append(cleanParts.get(i));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Transparently parses and normalizes unencrypted JCE serialized payload from TuringFD NativePack.
+     * Sanitizes Key 129 (network interfaces & IP addresses) in accordance with Iron Rule 4.2.
+     */
+    public static byte[] sanitizeTuringJceNativePayload(byte[] data) {
+        if (data == null || data.length < 8) return data;
+        try {
+            // Key 129 in JCE Map is encoded as:
+            // Tag 0, Type 1 (SHORT): byte 0x01, followed by 2 bytes: 0x00, 0x81 (short = 129)
+            // Tag 1 (Value): Type 6 (STRING1: 0x16) or Type 7 (STRING4: 0x17)
+            final byte[] pattern = new byte[] { (byte) 0x01, (byte) 0x00, (byte) 0x81 };
+            int pos = 0;
+            boolean modified = false;
+            byte[] curData = data;
+
+            while (pos <= curData.length - 8) {
+                int idx = -1;
+                for (int i = pos; i <= curData.length - 3; i++) {
+                    if (curData[i] == pattern[0] && curData[i + 1] == pattern[1] && curData[i + 2] == pattern[2]) {
+                        idx = i;
+                        break;
+                    }
+                }
+                if (idx == -1) break;
+
+                int valHeaderIdx = idx + 3;
+                if (valHeaderIdx >= curData.length) break;
+                byte vtypeByte = curData[valHeaderIdx];
+
+                int strLen = 0;
+                int contentStart = 0;
+
+                if (vtypeByte == (byte) 0x16) { // STRING1
+                    if (valHeaderIdx + 1 >= curData.length) break;
+                    strLen = curData[valHeaderIdx + 1] & 0xFF;
+                    contentStart = valHeaderIdx + 2;
+                } else if (vtypeByte == (byte) 0x17) { // STRING4
+                    if (valHeaderIdx + 4 >= curData.length) break;
+                    strLen = ((curData[valHeaderIdx + 1] & 0xFF) << 24) |
+                             ((curData[valHeaderIdx + 2] & 0xFF) << 16) |
+                             ((curData[valHeaderIdx + 3] & 0xFF) << 8) |
+                             (curData[valHeaderIdx + 4] & 0xFF);
+                    contentStart = valHeaderIdx + 5;
+                } else {
+                    pos = idx + 3;
+                    continue;
+                }
+
+                if (strLen < 0 || contentStart + strLen > curData.length) {
+                    pos = idx + 3;
+                    continue;
+                }
+
+                String ifaceListStr = new String(curData, contentStart, strLen, java.nio.charset.StandardCharsets.ISO_8859_1);
+                if (ifaceListStr.contains("tun") || ifaceListStr.contains("198.18.") ||
+                    ifaceListStr.contains("vgate") || ifaceListStr.contains("ap0") ||
+                    ifaceListStr.contains("ifb") || ifaceListStr.contains("dummy")) {
+
+                    String cleanIfaceStr = sanitizeNativeInterfaceListString(ifaceListStr);
+                    byte[] cleanBytes = cleanIfaceStr.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+
+                    byte[] newHdr;
+                    if (vtypeByte == (byte) 0x17) {
+                        newHdr = new byte[] {
+                            (byte) 0x17,
+                            (byte) ((cleanBytes.length >> 24) & 0xFF),
+                            (byte) ((cleanBytes.length >> 16) & 0xFF),
+                            (byte) ((cleanBytes.length >> 8) & 0xFF),
+                            (byte) (cleanBytes.length & 0xFF)
+                        };
+                    } else {
+                        newHdr = new byte[] {
+                            (byte) 0x16,
+                            (byte) (cleanBytes.length & 0xFF)
+                        };
+                    }
+
+                    int oldContentEnd = contentStart + strLen;
+                    int newLen = valHeaderIdx + newHdr.length + cleanBytes.length + (curData.length - oldContentEnd);
+                    byte[] newData = new byte[newLen];
+
+                    System.arraycopy(curData, 0, newData, 0, valHeaderIdx);
+                    System.arraycopy(newHdr, 0, newData, valHeaderIdx, newHdr.length);
+                    System.arraycopy(cleanBytes, 0, newData, valHeaderIdx + newHdr.length, cleanBytes.length);
+                    System.arraycopy(curData, oldContentEnd, newData, valHeaderIdx + newHdr.length + cleanBytes.length, curData.length - oldContentEnd);
+
+                    curData = newData;
+                    modified = true;
+                    pos = valHeaderIdx + newHdr.length + cleanBytes.length;
+                } else {
+                    pos = idx + 3;
+                }
+            }
+
+            return modified ? curData : data;
+        } catch (Throwable t) {
+            XposedEntry.logError("[TuringPatch] Error sanitizing Turing JCE native payload: " + t.getMessage(), t);
+            return data;
+        }
     }
 
     /**
@@ -4521,6 +4670,7 @@ public class QQ950PatchHook {
                                         android.util.SparseArray<?> sa = (android.util.SparseArray<?>) result;
                                         byte[] packedBytes = null;
                                         int retCode = 0;
+                                        int packedKey = -1;
                                         for (int i = 0; i < sa.size(); i++) {
                                             int k = sa.keyAt(i);
                                             Object v = sa.valueAt(i);
@@ -4528,14 +4678,39 @@ public class QQ950PatchHook {
                                                 retCode = ((Number) v).intValue();
                                             } else if (v instanceof byte[]) {
                                                 packedBytes = (byte[]) v;
+                                                packedKey = k;
                                             }
                                         }
                                         if (packedBytes != null && packedBytes.length > 0) {
+                                            byte[] cleanBytes = sanitizeTuringJceNativePayload(packedBytes);
+                                            if (cleanBytes != null && cleanBytes != packedBytes) {
+                                                @SuppressWarnings("unchecked")
+                                                android.util.SparseArray<Object> mutableSa = (android.util.SparseArray<Object>) sa;
+                                                mutableSa.put(packedKey, cleanBytes);
+                                                packedBytes = cleanBytes;
+                                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSanitizationEvent(
+                                                    "TuringFD", param.method.getName(),
+                                                    java.util.Collections.singletonList("NativePack_Key129_Scrubbed(tun0/ap0/vgate/dummy/ifb)")
+                                                );
+                                                XposedEntry.log("[TuringPatch] Sanitized Key 129 native network interface list in " + param.method.getName());
+                                            }
+
                                             String detail = "retCode=" + retCode + ", sparseArrayEntries=" + sa.size();
                                             io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
                                                 "TuringFD.NativePack",
                                                 param.method.getName() + " -> retCode=" + retCode,
                                                 packedBytes, detail, 4);
+                                        }
+                                    } else if (result instanceof byte[]) {
+                                        byte[] b = (byte[]) result;
+                                        byte[] cleanB = sanitizeTuringJceNativePayload(b);
+                                        if (cleanB != null && cleanB != b) {
+                                            param.setResult(cleanB);
+                                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSanitizationEvent(
+                                                "TuringFD", param.method.getName(),
+                                                java.util.Collections.singletonList("NativePack_Key129_Scrubbed_DirectByteArray")
+                                            );
+                                            XposedEntry.log("[TuringPatch] Sanitized Key 129 direct byte array in " + param.method.getName());
                                         }
                                     }
                                 }
