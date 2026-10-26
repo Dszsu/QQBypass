@@ -1676,20 +1676,34 @@ public class NetworkReportHook {
                     String cmd = "";
                     byte[] buffer = null;
 
-                    for (Object arg : param.args) {
-                        if (arg instanceof String) {
-                            String s = (String) arg;
-                            if (s.contains(".") || s.contains("_") || s.length() > 5) {
-                                if (cmd.isEmpty()) cmd = s;
-                            } else if (uin.isEmpty() && s.matches("\\d+")) {
-                                uin = s;
+                    // Deterministic parameter extraction based on method overload:
+                    // 6-arg native getSign: (QSec, String mExtra, String cmd, byte[] bArr, byte[] bArr2, String uin)
+                    // 5-arg Java getSign: (QSec, String cmd, byte[] bArr, byte[] bArr2, String uin)
+                    if (param.args.length >= 6) {
+                        cmd = param.args[2] instanceof String ? (String) param.args[2] : "";
+                        buffer = param.args[3] instanceof byte[] ? (byte[]) param.args[3] : null;
+                        uin = param.args[5] instanceof String ? (String) param.args[5] : "";
+                    } else if (param.args.length == 5) {
+                        cmd = param.args[1] instanceof String ? (String) param.args[1] : "";
+                        buffer = param.args[2] instanceof byte[] ? (byte[]) param.args[2] : null;
+                        uin = param.args[4] instanceof String ? (String) param.args[4] : "";
+                    } else {
+                        // Dynamic fallback heuristic
+                        for (Object arg : param.args) {
+                            if (arg instanceof String) {
+                                String s = (String) arg;
+                                if (s.contains(".") || s.contains("_") || s.length() > 5) {
+                                    if (cmd.isEmpty()) cmd = s;
+                                } else if (uin.isEmpty() && s.matches("\\d+")) {
+                                    uin = s;
+                                }
+                            } else if (arg instanceof byte[] && buffer == null) {
+                                buffer = (byte[]) arg;
                             }
-                        } else if (arg instanceof byte[] && buffer == null) {
-                            buffer = (byte[]) arg;
                         }
                     }
 
-                    if (isCoreProtocolCommand(cmd)) return;
+                    if (cmd.isEmpty() || isCoreProtocolCommand(cmd)) return;
 
                     Object signResult = param.getResult();
                     StringBuilder extra = new StringBuilder();
@@ -1725,6 +1739,9 @@ public class NetworkReportHook {
                         } else if (param.args[1] != null) {
                             strParams = param.args[1].toString();
                         }
+                    }
+                    if (param.args.length >= 3 && param.args[2] instanceof byte[]) {
+                        data = (byte[]) param.args[2];
                     }
                     io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
                         "QQSecuritySign." + param.method.getName(),

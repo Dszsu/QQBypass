@@ -3530,38 +3530,16 @@ public class QQ950PatchHook {
             }
         });
 
-        hookSafe(qsecCls, "getFeKitAttach", lpparam, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                byte[] res = (byte[]) p.getResult();
-                if (res == null || res.length == 0) {
-                    p.setResult(new byte[]{0});
-                }
-            }
-        });
+        // Note: Do NOT hook QSec.getFeKitAttach to inject new byte[]{0}!
+        // Injected dummy bytes create invalid protobuf payloads in WTLogin tlv_553,
+        // which causes server token exchange verification failure and invalidates sessions.
+        // Official QSec.getFeKitAttach already handles fallback safely.
 
-        // Hardware Keystore / Keymaster Attestation BootStatus Normalization
-        final String parserCls = "com.tencent.mobileqq.qsec.qsecurity.utils.SimpleAttestationParser";
-        hookSafe(parserCls, "getBootStatus", lpparam, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                Object bs = p.getResult();
-                if (bs == null) return;
-                try {
-                    XposedHelpers.setIntField(bs, "verifiedBootState", 0);
-                } catch (Throwable ignored) {}
-                try {
-                    XposedHelpers.setIntField(bs, "isDeviceLocked", 1);
-                } catch (Throwable ignored) {}
-                try {
-                    XposedHelpers.setIntField(bs, "attestationSecurityLevel", 1);
-                } catch (Throwable ignored) {}
-                try {
-                    XposedHelpers.setIntField(bs, "keymasterSecurityLevel", 1);
-                } catch (Throwable ignored) {}
-                XposedEntry.log("[QSecPatch] Normalized SimpleAttestationParser.BootStatus: verifiedBootState=0, isDeviceLocked=1");
-            }
-        });
+        // Note: Do NOT hook SimpleAttestationParser.getBootStatus or CertificationStatus.BL!
+        // Hardware Keystore Key Attestation certificates are signed by hardware Keymaster/TEE.
+        // Tampering with verifiedBootState=0 / isDeviceLocked=1 causes cryptographic and metadata
+        // inconsistency between the certificate chain and parsed status, triggering session revocation.
+        // Tencent server accepts authentic bootloader states on real unlocked devices.
 
         // Socket detection neutralization (0 = Connection refused / not found, clean status)
         hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.SocketStatus", "checkSocket", lpparam, new XC_MethodHook() {
@@ -3569,21 +3547,6 @@ public class QQ950PatchHook {
             protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                 if (p.getResult() instanceof Integer && ((Integer) p.getResult()) != 0) {
                     p.setResult(0);
-                }
-            }
-        });
-
-        // Hardware Keystore BootStatus normalization: allow authentic BL crypto generation, ensure GREEN locked status
-        hookSafe("com.tencent.mobileqq.qsec.qsecurity.utils.CertificationStatus", "BL", lpparam, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                Object res = p.getResult();
-                if (res instanceof Object[]) {
-                    Object[] arr = (Object[]) res;
-                    if (arr.length >= 5) {
-                        arr[3] = 0; // verifiedBootState = 0 (Verified / Green)
-                        arr[4] = 1; // isDeviceLocked = 1 (Locked)
-                    }
                 }
             }
         });
