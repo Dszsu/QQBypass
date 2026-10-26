@@ -352,18 +352,77 @@ public class ReportAuditManager {
     }
 
     /**
+     * Fast-path identification of TRPC and OIDB TRPC commands.
+     */
+    public static boolean isTrpcCommand(String cmd) {
+        if (cmd == null) return false;
+        String c = cmd.toLowerCase(Locale.ROOT);
+        return c.startsWith("trpc.") || c.contains("trpc") || c.startsWith("oidbsvctrpc");
+    }
+
+    /**
+     * Checks if a binary payload is empty, useless, or contains only envelope overhead.
+     * Rejects null, buffers with length <= 4, WUP packets declaring 0 body bytes (e.g. 00 00 00 04),
+     * and payloads that consist entirely of zero-bytes.
+     */
+    public static boolean isEmptyPayload(byte[] payload) {
+        if (payload == null || payload.length <= 4) return true;
+        // Big-endian 4-byte WUP length prefix check:
+        // When payload starts with 00 00 00 and declared length <= 4, it is an empty WUP envelope
+        if (payload[0] == 0 && payload[1] == 0 && payload[2] == 0) {
+            int wupLen = payload[3] & 0xFF;
+            if (wupLen <= 4) return true;
+        }
+
+        int wupLen = ((payload[0] & 0xFF) << 24) | ((payload[1] & 0xFF) << 16) | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
+        boolean hasNonZero = false;
+        int checkStart = (wupLen == payload.length) ? 4 : 0;
+        for (int i = checkStart; i < payload.length; i++) {
+            if (payload[i] != 0) {
+                hasNonZero = true;
+                break;
+            }
+        }
+        return !hasNonZero;
+    }
+
+    private static final java.util.LinkedHashMap<String, Long> sRecentPayloadDeduplication =
+        new java.util.LinkedHashMap<String, Long>(128, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(java.util.Map.Entry<String, Long> eldest) {
+                return size() > 500;
+            }
+        };
+
+    /**
      * Saves raw uncompressed binary payloads directly to disk for offline reverse engineering.
+     * Enforces empty payload rejection and 5-second CRC32 deduplication to eliminate junk/duplicate files.
      */
     public static void saveBinaryPayload(String subDirName, String cmd, int seq, byte[] payload) {
-        if (payload == null || payload.length == 0) return;
+        if (isEmptyPayload(payload)) return;
         try {
-            File baseDir = new File(EXTERNAL_CACHE_DIR, subDirName);
-            if (!baseDir.exists()) {
-                baseDir.mkdirs();
-            }
             String safeCmd = (cmd == null ? "unknown" : cmd.replaceAll("[^a-zA-Z0-9._-]", "_"));
             if (safeCmd.length() > 60) {
                 safeCmd = safeCmd.substring(0, 60);
+            }
+
+            // CRC32 payload deduplication within a 5-second window
+            java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+            crc.update(payload);
+            long crcVal = crc.getValue();
+            String dedupKey = subDirName + ":" + safeCmd + ":" + crcVal;
+            long now = System.currentTimeMillis();
+            synchronized (sRecentPayloadDeduplication) {
+                Long lastTime = sRecentPayloadDeduplication.get(dedupKey);
+                if (lastTime != null && (now - lastTime < 5000L)) {
+                    return; // Suppress duplicate payload dump
+                }
+                sRecentPayloadDeduplication.put(dedupKey, now);
+            }
+
+            File baseDir = new File(EXTERNAL_CACHE_DIR, subDirName);
+            if (!baseDir.exists()) {
+                baseDir.mkdirs();
             }
             String timeTag = get30MinTimeTag(System.currentTimeMillis());
             long rand = System.currentTimeMillis() % 100000;
@@ -1070,6 +1129,12 @@ public class ReportAuditManager {
     public static void recordPlaintextSecurityDispatch(String channel, String event, String plainParams, byte[] plainData, String extraInfo) {
         if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT) return;
         try {
+            // Save raw uncompressed binary payload to disk before encryption
+            if (plainData != null && !isEmptyPayload(plainData)) {
+                String cmdName = (event != null && !event.isEmpty()) ? event : channel;
+                saveBinaryPayload("outbound_packets", cmdName, 0, plainData);
+            }
+
             String time = getCurrentTimestamp();
             int pid = Process.myPid();
             int tid = Process.myTid();
@@ -1451,7 +1516,8 @@ public class ReportAuditManager {
     public static void recordMsfSso(String cmd, String uin, int ssoSeq, boolean needResp, Map<?, ?> attributes, byte[] wupBuf) {
         int bufLen = wupBuf != null ? wupBuf.length : 0;
         boolean isSecurity = isSecurityOrEnvironmentEvent("MsfCore", cmd, null, null);
-        if (isSecurity && wupBuf != null && bufLen > 0) {
+        boolean isTrpc = isTrpcCommand(cmd);
+        if (!isTrpc && isSecurity && wupBuf != null && !isEmptyPayload(wupBuf)) {
             StringBuilder extra = new StringBuilder();
             extra.append("uin=").append(uin).append(", seq=").append(ssoSeq).append(", needResp=").append(needResp);
             if (attributes != null && !attributes.isEmpty()) {

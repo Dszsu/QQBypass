@@ -1,5 +1,8 @@
 package io.github.xalsace.qqbypass.hooks;
 
+import android.content.Intent;
+import android.os.Bundle;
+
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XC_MethodReplacement;
 import de.robv.android.xposed.XposedBridge;
@@ -10,6 +13,7 @@ import io.github.xalsace.qqbypass.detector.DexMethodData;
 
 import java.lang.reflect.Member;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import io.github.xalsace.qqbypass.XposedEntry;
@@ -65,6 +69,15 @@ public class NetworkReportHook {
                command.startsWith("trpc.group_mall.") ||
                (command.startsWith("StatSvc.") && !command.contains("Offline")) ||
                (command.startsWith("OidbSvc.") && !command.contains("0xd79"));
+    }
+
+    /**
+     * Fast-path identification of TRPC and OIDB TRPC commands.
+     */
+    public static boolean isTrpcCommand(String cmd) {
+        if (cmd == null) return false;
+        String c = cmd.toLowerCase(Locale.ROOT);
+        return c.startsWith("trpc.") || c.contains("trpc") || c.startsWith("oidbsvctrpc");
     }
 
     // Targeted block: only pure telemetry and security report commands
@@ -375,27 +388,21 @@ public class NetworkReportHook {
                                 extra.append(", transKeys=").append(transInfo.keySet());
                             }
 
-                            if (data != null && data.length > 0) {
-                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
-                                    "MSFKernelBridge", cmd, data, extra.toString(), 6);
+                            boolean isTrpc = isTrpcCommand(cmd);
+                            if (!isTrpc) {
+                                if (data != null && data.length > 0) {
+                                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
+                                        "MSFKernelBridge", cmd, data, extra.toString(), 6);
+                                } else {
+                                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport(
+                                        "MSFKernelBridge", cmd, null, extra.toString(), 0);
+                                }
                             } else {
+                                // For TRPC commands, payload was already audited and dumped in plaintext before encryption
+                                // at upper layers (ProtoServlet.onSend, QQSecuritySign.getSign, FEKit.dispatchEventPB).
+                                // At MSFKernelBridge, data is already encrypted ciphertext; avoid dumping duplicate ciphertext.
                                 io.github.xalsace.qqbypass.utils.ReportAuditManager.recordReport(
-                                    "MSFKernelBridge", cmd, null, extra.toString(), 0);
-                            }
-
-                            if (secSign != null && secSign.length > 0) {
-                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
-                                    "MSFKernelBridge.secSign", cmd + "#secSign", secSign, "seq=" + seq + (uin != null ? ", uin=" + uin : ""), 4);
-                            }
-
-                            if (secDevToken != null && secDevToken.length > 0) {
-                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
-                                    "MSFKernelBridge.secDevToken", cmd + "#secDevToken", secDevToken, "seq=" + seq + (uin != null ? ", uin=" + uin : ""), 4);
-                            }
-
-                            if (secExtra != null && secExtra.length > 0) {
-                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordOutboundRiskPayload(
-                                    "MSFKernelBridge.secExtra", cmd + "#secExtra", secExtra, "seq=" + seq + (uin != null ? ", uin=" + uin : ""), 4);
+                                    "MSFKernelBridge (TRPC Outbound)", cmd, null, extra.toString(), 0);
                             }
 
                             if (cmd != null && (isKickCmd(cmd) || "StatSvc.RspMSFForceOffline".equals(cmd))) {
@@ -474,8 +481,12 @@ public class NetworkReportHook {
                             }
                         }
 
-                        // Prevent premature timeouts for ECDH / A2 access during Android Doze / deep sleep
-                        if (command != null && command.startsWith("trpc.o3.ecdh_access.")) {
+                        // Prevent premature timeouts for ECDH, login refresh, and status keepalive during Android Doze / deep sleep
+                        if (command != null && (command.startsWith("trpc.o3.ecdh_access.") ||
+                                                command.startsWith("trpc.login.ecdh.") ||
+                                                command.startsWith("wtlogin.") ||
+                                                command.startsWith("trpc.qq_new_tech.status_svc.") ||
+                                                command.startsWith("ConfigService.ClientReq"))) {
                             try {
                                 long curTimeout = ((Number) XposedHelpers.callMethod(toServiceMsg, "getTimeout")).longValue();
                                 if (curTimeout < 60000L) {
@@ -1506,7 +1517,7 @@ public class NetworkReportHook {
                     if (fromMsg != null) {
                         try {
                             String cmd = (String) XposedHelpers.callMethod(fromMsg, "getServiceCmd");
-                            if (cmd == null || isCoreProtocolCommand(cmd)) return;
+                            if (cmd == null || (isCoreProtocolCommand(cmd) && !isTrpcCommand(cmd))) return;
                             int failCode = ((Number) XposedHelpers.callMethod(fromMsg, "getBusinessFailCode")).intValue();
                             String failMsg = (String) XposedHelpers.callMethod(fromMsg, "getBusinessFailMsg");
                             int ssoSeq = ((Number) XposedHelpers.callMethod(fromMsg, "getRequestSsoSeq")).intValue();
@@ -1594,7 +1605,7 @@ public class NetworkReportHook {
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args == null || param.args.length < 2) return;
                     String event = param.args[0] != null ? param.args[0].toString() : "unknown";
-                    if (isCoreProtocolCommand(event)) return;
+                    if (isCoreProtocolCommand(event) && !isTrpcCommand(event)) return;
                     String params = param.args[1] != null ? param.args[1].toString() : null;
                     io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
                         "O3BusinessHandler." + param.method.getName(),
@@ -1615,7 +1626,7 @@ public class NetworkReportHook {
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args == null || param.args.length < 1) return;
                     String event = param.args[0] != null ? param.args[0].toString() : "unknown";
-                    if (isCoreProtocolCommand(event)) return;
+                    if (isCoreProtocolCommand(event) && !isTrpcCommand(event)) return;
                     byte[] data = null;
                     String strParams = null;
                     if (param.args.length >= 2) {
@@ -1646,7 +1657,7 @@ public class NetworkReportHook {
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args == null || param.args.length < 1) return;
                     String event = param.args[0] != null ? param.args[0].toString() : "unknown";
-                    if (isCoreProtocolCommand(event)) return;
+                    if (isCoreProtocolCommand(event) && !isTrpcCommand(event)) return;
                     byte[] data = null;
                     String strParams = null;
                     if (param.args.length >= 2) {
@@ -1703,7 +1714,13 @@ public class NetworkReportHook {
                         }
                     }
 
-                    if (cmd.isEmpty() || isCoreProtocolCommand(cmd)) return;
+                    if (cmd.isEmpty()) return;
+                    if (isCoreProtocolCommand(cmd)) {
+                        boolean isSec = io.github.xalsace.qqbypass.utils.ReportAuditManager.isSecurityOrEnvironmentEvent("QQSecuritySign.getSign", cmd, null, null);
+                        if (!isSec && !isTrpcCommand(cmd)) {
+                            return;
+                        }
+                    }
 
                     Object signResult = param.getResult();
                     StringBuilder extra = new StringBuilder();
@@ -1730,7 +1747,7 @@ public class NetworkReportHook {
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args == null || param.args.length < 1) return;
                     String event = param.args[0] != null ? param.args[0].toString() : "unknown";
-                    if (isCoreProtocolCommand(event)) return;
+                    if (isCoreProtocolCommand(event) && !isTrpcCommand(event)) return;
                     byte[] data = null;
                     String strParams = null;
                     if (param.args.length >= 2) {
@@ -1752,6 +1769,75 @@ public class NetworkReportHook {
             HookUtils.hookAllMethodsIfExists(secSignCls, "dispatchEventPB", secDispatchHook);
             XposedEntry.log("[NetworkReport] Hooked QQSecuritySign getSign/dispatchEvent on loader " + cl);
         }
+
+        // 5. ProtoServlet & TrpcProtoServlet: pre-encryption onSend & post-decryption onReceive
+        Class<?> protoServletCls = XposedHelpers.findClassIfExists("com.tencent.biz.ProtoServlet", cl);
+        if (protoServletCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_ProtoServlet")) {
+            HookUtils.hookAllMethods(protoServletCls, "onSend", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length < 2) return;
+                    if (!(param.args[0] instanceof Intent)) return;
+                    Intent intent = (Intent) param.args[0];
+                    String cmd = intent.getStringExtra("cmd");
+                    if (cmd == null || cmd.isEmpty()) return;
+                    byte[] data = intent.getByteArrayExtra("data");
+                    if (data == null || io.github.xalsace.qqbypass.utils.ReportAuditManager.isEmptyPayload(data)) return;
+
+                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
+                        "ProtoServlet.onSend", cmd, "intentSeq=" + intent.getIntExtra("seq", 0), data, "timeout=" + intent.getLongExtra("timeout", 0));
+                }
+            });
+
+            HookUtils.hookAllMethods(protoServletCls, "onReceive", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    auditProtoServletReceive("ProtoServlet.onReceive", param);
+                }
+            });
+            XposedEntry.log("[NetworkReport] Hooked ProtoServlet on loader " + cl);
+        }
+
+        Class<?> trpcServletCls = XposedHelpers.findClassIfExists("com.tencent.biz.TrpcProtoServlet", cl);
+        if (trpcServletCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_TrpcProtoServlet")) {
+            HookUtils.hookAllMethods(trpcServletCls, "onReceive", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    auditProtoServletReceive("TrpcProtoServlet.onReceive", param);
+                }
+            });
+            XposedEntry.log("[NetworkReport] Hooked TrpcProtoServlet on loader " + cl);
+        }
+    }
+
+    private static void auditProtoServletReceive(String tag, XC_MethodHook.MethodHookParam param) {
+        if (param.args == null || param.args.length < 2) return;
+        if (!(param.args[0] instanceof Intent)) return;
+        Intent intent = (Intent) param.args[0];
+        String cmd = null;
+        Object fromMsg = param.args[1];
+        int retCode = 0;
+        String errMsg = null;
+        int ssoSeq = intent.getIntExtra("seq", 0);
+        if (fromMsg != null) {
+            try {
+                cmd = (String) XposedHelpers.callMethod(fromMsg, "getServiceCmd");
+                retCode = ((Number) XposedHelpers.callMethod(fromMsg, "getBusinessFailCode")).intValue();
+                errMsg = (String) XposedHelpers.callMethod(fromMsg, "getBusinessFailMsg");
+                ssoSeq = ((Number) XposedHelpers.callMethod(fromMsg, "getRequestSsoSeq")).intValue();
+            } catch (Throwable ignored) {}
+        }
+        if (cmd == null || cmd.isEmpty()) {
+            cmd = intent.getStringExtra("cmd");
+        }
+        if (cmd == null || cmd.isEmpty()) return;
+
+        Bundle extras = intent.getExtras();
+        byte[] data = extras != null ? extras.getByteArray("data") : intent.getByteArrayExtra("data");
+        if (data == null || io.github.xalsace.qqbypass.utils.ReportAuditManager.isEmptyPayload(data)) return;
+
+        io.github.xalsace.qqbypass.utils.ReportAuditManager.recordInboundResponse(
+            tag, cmd, ssoSeq, retCode, errMsg, data, "intentSeq=" + intent.getIntExtra("seq", 0), 4);
     }
 
     /**
