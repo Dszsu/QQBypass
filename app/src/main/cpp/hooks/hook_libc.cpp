@@ -2834,6 +2834,18 @@ int fake_system_property_get(const char* name, char* value) {
         strcpy(value, "green");
         return strlen("green");
     }
+    if (strcmp(name, "ro.boot.veritymode") == 0) {
+        strcpy(value, "enforcing");
+        return strlen("enforcing");
+    }
+    if (strcmp(name, "ro.secureboot.lockstate") == 0) {
+        strcpy(value, "locked");
+        return strlen("locked");
+    }
+    if (strcmp(name, "ro.boot.warranty_bit") == 0 || strcmp(name, "ro.warranty_bit") == 0) {
+        strcpy(value, "0");
+        return 1;
+    }
     if (strcmp(name, "persist.sys.adb.engineermode") == 0) {
         strcpy(value, "0");
         return 1;
@@ -2885,6 +2897,9 @@ static void prop_read_callback_wrapper(void* cookie, const char* name, const cha
     else if (strcmp(name, "ro.boot.flash.locked") == 0) spoof_val = "1";
     else if (strcmp(name, "ro.boot.vbmeta.device_state") == 0) spoof_val = "locked";
     else if (strcmp(name, "ro.boot.verifiedbootstate") == 0) spoof_val = "green";
+    else if (strcmp(name, "ro.boot.veritymode") == 0) spoof_val = "enforcing";
+    else if (strcmp(name, "ro.secureboot.lockstate") == 0) spoof_val = "locked";
+    else if (strcmp(name, "ro.boot.warranty_bit") == 0 || strcmp(name, "ro.warranty_bit") == 0) spoof_val = "0";
     else if (strcmp(name, "persist.sys.adb.engineermode") == 0) spoof_val = "0";
     else if (strcmp(name, "sys.usb.config") == 0 || strcmp(name, "sys.usb.state") == 0 || strcmp(name, "persist.sys.usb.config") == 0) spoof_val = "none";
     else if (strcmp(name, "init.svc.adbd") == 0) spoof_val = "stopped";
@@ -2928,6 +2943,9 @@ int fake_system_property_read(const prop_info* pi, char* name, char* value) {
         else if (strcmp(name, "ro.boot.flash.locked") == 0) strcpy(value, "1");
         else if (strcmp(name, "ro.boot.vbmeta.device_state") == 0) strcpy(value, "locked");
         else if (strcmp(name, "ro.boot.verifiedbootstate") == 0) strcpy(value, "green");
+        else if (strcmp(name, "ro.boot.veritymode") == 0) strcpy(value, "enforcing");
+        else if (strcmp(name, "ro.secureboot.lockstate") == 0) strcpy(value, "locked");
+        else if (strcmp(name, "ro.boot.warranty_bit") == 0 || strcmp(name, "ro.warranty_bit") == 0) strcpy(value, "0");
         else if (strcmp(name, "persist.sys.adb.engineermode") == 0) strcpy(value, "0");
         else if (strcmp(name, "sys.usb.config") == 0 || strcmp(name, "sys.usb.state") == 0 || strcmp(name, "persist.sys.usb.config") == 0) strcpy(value, "none");
         else if (strcmp(name, "init.svc.adbd") == 0) strcpy(value, "stopped");

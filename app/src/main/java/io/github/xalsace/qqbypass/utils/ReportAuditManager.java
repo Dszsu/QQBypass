@@ -268,9 +268,10 @@ public class ReportAuditManager {
                 // 3. Clean legacy non-bucketed audit files and old temporary/prune files
                 cleanLegacyFiles(dir);
 
-                // 4. Retain only the 50 most recent raw binary packets in outbound_packets & inbound_packets
-                cleanBinaryPacketDirectory(new File(dir, "outbound_packets"), 50);
-                cleanBinaryPacketDirectory(new File(dir, "inbound_packets"), 50);
+                // 4. Retain up to 300 raw binary packets in outbound_packets & inbound_packets,
+                // while always preserving critical risk telemetry (TuringFD, d1.a, g209311, wtlogin, etc.)
+                cleanBinaryPacketDirectory(new File(dir, "outbound_packets"), 300);
+                cleanBinaryPacketDirectory(new File(dir, "inbound_packets"), 300);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in cleanExpiredLogsInternal: " + t.getMessage());
@@ -325,6 +326,13 @@ public class ReportAuditManager {
         }
     }
 
+    private static boolean isCriticalAuditPacketFile(String name) {
+        if (name == null) return false;
+        return name.contains("Turing") || name.contains("g209311") || name.contains("d1.a")
+                || name.contains("wtlogin") || name.contains("StatSvc") || name.contains("SecVerify")
+                || name.contains("safecheck") || name.contains("ClientInfo") || name.contains("RiskServer");
+    }
+
     private static void cleanBinaryPacketDirectory(File dir, int maxKeep) {
         if (dir == null || !dir.exists() || !dir.isDirectory()) return;
         try {
@@ -343,8 +351,17 @@ public class ReportAuditManager {
                 }
             });
 
+            int criticalKept = 0;
             for (int i = maxKeep; i < files.length; i++) {
                 try {
+                    String name = files[i].getName();
+                    if (isCriticalAuditPacketFile(name)) {
+                        // Protect up to 100 critical packets beyond maxKeep for deep forensics
+                        if (criticalKept < 100) {
+                            criticalKept++;
+                            continue;
+                        }
+                    }
                     files[i].delete();
                 } catch (Throwable ignored) {}
             }

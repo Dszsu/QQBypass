@@ -433,6 +433,8 @@ void install_hooks() {
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "recvfrom", (void*)xq_fake_recvfrom, nullptr, (void**)&real_xq_recvfrom_ptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "if_indextoname", (void*)xq_fake_if_indextoname, nullptr, (void**)&real_xq_if_indextoname_ptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "ioctl", (void*)xq_fake_ioctl, nullptr, (void**)&real_xq_ioctl_ptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "__system_property_get", (void*)hook_libc::fake_system_property_get, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "__system_property_find", (void*)hook_libc::fake_system_property_find, nullptr, nullptr);
 }
 
 } // namespace hook_libturingxq

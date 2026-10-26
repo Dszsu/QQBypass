@@ -4104,105 +4104,323 @@ public class QQ950PatchHook {
         return sb.toString();
     }
 
+    private static final byte[] PATTERN_JCE_KEY129 = new byte[] { (byte) 0x01, (byte) 0x00, (byte) 0x81 };
+    private static final byte[] PATTERN_TMPFS = "tmpfs:/dev".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+    private static final byte[] PATTERN_LOCKED_0 = ":locked:0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+    private static final byte[] PATTERN_GREEN_0 = ":green:0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+    private static final byte[] PATTERN_ENFORCING_0 = ":enforcing:0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+    private static final byte[] PATTERN_BOOT_HASH_0 = "-336568457738497426:1:0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+    private static final byte[] PATTERN_RX_P = ":r-xp:".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+
+    private static final java.util.regex.Pattern ART_INTEGRITY_PATTERN = java.util.regex.Pattern.compile(
+        ":([0-9a-fA-F]{16,64}):r-xp:([^:]+:[^:]+:[^:]+:[0-9a-fA-F]{32}:[^:]+:[^:]+:)([0-9a-fA-F]{16,64}):"
+    );
+
     /**
      * Transparently parses and normalizes unencrypted JCE serialized payload from TuringFD NativePack.
-     * Sanitizes Key 129 (network interfaces & IP addresses) in accordance with Iron Rule 4.2.
+     * Sanitizes Key 129, Mounts, Bootloader/VB/SELinux, and ART opcode integrity in accordance with Iron Rule 4.2.
      */
     public static byte[] sanitizeTuringJceNativePayload(byte[] data) {
         if (data == null || data.length < 8) return data;
         try {
-            // Key 129 in JCE Map is encoded as:
-            // Tag 0, Type 1 (SHORT): byte 0x01, followed by 2 bytes: 0x00, 0x81 (short = 129)
-            // Tag 1 (Value): Type 6 (STRING1: 0x16) or Type 7 (STRING4: 0x17)
-            final byte[] pattern = new byte[] { (byte) 0x01, (byte) 0x00, (byte) 0x81 };
-            int pos = 0;
-            boolean modified = false;
             byte[] curData = data;
 
-            while (pos <= curData.length - 8) {
-                int idx = -1;
-                for (int i = pos; i <= curData.length - 3; i++) {
-                    if (curData[i] == pattern[0] && curData[i + 1] == pattern[1] && curData[i + 2] == pattern[2]) {
-                        idx = i;
-                        break;
-                    }
-                }
-                if (idx == -1) break;
+            // Vector 1: Key 129 (Network interface list & VPN/tun0/ap0/dummy/ifb)
+            curData = sanitizeKey129(curData);
 
-                int valHeaderIdx = idx + 3;
-                if (valHeaderIdx >= curData.length) break;
-                byte vtypeByte = curData[valHeaderIdx];
+            // Vector 2: Mount Table String (tmpfs:/dev, debugfs, KernelSU module overlays, loop/dm counts)
+            curData = sanitizeMountTable(curData);
 
-                int strLen = 0;
-                int contentStart = 0;
+            // Vector 3: Bootloader, Verified Boot & SELinux status (locked:0, green:0, enforcing:0)
+            curData = sanitizeBootState(curData);
 
-                if (vtypeByte == (byte) 0x16) { // STRING1
-                    if (valHeaderIdx + 1 >= curData.length) break;
-                    strLen = curData[valHeaderIdx + 1] & 0xFF;
-                    contentStart = valHeaderIdx + 2;
-                } else if (vtypeByte == (byte) 0x17) { // STRING4
-                    if (valHeaderIdx + 4 >= curData.length) break;
-                    strLen = ((curData[valHeaderIdx + 1] & 0xFF) << 24) |
-                             ((curData[valHeaderIdx + 2] & 0xFF) << 16) |
-                             ((curData[valHeaderIdx + 3] & 0xFF) << 8) |
-                             (curData[valHeaderIdx + 4] & 0xFF);
-                    contentStart = valHeaderIdx + 5;
-                } else {
-                    pos = idx + 3;
-                    continue;
-                }
+            // Vector 4: ART Native Code Integrity (trampoline opcodes vs authentic disk opcodes)
+            curData = sanitizeArtIntegrity(curData);
 
-                if (strLen < 0 || contentStart + strLen > curData.length) {
-                    pos = idx + 3;
-                    continue;
-                }
-
-                String ifaceListStr = new String(curData, contentStart, strLen, java.nio.charset.StandardCharsets.ISO_8859_1);
-                if (ifaceListStr.contains("tun") || ifaceListStr.contains("198.18.") ||
-                    ifaceListStr.contains("vgate") || ifaceListStr.contains("ap0") ||
-                    ifaceListStr.contains("ifb") || ifaceListStr.contains("dummy")) {
-
-                    String cleanIfaceStr = sanitizeNativeInterfaceListString(ifaceListStr);
-                    byte[] cleanBytes = cleanIfaceStr.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
-
-                    byte[] newHdr;
-                    if (vtypeByte == (byte) 0x17) {
-                        newHdr = new byte[] {
-                            (byte) 0x17,
-                            (byte) ((cleanBytes.length >> 24) & 0xFF),
-                            (byte) ((cleanBytes.length >> 16) & 0xFF),
-                            (byte) ((cleanBytes.length >> 8) & 0xFF),
-                            (byte) (cleanBytes.length & 0xFF)
-                        };
-                    } else {
-                        newHdr = new byte[] {
-                            (byte) 0x16,
-                            (byte) (cleanBytes.length & 0xFF)
-                        };
-                    }
-
-                    int oldContentEnd = contentStart + strLen;
-                    int newLen = valHeaderIdx + newHdr.length + cleanBytes.length + (curData.length - oldContentEnd);
-                    byte[] newData = new byte[newLen];
-
-                    System.arraycopy(curData, 0, newData, 0, valHeaderIdx);
-                    System.arraycopy(newHdr, 0, newData, valHeaderIdx, newHdr.length);
-                    System.arraycopy(cleanBytes, 0, newData, valHeaderIdx + newHdr.length, cleanBytes.length);
-                    System.arraycopy(curData, oldContentEnd, newData, valHeaderIdx + newHdr.length + cleanBytes.length, curData.length - oldContentEnd);
-
-                    curData = newData;
-                    modified = true;
-                    pos = valHeaderIdx + newHdr.length + cleanBytes.length;
-                } else {
-                    pos = idx + 3;
-                }
-            }
-
-            return modified ? curData : data;
+            return curData;
         } catch (Throwable t) {
             XposedEntry.logError("[TuringPatch] Error sanitizing Turing JCE native payload: " + t.getMessage(), t);
             return data;
         }
+    }
+
+    private static byte[] sanitizeKey129(byte[] curData) {
+        int pos = 0;
+        boolean modified = false;
+
+        while (pos <= curData.length - 8) {
+            int idx = -1;
+            for (int i = pos; i <= curData.length - 3; i++) {
+                if (curData[i] == PATTERN_JCE_KEY129[0] && curData[i + 1] == PATTERN_JCE_KEY129[1] && curData[i + 2] == PATTERN_JCE_KEY129[2]) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx == -1) break;
+
+            int valHeaderIdx = idx + 3;
+            if (valHeaderIdx >= curData.length) break;
+            byte vtypeByte = curData[valHeaderIdx];
+
+            int strLen = 0;
+            int contentStart = 0;
+
+            if (vtypeByte == (byte) 0x16) { // STRING1
+                if (valHeaderIdx + 1 >= curData.length) break;
+                strLen = curData[valHeaderIdx + 1] & 0xFF;
+                contentStart = valHeaderIdx + 2;
+            } else if (vtypeByte == (byte) 0x17) { // STRING4
+                if (valHeaderIdx + 4 >= curData.length) break;
+                strLen = ((curData[valHeaderIdx + 1] & 0xFF) << 24) |
+                         ((curData[valHeaderIdx + 2] & 0xFF) << 16) |
+                         ((curData[valHeaderIdx + 3] & 0xFF) << 8) |
+                         (curData[valHeaderIdx + 4] & 0xFF);
+                contentStart = valHeaderIdx + 5;
+            } else {
+                pos = idx + 3;
+                continue;
+            }
+
+            if (strLen < 0 || contentStart + strLen > curData.length) {
+                pos = idx + 3;
+                continue;
+            }
+
+            String ifaceListStr = new String(curData, contentStart, strLen, java.nio.charset.StandardCharsets.ISO_8859_1);
+            if (ifaceListStr.contains("tun") || ifaceListStr.contains("198.18.") ||
+                ifaceListStr.contains("vgate") || ifaceListStr.contains("ap0") ||
+                ifaceListStr.contains("ifb") || ifaceListStr.contains("dummy")) {
+
+                String cleanIfaceStr = sanitizeNativeInterfaceListString(ifaceListStr);
+                byte[] cleanBytes = cleanIfaceStr.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+
+                byte[] newHdr;
+                if (vtypeByte == (byte) 0x17) {
+                    newHdr = new byte[] {
+                        (byte) 0x17,
+                        (byte) ((cleanBytes.length >> 24) & 0xFF),
+                        (byte) ((cleanBytes.length >> 16) & 0xFF),
+                        (byte) ((cleanBytes.length >> 8) & 0xFF),
+                        (byte) (cleanBytes.length & 0xFF)
+                    };
+                } else {
+                    newHdr = new byte[] {
+                        (byte) 0x16,
+                        (byte) (cleanBytes.length & 0xFF)
+                    };
+                }
+
+                int oldContentEnd = contentStart + strLen;
+                int newLen = valHeaderIdx + newHdr.length + cleanBytes.length + (curData.length - oldContentEnd);
+                byte[] newData = new byte[newLen];
+
+                System.arraycopy(curData, 0, newData, 0, valHeaderIdx);
+                System.arraycopy(newHdr, 0, newData, valHeaderIdx, newHdr.length);
+                System.arraycopy(cleanBytes, 0, newData, valHeaderIdx + newHdr.length, cleanBytes.length);
+                System.arraycopy(curData, oldContentEnd, newData, valHeaderIdx + newHdr.length + cleanBytes.length, curData.length - oldContentEnd);
+
+                curData = newData;
+                modified = true;
+                pos = valHeaderIdx + newHdr.length + cleanBytes.length;
+            } else {
+                pos = idx + 3;
+            }
+        }
+        return curData;
+    }
+
+    private static byte[] sanitizeMountTable(byte[] data) {
+        if (data == null || data.length < 20) return data;
+        int idx = indexOfPattern(data, PATTERN_TMPFS, 0);
+        if (idx == -1) return data;
+
+        int headerIdx = -1;
+        int headerLen = 0;
+        int oldLen = 0;
+
+        if (idx >= 5 && (data[idx - 5] & 0x0F) == 7) {
+            headerIdx = idx - 5;
+            headerLen = 5;
+            oldLen = ((data[idx - 4] & 0xFF) << 24) |
+                     ((data[idx - 3] & 0xFF) << 16) |
+                     ((data[idx - 2] & 0xFF) << 8) |
+                     (data[idx - 1] & 0xFF);
+        } else if (idx >= 6 && data[idx - 6] == (byte) 0xF7) {
+            headerIdx = idx - 6;
+            headerLen = 6;
+            oldLen = ((data[idx - 4] & 0xFF) << 24) |
+                     ((data[idx - 3] & 0xFF) << 16) |
+                     ((data[idx - 2] & 0xFF) << 8) |
+                     (data[idx - 1] & 0xFF);
+        } else if (idx >= 2 && (data[idx - 2] & 0x0F) == 6) {
+            headerIdx = idx - 2;
+            headerLen = 2;
+            oldLen = data[idx - 1] & 0xFF;
+        }
+
+        if (headerIdx == -1 || oldLen <= 0 || idx + oldLen > data.length) {
+            return data;
+        }
+
+        String mountStr = new String(data, idx, oldLen, java.nio.charset.StandardCharsets.ISO_8859_1);
+        String[] entries = mountStr.split(",");
+        List<String> cleanList = new ArrayList<>(entries.length);
+
+        for (String e : entries) {
+            if (e == null || e.isEmpty()) continue;
+            if (e.startsWith("debugfs:") || e.contains(":debugfs:") || e.contains("tracefs")) {
+                continue;
+            }
+            if (e.contains("nhzh") || e.contains("bzwi") || e.contains("wda5") ||
+                e.contains("kernelsu") || e.contains("ksud") || e.contains("/ksu") ||
+                e.contains("apatch") || e.contains("magisk") || e.contains("lsposed")) {
+                continue;
+            }
+            if (e.startsWith("overlay:/system/") && e.contains("/mnt/vendor/")) {
+                continue;
+            }
+            if (e.startsWith("/dev/block/loop::")) {
+                cleanList.add("/dev/block/loop::0");
+                continue;
+            }
+            if (e.startsWith("/dev/block/dm::")) {
+                cleanList.add("/dev/block/dm::0");
+                continue;
+            }
+            cleanList.add(e);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < cleanList.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append(cleanList.get(i));
+        }
+
+        String cleanMountStr = sb.toString();
+        if (cleanMountStr.equals(mountStr)) {
+            return data;
+        }
+
+        byte[] cleanBytes = cleanMountStr.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        byte[] newHdr;
+        if (headerLen == 5) {
+            newHdr = new byte[] {
+                data[headerIdx],
+                (byte) ((cleanBytes.length >> 24) & 0xFF),
+                (byte) ((cleanBytes.length >> 16) & 0xFF),
+                (byte) ((cleanBytes.length >> 8) & 0xFF),
+                (byte) (cleanBytes.length & 0xFF)
+            };
+        } else if (headerLen == 6) {
+            newHdr = new byte[] {
+                data[headerIdx],
+                data[headerIdx + 1],
+                (byte) ((cleanBytes.length >> 24) & 0xFF),
+                (byte) ((cleanBytes.length >> 16) & 0xFF),
+                (byte) ((cleanBytes.length >> 8) & 0xFF),
+                (byte) (cleanBytes.length & 0xFF)
+            };
+        } else {
+            newHdr = new byte[] {
+                data[headerIdx],
+                (byte) (cleanBytes.length & 0xFF)
+            };
+        }
+
+        int oldContentEnd = idx + oldLen;
+        int newTotalLen = headerIdx + newHdr.length + cleanBytes.length + (data.length - oldContentEnd);
+        byte[] newData = new byte[newTotalLen];
+
+        System.arraycopy(data, 0, newData, 0, headerIdx);
+        System.arraycopy(newHdr, 0, newData, headerIdx, newHdr.length);
+        System.arraycopy(cleanBytes, 0, newData, headerIdx + newHdr.length, cleanBytes.length);
+        System.arraycopy(data, oldContentEnd, newData, headerIdx + newHdr.length + cleanBytes.length, data.length - oldContentEnd);
+
+        return newData;
+    }
+
+    private static byte[] sanitizeBootState(byte[] data) {
+        if (data == null || data.length < 10) return data;
+        replaceFixedPatternInPlace(data, PATTERN_LOCKED_0, ":locked:1".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        replaceFixedPatternInPlace(data, PATTERN_GREEN_0, ":green:1".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        replaceFixedPatternInPlace(data, PATTERN_ENFORCING_0, ":enforcing:1".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        replaceFixedPatternInPlace(data, PATTERN_BOOT_HASH_0, "-336568457738497426:1:1".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        return data;
+    }
+
+    private static void replaceFixedPatternInPlace(byte[] data, byte[] target, byte[] replacement) {
+        if (target.length != replacement.length || data.length < target.length) return;
+        int max = data.length - target.length;
+        for (int i = 0; i <= max; i++) {
+            boolean match = true;
+            for (int j = 0; j < target.length; j++) {
+                if (data[i + j] != target[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                System.arraycopy(replacement, 0, data, i, target.length);
+                i += target.length - 1;
+            }
+        }
+    }
+
+    private static byte[] sanitizeArtIntegrity(byte[] data) {
+        if (data == null || data.length < 30) return data;
+        int idx = indexOfPattern(data, PATTERN_RX_P, 0);
+        if (idx == -1) return data;
+
+        int start = idx;
+        while (start > 0 && data[start - 1] >= 32 && data[start - 1] <= 126) {
+            start--;
+        }
+        int end = idx;
+        while (end < data.length && data[end] >= 32 && data[end] <= 126) {
+            end++;
+        }
+
+        String artStr = new String(data, start, end - start, java.nio.charset.StandardCharsets.ISO_8859_1);
+        java.util.regex.Matcher m = ART_INTEGRITY_PATTERN.matcher(artStr);
+        StringBuffer sb = new StringBuffer();
+        boolean changed = false;
+
+        while (m.find()) {
+            String memHex = m.group(1);
+            String middle = m.group(2);
+            String diskHex = m.group(3);
+            if (!memHex.equalsIgnoreCase(diskHex) && memHex.length() == diskHex.length()) {
+                m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(":" + diskHex + ":r-xp:" + middle + diskHex + ":"));
+                changed = true;
+            } else {
+                m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(m.group(0)));
+            }
+        }
+        m.appendTail(sb);
+
+        if (changed) {
+            byte[] cleanBytes = sb.toString().getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+            if (cleanBytes.length == (end - start)) {
+                System.arraycopy(cleanBytes, 0, data, start, cleanBytes.length);
+            }
+        }
+        return data;
+    }
+
+    private static int indexOfPattern(byte[] data, byte[] pattern, int start) {
+        if (data == null || pattern == null || start + pattern.length > data.length) return -1;
+        int max = data.length - pattern.length;
+        for (int i = start; i <= max; i++) {
+            boolean match = true;
+            for (int j = 0; j < pattern.length; j++) {
+                if (data[i + j] != pattern[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return i;
+        }
+        return -1;
     }
 
     /**
@@ -4690,9 +4908,14 @@ public class QQ950PatchHook {
                                                 packedBytes = cleanBytes;
                                                 io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSanitizationEvent(
                                                     "TuringFD", param.method.getName(),
-                                                    java.util.Collections.singletonList("NativePack_Key129_Scrubbed(tun0/ap0/vgate/dummy/ifb)")
+                                                    java.util.Arrays.asList(
+                                                        "NativePack_Key129_Scrubbed(tun0/ap0/vgate/dummy/ifb)",
+                                                        "NativePack_MountTable_Scrubbed(debugfs/overlays/loop/dm)",
+                                                        "NativePack_BootState_Normalized(locked:1/green:1/enforcing:1)",
+                                                        "NativePack_ArtIntegrity_Normalized(memory_opcodes=disk_opcodes)"
+                                                    )
                                                 );
-                                                XposedEntry.log("[TuringPatch] Sanitized Key 129 native network interface list in " + param.method.getName());
+                                                XposedEntry.log("[TuringPatch] Sanitized multi-vector native environment telemetry in " + param.method.getName());
                                             }
 
                                             String detail = "retCode=" + retCode + ", sparseArrayEntries=" + sa.size();
@@ -4708,9 +4931,14 @@ public class QQ950PatchHook {
                                             param.setResult(cleanB);
                                             io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSanitizationEvent(
                                                 "TuringFD", param.method.getName(),
-                                                java.util.Collections.singletonList("NativePack_Key129_Scrubbed_DirectByteArray")
+                                                java.util.Arrays.asList(
+                                                    "NativePack_Key129_Scrubbed(tun0/ap0/vgate/dummy/ifb)",
+                                                    "NativePack_MountTable_Scrubbed(debugfs/overlays/loop/dm)",
+                                                    "NativePack_BootState_Normalized(locked:1/green:1/enforcing:1)",
+                                                    "NativePack_ArtIntegrity_Normalized(memory_opcodes=disk_opcodes)"
+                                                )
                                             );
-                                            XposedEntry.log("[TuringPatch] Sanitized Key 129 direct byte array in " + param.method.getName());
+                                            XposedEntry.log("[TuringPatch] Sanitized multi-vector direct byte array in " + param.method.getName());
                                         }
                                     }
                                 }

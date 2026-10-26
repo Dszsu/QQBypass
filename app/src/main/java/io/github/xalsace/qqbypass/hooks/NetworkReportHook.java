@@ -644,9 +644,14 @@ public class NetworkReportHook {
                                     bArr = cleanBArr;
                                     io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSanitizationEvent(
                                         "TuringFD.Network", "d1.a",
-                                        java.util.Collections.singletonList("d1.a_Key129_Scrubbed(tun0/ap0/vgate/dummy/ifb)")
+                                        java.util.Arrays.asList(
+                                            "d1.a_Key129_Scrubbed(tun0/ap0/vgate/dummy/ifb)",
+                                            "d1.a_MountTable_Scrubbed(debugfs/overlays/loop/dm)",
+                                            "d1.a_BootState_Normalized(locked:1/green:1/enforcing:1)",
+                                            "d1.a_ArtIntegrity_Normalized(memory_opcodes=disk_opcodes)"
+                                        )
                                     );
-                                    XposedEntry.log("[NetworkReport] Sanitized Key 129 network interface leak in d1.a payload");
+                                    XposedEntry.log("[NetworkReport] Sanitized multi-vector risk telemetry in d1.a payload");
                                 }
                             }
                             long timeout = param.args.length >= 5 && param.args[4] instanceof Number ? ((Number) param.args[4]).longValue() : 0L;
