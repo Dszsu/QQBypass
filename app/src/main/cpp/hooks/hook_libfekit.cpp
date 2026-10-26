@@ -119,7 +119,6 @@ static char* fake_strstr(const char* haystack, const char* needle) {
             "com.kingo.root", "com.smedialink.oneclickroot", "com.zhiqupk.root.global",
             "com.shuame.rootgenius", "com.applisto.appcloner",
             "RuntimeEnvCensor", "parse_libart", "detection_libfekit_file",
-            "VMStack_getThreadStackTrace", "trpc.o3.report.Report.SsoReport",
             "busybox", "substrate", "cydia", "sutemp", "daemonsu", "permmgrd", "360sguard",
             "/data/adb",
             nullptr
@@ -153,7 +152,6 @@ static char* fake_strcasestr(const char* haystack, const char* needle) {
             "com.kingo.root", "com.smedialink.oneclickroot", "com.zhiqupk.root.global",
             "com.shuame.rootgenius", "com.applisto.appcloner",
             "RuntimeEnvCensor", "parse_libart", "detection_libfekit_file",
-            "VMStack_getThreadStackTrace", "trpc.o3.report.Report.SsoReport",
             "busybox", "substrate", "cydia", "sutemp", "daemonsu", "permmgrd", "360sguard",
             "/data/adb",
             nullptr

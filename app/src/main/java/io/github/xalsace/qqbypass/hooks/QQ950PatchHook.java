@@ -1171,40 +1171,17 @@ public class QQ950PatchHook {
     }
 
     public static String generateSafeTuringSignMsg() {
-        try {
-            org.json.JSONObject signJson = new org.json.JSONObject();
-            signJson.put("sign", "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=");
-            java.util.Random rnd = new java.util.Random();
-            StringBuilder nonceSb = new StringBuilder(32);
-            String chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-            for (int i = 0; i < 32; i++) {
-                nonceSb.append(chars.charAt(rnd.nextInt(chars.length())));
-            }
-            signJson.put("nonce", nonceSb.toString());
-            signJson.put("timestamp", System.currentTimeMillis());
-            signJson.put("token", "");
-            signJson.put("signMethod", "TuringV2");
-            return android.util.Base64.encodeToString(signJson.toString().getBytes("UTF-8"), android.util.Base64.NO_WRAP);
-        } catch (Throwable t) {
-            return "eyJzaWduIjoiQVFJREJBVUdCd2dKQ2dzTURRNE1FUkVTRXhRVkZoY1lHUm9iSEIwZUh5QT0iLCJub25jZSI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmIiwidGltZXN0YW1wIjoxNjAwMDAwMDAwMDAwLCJ0b2tlbiI6IiIsInNpZ25NZXRob2QiOiJUdXJpbmdWMiJ9";
-        }
+        return "";
     }
 
     public static void hookFaceRecognitionAndMFAWithClassLoader(ClassLoader cl) {
         if (cl == null) return;
 
-        // 1. TuringFaceDefender: init, signData, activeSign, getDeviceInfo, setPreviewDisplay
+        // 1. TuringFaceDefender: null-safety crash defenses
         final String tfdCls = "com.tencent.turingcam.TuringFaceDefender";
         Class<?> tfdClass = XposedHelpers.findClassIfExists(tfdCls, cl);
         if (tfdClass != null && !sHookedFaceClasses.contains(tfdClass)) {
             sHookedFaceClasses.add(tfdClass);
-            HookUtils.hookAllMethods(tfdClass, "init", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult(0);
-                    XposedEntry.log("[FacePatch] TuringFaceDefender.init executed -> forced result 0");
-                }
-            });
 
             HookUtils.hookAllMethods(tfdClass, "setPreviewDisplay", new XC_MethodHook() {
                 @Override
@@ -1227,22 +1204,6 @@ public class QQ950PatchHook {
                 }
             });
 
-            HookUtils.hookAllMethods(tfdClass, "activeSign", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    Object res = param.getResult();
-                    if (res instanceof Number) {
-                        long code = ((Number) res).longValue();
-                        if (code != 0L) {
-                            XposedEntry.log("[FacePatch] TuringFaceDefender.activeSign returned " + code + ", normalizing to 0L");
-                            param.setResult(0L);
-                        } else {
-                            XposedEntry.log("[FacePatch] TuringFaceDefender.activeSign succeeded natively -> 0L");
-                        }
-                    }
-                }
-            });
-
             HookUtils.hookAllMethods(tfdClass, "getDeviceInfo", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -1252,54 +1213,7 @@ public class QQ950PatchHook {
                     }
                 }
             });
-
-            HookUtils.hookAllMethods(tfdClass, "signData", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    Object result = param.getResult();
-                    String safeSign = generateSafeTuringSignMsg();
-                    if (result != null) {
-                        try {
-                            long code = XposedHelpers.getLongField(result, "code");
-                            if (code != 0) {
-                                XposedHelpers.setLongField(result, "code", 0L);
-                                XposedEntry.log("[FacePatch] Sanitized TuringFaceDefender.signData code: " + code + " -> 0");
-                            }
-                        } catch (Throwable t) {
-                            try {
-                                int codeInt = XposedHelpers.getIntField(result, "code");
-                                if (codeInt != 0) {
-                                    XposedHelpers.setIntField(result, "code", 0);
-                                    XposedEntry.log("[FacePatch] Sanitized TuringFaceDefender.signData code: " + codeInt + " -> 0");
-                                }
-                            } catch (Throwable ignored) {}
-                        }
-                        try {
-                            String signMsg = (String) XposedHelpers.getObjectField(result, "signMsg");
-                            if (signMsg == null || signMsg.isEmpty()) {
-                                XposedHelpers.setObjectField(result, "signMsg", safeSign);
-                                XposedEntry.log("[FacePatch] Sanitized TuringFaceDefender.signData signMsg: null -> valid safe token");
-                            } else {
-                                XposedEntry.log("[FacePatch] Preserved genuine TuringFaceDefender.signData signMsg (len=" + signMsg.length() + ")");
-                            }
-                        } catch (Throwable t) {
-                            try {
-                                XposedHelpers.setObjectField(result, "signMsg", safeSign);
-                            } catch (Throwable ignored) {}
-                        }
-                    } else {
-                        try {
-                            Class<?> signResultClass = XposedHelpers.findClassIfExists("com.tencent.turingcam.SignResult", cl);
-                            if (signResultClass != null) {
-                                Object safeResult = XposedHelpers.newInstance(signResultClass, 0L, safeSign);
-                                param.setResult(safeResult);
-                                XposedEntry.log("[FacePatch] Constructed safe SignResult for null signData");
-                            }
-                        } catch (Throwable ignored) {}
-                    }
-                }
-            });
-            XposedEntry.log("[FacePatch] Hooked TuringFaceDefender for face recognition safety");
+            XposedEntry.log("[FacePatch] Hooked TuringFaceDefender for null-safety guards");
         }
 
         // 1.1 OTVRM: direct defense in depth for constructors, setPreviewDisplay and start methods
@@ -1332,7 +1246,7 @@ public class QQ950PatchHook {
             XposedEntry.log("[FacePatch] Hooked OTVRM constructors & a methods with universal null-safe guard");
         }
 
-        // 2. TuringSdkImp: b(Context) hardware init & a() status / a(String, String) sign / a(View, CameraHolder, String) start
+        // 2. TuringSdkImp: b(Context) hardware init & argument null-safety
         final String turingSdkImpCls = "com.tencent.could.huiyansdk.turingmodule.TuringSdkImp";
         Class<?> turingSdkImpClass = XposedHelpers.findClassIfExists(turingSdkImpCls, cl);
         if (turingSdkImpClass != null && !sHookedFaceClasses.contains(turingSdkImpClass)) {
@@ -1373,34 +1287,8 @@ public class QQ950PatchHook {
                         }
                     }
                 }
-
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.method instanceof java.lang.reflect.Method) {
-                        java.lang.reflect.Method m = (java.lang.reflect.Method) param.method;
-                        if (m.getReturnType() == String.class && (param.args == null || param.args.length == 0)) {
-                            Object res = param.getResult();
-                            if (res instanceof String && !((String) res).isEmpty()) {
-                                param.setResult("");
-                            }
-                        } else if (m.getReturnType() == String.class && param.args != null && param.args.length == 2) {
-                            Object res = param.getResult();
-                            if (res == null || "".equals(res) || (res instanceof String && ((String) res).startsWith("error"))) {
-                                String safeSign = generateSafeTuringSignMsg();
-                                param.setResult(safeSign);
-                                XposedEntry.log("[FacePatch] Sanitized TuringSdkImp.a(String, String) -> safe token (was " + res + ")");
-                            }
-                        } else if (m.getReturnType() == int.class && param.args != null && param.args.length == 3) {
-                            Object res = param.getResult();
-                            if (res instanceof Number && ((Number) res).intValue() != 0) {
-                                XposedEntry.log("[FacePatch] Normalized TuringSdkImp.a(View, CameraHolder, String) return " + res + " -> 0");
-                                param.setResult(0);
-                            }
-                        }
-                    }
-                }
             });
-            XposedEntry.log("[FacePatch] Hooked TuringSdkImp for face hardware status, sign, and defender start");
+            XposedEntry.log("[FacePatch] Hooked TuringSdkImp for face hardware status and argument null-safety");
         }
 
         // 2.1 Turing base class: com.tencent.could.huiyansdk.turing.b is an abstract class.
@@ -4176,18 +4064,16 @@ public class QQ950PatchHook {
             Class<?> bCls = XposedHelpers.findClassIfExists(bClsName, cl);
             if (bCls != null && sHookedTuringBerryClasses.add(cl.hashCode() + "_" + bClsName)) {
                 // Berry.b() -> listens to open ports/tcp -> allow real execution so Key 118 elapsed time is authentic!
-                // In afterHookedMethod: sanitize "-1" or suspicious ports to clean "v4;0_v6;0"
+                // In afterHookedMethod: only scrub suspicious debug/instrumentation ports if present, preserving genuine socket list
                 HookUtils.hookIfMethodExists(bCls, "b", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         Object res = param.getResult();
-                        if (res == null || "".equals(res) || !(res instanceof String)) {
-                            param.setResult("v4;0_v6;0");
-                            return;
-                        }
-                        String s = (String) res;
-                        if (s.contains(";-1") || s.contains(";27042") || s.contains(";5555")) {
-                            param.setResult("v4;0_v6;0");
+                        if (res instanceof String) {
+                            String s = (String) res;
+                            if (s.contains(":27042") || s.contains(":27043") || s.contains(":5555")) {
+                                param.setResult(s.replaceAll("(:27042|:27043|:5555)", ":0"));
+                            }
                         }
                     }
                 });
@@ -4573,13 +4459,13 @@ public class QQ950PatchHook {
                                                     }
                                                 }
 
-                                                // Key 272: Open ports / listening sockets -> clean baseline "v4;0_v6;0"
+                                                // Key 272: Open ports / listening sockets -> scrub suspicious debug/instrumentation ports if present
                                                 if (hasRiskKey(map, 272)) {
                                                     Object v = getRiskValue(map, 272);
                                                     if (v != null) {
                                                         String s = v.toString();
-                                                        if (s.contains(";-1") || s.contains(";27042") || s.contains(";5555")) {
-                                                            putRiskValue(map, 272, "v4;0_v6;0");
+                                                        if (s.contains(":27042") || s.contains(":27043") || s.contains(":5555")) {
+                                                            putRiskValue(map, 272, s.replaceAll("(:27042|:27043|:5555)", ":0"));
                                                             sanitized = true;
                                                             sanitizedDetails.add("272(PortsSanitized)");
                                                         }
