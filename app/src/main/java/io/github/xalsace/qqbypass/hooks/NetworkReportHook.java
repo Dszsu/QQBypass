@@ -981,10 +981,11 @@ public class NetworkReportHook {
         String[] kickMethods = {
             "onUserTokenExpired", "onKickedAndClearToken", "onKicked",
             "onInterceptKicked", "onKickedInternal", "onGrayError",
-            "onServerSuspended", "onInvalidSign", "onNoTestEnvPermission"
+            "onServerSuspended", "onInvalidSign", "onNoTestEnvPermission",
+            "onRecvServerTip"
         };
         for (String mName : kickMethods) {
-            HookUtils.hookAllMethods(ehCls, mName, new XC_MethodHook() {
+            HookUtils.hookIfMethodExists(ehCls, mName, new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     Object fromServiceMsg = null;
@@ -1008,7 +1009,7 @@ public class NetworkReportHook {
             });
         }
 
-        HookUtils.hookAllMethods(ehCls, "popupNotification", new XC_MethodHook() {
+        HookUtils.hookIfMethodExists(ehCls, "popupNotification", new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 StringBuilder details = new StringBuilder("popupNotification called with args: [");
@@ -1025,7 +1026,7 @@ public class NetworkReportHook {
             }
         });
 
-        HookUtils.hookAllMethods(ehCls, "popupNotificationEx", new XC_MethodHook() {
+        HookUtils.hookIfMethodExists(ehCls, "popupNotificationEx", new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 StringBuilder details = new StringBuilder("popupNotificationEx (SecKick) called with args: [");
