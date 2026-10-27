@@ -357,7 +357,7 @@ bool is_sensitive_path(const char* path) {
         "top.nkbe.npatch", "npatch", "org.lsposed.manager", "lspilot",
         "bytehook", "native-bypass", "libapatch", "/apatch/", "apatchd", "fusehide", "simplehook",
         "libchecker", "shizuku", "vtools", "bin.mt", "bin.mt.plus", "bin.mt.termex",
-        "thanos", "termux", "duckusb", "antigravity", ".gemini",
+        "thanos", "termux", "duckusb", "antigravity", ".gemini", "proxypin", "243f0bfb",
         "me.weishu.kernelsu", "me.bmax.apatch", "eu.chainfire.supersu",
         "com.koushikdutta.superuser", "com.noshufou.android.su", "com.kingroot.kinguser",
         "com.kingo.root", "com.smedialink.oneclickroot", "com.zhiqupk.root.global",
@@ -620,7 +620,7 @@ static bool is_sensitive_name_for_caller(const char* name, void* return_address)
         "shamiko", "libapatch", "apatchd", "npatch", "lspilot", "fusehide",
         "simplehook", "libchecker", "shizuku", "vtools",
         "bin.mt", "mt2", "singleneuron", "bytebuddy",
-        "thanos", "termux", "duckusb", "lspatch",
+        "thanos", "termux", "duckusb", "lspatch", "proxypin", "243f0bfb",
         "org.lsposed.lspatch", "moe.ono", "ono_mmkv", "ono_hcb_",
         "ono_bubble_cache", "ono_image_tag", "ono_need_find_method",
         "lzlnb", "libcnm", "liball-jni", "cnm0",
@@ -1042,6 +1042,7 @@ FILE* build_filtered_mounts() {
         "mountify", "tricky_store", "metamodule", "zygisksu",
         "hosts", "data_mirror",
         "debugfs", "fclnicsd", "jshenoea", "tracefs",
+        "cacerts", "proxypin", "wda5", "nhzh", "bzwi",
         nullptr
     };
 
@@ -1051,6 +1052,10 @@ FILE* build_filtered_mounts() {
             if (strcasestr(line, blacklist[i])) { filter = true; break; }
         }
         if (!filter && strstr(line, "/dev/") && (strstr(line, "debugfs") || strstr(line, "fclnicsd") || strstr(line, "jshenoea"))) {
+            filter = true;
+        }
+        // In standard Android, only /apex itself is tmpfs; subdirectories (e.g. /apex/com.android.../cacerts) must never be tmpfs
+        if (!filter && strstr(line, "tmpfs /apex/")) {
             filter = true;
         }
         if (!filter) fputs(line, fake);
@@ -1084,6 +1089,7 @@ FILE* build_filtered_mountinfo() {
         "mountify", "tricky_store", "metamodule", "zygisksu",
         "hosts", "data_mirror",
         "debugfs", "fclnicsd", "jshenoea", "tracefs",
+        "cacerts", "proxypin", "wda5", "nhzh", "bzwi",
         nullptr
     };
 
@@ -1094,6 +1100,11 @@ FILE* build_filtered_mountinfo() {
         }
         if (!filter && strstr(line, "/dev/") && (strstr(line, "debugfs") || strstr(line, "fclnicsd") || strstr(line, "jshenoea"))) {
             filter = true;
+        }
+        if (!filter && strstr(line, "tmpfs") && strstr(line, "/apex/")) {
+            if (!strstr(line, " /apex ") && !strstr(line, " /apex/ ")) {
+                filter = true;
+            }
         }
         if (!filter) fputs(line, fake);
     }

@@ -794,7 +794,13 @@ public class QQ950PatchHook {
                                     if (dt != null && !dt.isEmpty()) {
                                         sLastKnownDeviceToken = dt;
                                         XposedEntry.log("[TuringPatch] Preserved authentic Wild.b deviceToken");
+                                    } else if (sLastKnownDeviceToken != null && !sLastKnownDeviceToken.isEmpty()) {
+                                        fb.set(wild, sLastKnownDeviceToken);
                                     }
+                                    // Ensure errorCode in Wild is normalized to 0 (No risk)
+                                    Field fa = wild.getClass().getDeclaredField("a");
+                                    fa.setAccessible(true);
+                                    fa.setInt(wild, 0);
                                 } catch (Throwable ignored) {}
                             }
                         } catch (Throwable ignored) {}
@@ -803,10 +809,11 @@ public class QQ950PatchHook {
             });
         }
 
-        // Direct method hooks on o2 implementations to observe authentic deviceToken
+        // Direct method hooks on o2 implementations to observe authentic deviceToken & guarantee 0 error code
         String[] o2Classes = {
             "com.tencent.turingfd.sdk.xq.o2",
-            "com.tencent.tfd.sdk.wxa.o2"
+            "com.tencent.tfd.sdk.wxa.o2",
+            "com.tencent.turingfd.sdk.tbs.o2"
         };
         for (String o2Cls : o2Classes) {
             Class<?> clazz = XposedHelpers.findClassIfExists(o2Cls, cl);
@@ -817,6 +824,36 @@ public class QQ950PatchHook {
                     Object res = p.getResult();
                     if (res instanceof String && !((String) res).isEmpty()) {
                         sLastKnownDeviceToken = (String) res;
+                    } else if (sLastKnownDeviceToken != null && !sLastKnownDeviceToken.isEmpty()) {
+                        p.setResult(sLastKnownDeviceToken);
+                    }
+                }
+            });
+            HookUtils.hookAllMethods(clazz, "getErrorCode", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    p.setResult(0L);
+                }
+            });
+            HookUtils.hookAllMethods(clazz, "isDowngrade", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    p.setResult(false);
+                }
+            });
+        }
+
+        // Hook TuringSdkInitHelper (com.tencent.mobileqq.turingfd.i) method f(boolean)
+        Class<?> turingInitHelper = XposedHelpers.findClassIfExists("com.tencent.mobileqq.turingfd.i", cl);
+        if (turingInitHelper != null && sHookedTuringClasses.add(turingInitHelper)) {
+            HookUtils.hookAllMethods(turingInitHelper, "f", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    Object res = p.getResult();
+                    if ((res == null || (res instanceof String && ((String) res).isEmpty())) &&
+                        sLastKnownDeviceToken != null && !sLastKnownDeviceToken.isEmpty()) {
+                        p.setResult(sLastKnownDeviceToken);
+                        XposedEntry.log("[TuringPatch] Guarded TuringSdkInitHelper.f: populated fallback deviceToken");
                     }
                 }
             });
@@ -4310,10 +4347,14 @@ public class QQ950PatchHook {
             }
             if (e.contains("nhzh") || e.contains("bzwi") || e.contains("wda5") ||
                 e.contains("kernelsu") || e.contains("ksud") || e.contains("/ksu") ||
-                e.contains("apatch") || e.contains("magisk") || e.contains("lsposed")) {
+                e.contains("apatch") || e.contains("magisk") || e.contains("lsposed") ||
+                e.contains("cacerts") || e.contains("proxypin")) {
                 continue;
             }
-            if (e.startsWith("overlay:/system/") && e.contains("/mnt/vendor/")) {
+            if (e.startsWith("tmpfs:/apex/") && !e.equals("tmpfs:/apex")) {
+                continue;
+            }
+            if (e.contains("overlay") && (e.contains("/system/etc") || e.contains("lowerdir="))) {
                 continue;
             }
             if (e.startsWith("/dev/block/loop::")) {
@@ -4907,6 +4948,76 @@ public class QQ950PatchHook {
                                                             sanitized = true;
                                                             sanitizedDetails.add("2021(Accessibility)");
                                                         }
+                                                    }
+                                                }
+
+                                                // Key 251: l3.b root/hook detection flag (clean baseline: "0")
+                                                if (hasRiskKey(map, 251)) {
+                                                    Object v = getRiskValue(map, 251);
+                                                    if (v != null && !"0".equals(v.toString())) {
+                                                        putRiskValue(map, 251, "0");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("251(RootFlag)");
+                                                    }
+                                                }
+
+                                                // Key 288: l3.b root/hook bitmask (clean baseline: "0")
+                                                if (hasRiskKey(map, 288)) {
+                                                    Object v = getRiskValue(map, 288);
+                                                    if (v != null && !"0".equals(v.toString())) {
+                                                        putRiskValue(map, 288, "0");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("288(RootBitmask)");
+                                                    }
+                                                }
+
+                                                // Key 252: y0.a virtual environment / su check flag (clean baseline: "0")
+                                                if (hasRiskKey(map, 252)) {
+                                                    Object v = getRiskValue(map, 252);
+                                                    if (v != null && !"0".equals(v.toString())) {
+                                                        putRiskValue(map, 252, "0");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("252(VirtualEnv)");
+                                                    }
+                                                }
+
+                                                // Key 256: Berry.a suspicious process inspection matching r1.c (clean baseline: "")
+                                                if (hasRiskKey(map, 256)) {
+                                                    Object v = getRiskValue(map, 256);
+                                                    if (v != null && !v.toString().isEmpty()) {
+                                                        putRiskValue(map, 256, "");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("256(ProcScanC)");
+                                                    }
+                                                }
+
+                                                // Key 268: Berry.a suspicious process inspection matching r1.d (clean baseline: "")
+                                                if (hasRiskKey(map, 268)) {
+                                                    Object v = getRiskValue(map, 268);
+                                                    if (v != null && !v.toString().isEmpty()) {
+                                                        putRiskValue(map, 268, "");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("268(ProcScanD)");
+                                                    }
+                                                }
+
+                                                // Key 269: Bennet.a /system/lib DSO inspection (clean baseline: "")
+                                                if (hasRiskKey(map, 269)) {
+                                                    Object v = getRiskValue(map, 269);
+                                                    if (v != null && !v.toString().isEmpty()) {
+                                                        putRiskValue(map, 269, "");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("269(DsoScan)");
+                                                    }
+                                                }
+
+                                                // Key 280: protected.a diagnostic shell execution result (clean baseline: "")
+                                                if (hasRiskKey(map, 280)) {
+                                                    Object v = getRiskValue(map, 280);
+                                                    if (v != null && !v.toString().isEmpty()) {
+                                                        putRiskValue(map, 280, "");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("280(DiagExec)");
                                                     }
                                                 }
 
