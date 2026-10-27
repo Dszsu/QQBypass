@@ -110,6 +110,9 @@ public class QQ950PatchHook {
         // Native security DSO inline syscall proximity trampoline triggers
         io.github.xalsace.qqbypass.NativeBypass.patchLibrary("fekit");
         io.github.xalsace.qqbypass.NativeBypass.patchLibrary("QSec");
+        io.github.xalsace.qqbypass.NativeBypass.patchLibrary("turing");
+        io.github.xalsace.qqbypass.NativeBypass.patchLibrary("wxa");
+        io.github.xalsace.qqbypass.NativeBypass.patchLibrary("tbs");
 
         hookTuringWrapper(lpparam);
         hookChannelReport(lpparam);
@@ -772,7 +775,8 @@ public class QQ950PatchHook {
         if (!HookConfig.ENABLE_QQ950_RISK_BLOCK || cl == null) return;
         String[] classes = {
             "com.tencent.tfd.sdk.wxa.TuringRiskService",
-            "com.tencent.turingfd.sdk.xq.TuringRiskService"
+            "com.tencent.turingfd.sdk.xq.TuringRiskService",
+            "com.tencent.turingfd.sdk.tbs.TuringRiskService"
         };
         for (final String cls : classes) {
             Class<?> clazz = XposedHelpers.findClassIfExists(cls, cl);
@@ -836,7 +840,8 @@ public class QQ950PatchHook {
         if (!HookConfig.ENABLE_QQ950_RISK_BLOCK || cl == null) return;
         String[] classes = {
             "com.tencent.tfd.sdk.wxa.TuringIDService",
-            "com.tencent.turingfd.sdk.xq.TuringIDService"
+            "com.tencent.turingfd.sdk.xq.TuringIDService",
+            "com.tencent.turingfd.sdk.tbs.TuringIDService"
         };
         for (final String cls : classes) {
             Class<?> clazz = XposedHelpers.findClassIfExists(cls, cl);
@@ -4471,7 +4476,9 @@ public class QQ950PatchHook {
         if (cl == null) return;
 
         String[] berryClasses = {
-            "com.tencent.turingfd.sdk.xq.Berry"
+            "com.tencent.turingfd.sdk.xq.Berry",
+            "com.tencent.tfd.sdk.wxa.Berry",
+            "com.tencent.turingfd.sdk.tbs.Berry"
         };
         for (String bClsName : berryClasses) {
             Class<?> bCls = XposedHelpers.findClassIfExists(bClsName, cl);
@@ -4767,13 +4774,22 @@ public class QQ950PatchHook {
         String[] tnativeClasses = {
             "com.tencent.turingfd.sdk.xq.TNative$aa",
             "com.tencent.tfd.sdk.wxa.TNative$aa",
+            "com.tencent.turingfd.sdk.tbs.TNative$aa",
             "com.tencent.turingfd.sdk.xq.TNative",
-            "com.tencent.tfd.sdk.wxa.TNative"
+            "com.tencent.tfd.sdk.wxa.TNative",
+            "com.tencent.turingfd.sdk.tbs.TNative"
         };
 
         for (String clsName : tnativeClasses) {
             Class<?> clazz = XposedHelpers.findClassIfExists(clsName, cl);
             if (clazz != null && sHookedTuringMapClasses.add(cl.hashCode() + "_" + clsName)) {
+                if (clsName.contains(".wxa.")) {
+                    io.github.xalsace.qqbypass.NativeBypass.patchLibrary("lib108168wxa.so");
+                } else if (clsName.contains(".tbs.")) {
+                    io.github.xalsace.qqbypass.NativeBypass.patchLibrary("libturingtbs.so");
+                } else {
+                    io.github.xalsace.qqbypass.NativeBypass.patchLibrary("libturingxq.so");
+                }
                 for (Method method : clazz.getDeclaredMethods()) {
                     Class<?>[] pTypes = method.getParameterTypes();
                     boolean hasMap = false;

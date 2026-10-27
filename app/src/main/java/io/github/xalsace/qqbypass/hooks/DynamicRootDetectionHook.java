@@ -1944,7 +1944,7 @@ public class DynamicRootDetectionHook {
                 String cls = elem.getClassName();
                 if (cls == null) continue;
                 String lower = cls.toLowerCase();
-                if (lower.contains(".qsec.") || lower.contains(".turing") || lower.contains(".beacon.")
+                if (lower.contains(".qsec.") || lower.contains(".turing") || lower.contains(".tfd.") || lower.contains(".beacon.")
                         || lower.contains(".pandora") || lower.contains(".bugly.")
                         || lower.contains(".feedback.") || lower.contains("gathererga")
                         || lower.contains("camerasdk.avreport")

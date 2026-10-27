@@ -241,8 +241,14 @@ Java_io_github_xalsace_qqbypass_NativeBypass_patchLibraryNative(JNIEnv* env, jcl
             hook_libfekit::patch_libfekit_in_memory();
         } else if (strstr(name, "QSec") || strstr(name, "qsec")) {
             hook_libqsec::patch_libqsec_in_memory();
-        } else if (strstr(name, "turing") || strstr(name, "tfd")) {
+        } else if (strstr(name, "qimei")) {
+            hook_libqimei::patch_libqimei_in_memory();
+        } else if (strstr(name, "turing") || strstr(name, "tfd") || strstr(name, "wxa") || strstr(name, "tbs")) {
             hook_libturingxq::patch_libturingxq_in_memory();
+            hook_libturingxq::install_hooks();
+            const char* slash = strrchr(name, '/');
+            const char* base = slash ? (slash + 1) : name;
+            hook_libturingxq::install_hooks_for_lib(base);
         }
         sanitize_system_memory_permissions();
         env->ReleaseStringUTFChars(lib_name, name);

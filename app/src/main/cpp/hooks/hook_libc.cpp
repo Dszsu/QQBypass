@@ -3393,13 +3393,15 @@ static void* fake_dlopen(const char* filename, int flags) {
             hook_libfekit::patch_libfekit_in_memory();
         } else if (filename && strstr(filename, "libQSec.so")) {
             hook_libqsec::patch_libqsec_in_memory();
-        } else if (filename && strstr(filename, "libqimei.so")) {
+        } else if (filename && (strstr(filename, "libqimei") || strstr(filename, "qimei"))) {
             hook_libqimei::patch_libqimei_in_memory();
-        } else if (filename && (strstr(filename, "libturingxq") || strstr(filename, "turingxq") || strstr(filename, "libtfd"))) {
-            hook_libturingxq::patch_libturingxq_in_memory();
-            hook_libturingxq::install_hooks();
         } else if (filename && (strstr(filename, "libturingmfa") || strstr(filename, "turingmfa"))) {
             install_turingmfa_hooks();
+        } else if (filename && (strstr(filename, "turing") || strstr(filename, "libtfd") || (strstr(filename, "wxa") && strstr(filename, ".so")))) {
+            hook_libturingxq::patch_libturingxq_in_memory();
+            const char* slash = strrchr(filename, '/');
+            const char* base = slash ? (slash + 1) : filename;
+            hook_libturingxq::install_hooks_for_lib(base);
         } else if (filename && strstr(filename, "libqauxv-core0")) {
             s_cached_qauxv_core0 = handle;
         } else if (filename && strstr(filename, "libcnm")) {
@@ -3442,13 +3444,15 @@ static void* fake_android_dlopen_ext(const char* filename, int flags, const void
             hook_libfekit::patch_libfekit_in_memory();
         } else if (filename && strstr(filename, "libQSec.so")) {
             hook_libqsec::patch_libqsec_in_memory();
-        } else if (filename && strstr(filename, "libqimei.so")) {
+        } else if (filename && (strstr(filename, "libqimei") || strstr(filename, "qimei"))) {
             hook_libqimei::patch_libqimei_in_memory();
-        } else if (filename && (strstr(filename, "libturingxq") || strstr(filename, "turingxq") || strstr(filename, "libtfd"))) {
-            hook_libturingxq::patch_libturingxq_in_memory();
-            hook_libturingxq::install_hooks();
         } else if (filename && (strstr(filename, "libturingmfa") || strstr(filename, "turingmfa"))) {
             install_turingmfa_hooks();
+        } else if (filename && (strstr(filename, "turing") || strstr(filename, "libtfd") || (strstr(filename, "wxa") && strstr(filename, ".so")))) {
+            hook_libturingxq::patch_libturingxq_in_memory();
+            const char* slash = strrchr(filename, '/');
+            const char* base = slash ? (slash + 1) : filename;
+            hook_libturingxq::install_hooks_for_lib(base);
         } else if (filename && strstr(filename, "libqauxv-core0")) {
             s_cached_qauxv_core0 = handle;
         } else if (filename && strstr(filename, "libcnm")) {

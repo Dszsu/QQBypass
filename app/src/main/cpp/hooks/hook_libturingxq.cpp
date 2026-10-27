@@ -20,6 +20,9 @@
 #include <net/if.h>
 #include <stdarg.h>
 #include <atomic>
+#include <unordered_set>
+#include <string>
+#include <mutex>
 
 namespace hook_libturingxq {
 
@@ -373,11 +376,26 @@ void patch_libturingxq_in_memory() {
     LOGI("libturingxq.so: Preserving authentic text segment & code integrity (in-memory patching disabled)");
 }
 
-void install_hooks() {
-    patch_libturingxq_in_memory();
+static std::mutex s_targets_mutex;
+static std::unordered_set<std::string> s_hooked_targets;
+
+void install_hooks_for_lib(const char* target_lib) {
+    if (!target_lib || !target_lib[0]) return;
+
+    const char* slash = strrchr(target_lib, '/');
+    const char* lib_name = slash ? (slash + 1) : target_lib;
+
+    {
+        std::lock_guard<std::mutex> lock(s_targets_mutex);
+        if (!s_hooked_targets.insert(lib_name).second) {
+            return;
+        }
+    }
+
+    LOGI("libturing: Installing specialized hooks for target: %s", lib_name);
 
     TRACK_NATIVE_HOOK_SINGLE(
-        "libturingxq.so",
+        lib_name,
         nullptr,
         "syscall",
         (void*)hooked_syscall,
@@ -385,26 +403,29 @@ void install_hooks() {
         (void**)&original_syscall
     );
 
-    TRACK_NATIVE_HOOK_SINGLE(
-        "libturingxq.so",
-        "libturingxq.so",
-        "real_syscall",
-        (void*)hooked_real_syscall,
-        nullptr,
-        (void**)&original_real_syscall
-    );
+    // Only hook real_syscall if the target DSO is known to export or use it (libturingxq, lib*wxa, libturingmfa)
+    if (strstr(lib_name, "xq") != nullptr || strstr(lib_name, "wxa") != nullptr || strstr(lib_name, "mfa") != nullptr) {
+        TRACK_NATIVE_HOOK_SINGLE(
+            lib_name,
+            lib_name,
+            "real_syscall",
+            (void*)hooked_real_syscall,
+            nullptr,
+            (void**)&original_real_syscall
+        );
+
+        TRACK_NATIVE_HOOK_SINGLE(
+            lib_name,
+            nullptr,
+            "real_syscall",
+            (void*)hooked_real_syscall,
+            nullptr,
+            (void**)&original_real_syscall
+        );
+    }
 
     TRACK_NATIVE_HOOK_SINGLE(
-        "libturingxq.so",
-        nullptr,
-        "real_syscall",
-        (void*)hooked_real_syscall,
-        nullptr,
-        (void**)&original_real_syscall
-    );
-
-    TRACK_NATIVE_HOOK_SINGLE(
-        "libturingxq.so",
+        lib_name,
         nullptr,
         "strstr",
         (void*)fake_xq_strstr,
@@ -412,31 +433,38 @@ void install_hooks() {
         nullptr
     );
 
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "fopen", (void*)xq_fake_fopen, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "fopen64", (void*)xq_fake_fopen, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "open", (void*)xq_fake_open, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "open64", (void*)xq_fake_open, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "__open_2", (void*)xq_fake_open_2, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "openat", (void*)xq_fake_openat, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "openat64", (void*)xq_fake_openat, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "__openat_2", (void*)xq_fake_openat_2, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "stat", (void*)xq_fake_stat, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "lstat", (void*)xq_fake_lstat, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "fstatat", (void*)xq_fake_fstatat, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "access", (void*)xq_fake_access, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "faccessat", (void*)xq_fake_faccessat, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "statfs", (void*)xq_fake_statfs, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "popen", (void*)xq_fake_popen, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "fgets", (void*)xq_fake_fgets, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "readlink", (void*)xq_fake_readlink, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "readlinkat", (void*)xq_fake_readlinkat, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "recvfrom", (void*)xq_fake_recvfrom, nullptr, (void**)&real_xq_recvfrom_ptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "if_indextoname", (void*)xq_fake_if_indextoname, nullptr, (void**)&real_xq_if_indextoname_ptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "ioctl", (void*)xq_fake_ioctl, nullptr, (void**)&real_xq_ioctl_ptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "getifaddrs", (void*)hook_libc::fake_getifaddrs, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "freeifaddrs", (void*)hook_libc::fake_freeifaddrs, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "__system_property_get", (void*)hook_libc::fake_system_property_get, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "__system_property_find", (void*)hook_libc::fake_system_property_find, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "fopen", (void*)xq_fake_fopen, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "fopen64", (void*)xq_fake_fopen, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "open", (void*)xq_fake_open, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "open64", (void*)xq_fake_open, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "__open_2", (void*)xq_fake_open_2, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "openat", (void*)xq_fake_openat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "openat64", (void*)xq_fake_openat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "__openat_2", (void*)xq_fake_openat_2, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "stat", (void*)xq_fake_stat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "lstat", (void*)xq_fake_lstat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "fstatat", (void*)xq_fake_fstatat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "access", (void*)xq_fake_access, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "faccessat", (void*)xq_fake_faccessat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "statfs", (void*)xq_fake_statfs, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "popen", (void*)xq_fake_popen, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "fgets", (void*)xq_fake_fgets, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "readlink", (void*)xq_fake_readlink, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "readlinkat", (void*)xq_fake_readlinkat, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "recvfrom", (void*)xq_fake_recvfrom, nullptr, (void**)&real_xq_recvfrom_ptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "if_indextoname", (void*)xq_fake_if_indextoname, nullptr, (void**)&real_xq_if_indextoname_ptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "ioctl", (void*)xq_fake_ioctl, nullptr, (void**)&real_xq_ioctl_ptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "getifaddrs", (void*)hook_libc::fake_getifaddrs, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "freeifaddrs", (void*)hook_libc::fake_freeifaddrs, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "__system_property_get", (void*)hook_libc::fake_system_property_get, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE(lib_name, nullptr, "__system_property_find", (void*)hook_libc::fake_system_property_find, nullptr, nullptr);
+}
+
+void install_hooks() {
+    patch_libturingxq_in_memory();
+    install_hooks_for_lib("libturingxq.so");
+    install_hooks_for_lib("libturingtbs.so");
+    install_hooks_for_lib("lib108168wxa.so");
 }
 
 } // namespace hook_libturingxq
