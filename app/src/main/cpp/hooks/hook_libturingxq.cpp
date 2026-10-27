@@ -321,7 +321,7 @@ static ssize_t (*real_xq_recvfrom_ptr)(int, void*, size_t, int, struct sockaddr*
 static ssize_t xq_fake_recvfrom(int fd, void* buf, size_t len, int flags, struct sockaddr* src_addr, socklen_t* addrlen) {
     ssize_t ret = real_xq_recvfrom_ptr ? real_xq_recvfrom_ptr(fd, buf, len, flags, src_addr, addrlen)
                                        : recvfrom(fd, buf, len, flags, src_addr, addrlen);
-    if (ret > 0 && buf != nullptr) {
+    if (ret > 0 && buf != nullptr && hook_libc::is_netlink_socket(fd)) {
         hook_libc::sanitize_netlink_routing_response(buf, (size_t)ret);
     }
     return ret;
@@ -433,6 +433,8 @@ void install_hooks() {
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "recvfrom", (void*)xq_fake_recvfrom, nullptr, (void**)&real_xq_recvfrom_ptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "if_indextoname", (void*)xq_fake_if_indextoname, nullptr, (void**)&real_xq_if_indextoname_ptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "ioctl", (void*)xq_fake_ioctl, nullptr, (void**)&real_xq_ioctl_ptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "getifaddrs", (void*)hook_libc::fake_getifaddrs, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "freeifaddrs", (void*)hook_libc::fake_freeifaddrs, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "__system_property_get", (void*)hook_libc::fake_system_property_get, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingxq.so", nullptr, "__system_property_find", (void*)hook_libc::fake_system_property_find, nullptr, nullptr);
 }

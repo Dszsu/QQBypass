@@ -116,6 +116,8 @@ void install_turingmfa_hooks() {
     TRACK_NATIVE_HOOK_SINGLE("libturingmfa.so", nullptr, "recvfrom", (void*)hook_libc::fake_recvfrom, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingmfa.so", nullptr, "if_indextoname", (void*)hook_libc::fake_if_indextoname, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingmfa.so", nullptr, "ioctl", (void*)hook_libc::fake_ioctl, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingmfa.so", nullptr, "getifaddrs", (void*)hook_libc::fake_getifaddrs, nullptr, nullptr);
+    TRACK_NATIVE_HOOK_SINGLE("libturingmfa.so", nullptr, "freeifaddrs", (void*)hook_libc::fake_freeifaddrs, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingmfa.so", nullptr, "__system_property_get", (void*)hook_libc::fake_system_property_get, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libturingmfa.so", nullptr, "__system_property_find", (void*)hook_libc::fake_system_property_find, nullptr, nullptr);
 }

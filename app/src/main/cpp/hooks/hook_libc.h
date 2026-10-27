@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <sys/vfs.h>
 #include <sys/socket.h>
+#include <ifaddrs.h>
 #include <dirent.h>
 #include <sys/system_properties.h>
 
@@ -19,6 +20,8 @@ bool is_sensitive_link_target(const char* target);
 bool is_sensitive_proc_fd(const char* path);
 bool is_sensitive_proc_fd(int dirfd, const char* path);
 bool is_virtual_or_vpn_interface_name(const char* name);
+bool is_caller_security_dso(void* return_address);
+bool is_netlink_socket(int fd);
 bool is_filtered_ifindex(int ifindex);
 void record_filtered_ifindex(int ifindex);
 void sanitize_netlink_routing_response(void* buf, size_t len);
@@ -61,6 +64,8 @@ int fake_faccessat(int dirfd, const char* pathname, int mode, int flags);
 ssize_t fake_recvfrom(int fd, void* buf, size_t len, int flags, struct sockaddr* src_addr, socklen_t* addrlen);
 char* fake_if_indextoname(unsigned int ifindex, char* ifname);
 int fake_ioctl(int fd, unsigned long request, ...);
+int fake_getifaddrs(struct ifaddrs** ifap);
+void fake_freeifaddrs(struct ifaddrs* ifa);
 char* fake_fgets(char* s, int size, FILE* stream);
 ssize_t fake_readlink(const char* pathname, char* buf, size_t bufsiz);
 ssize_t fake_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsiz);

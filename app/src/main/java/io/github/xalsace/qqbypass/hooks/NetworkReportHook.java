@@ -56,8 +56,11 @@ public class NetworkReportHook {
     public static boolean isCoreProtocolCommand(String command) {
         if (command == null || command.isEmpty()) return false;
         return command.startsWith("trpc.msg.") ||
+               command.startsWith("trpc.group_pro.") ||
                command.startsWith("trpc.qq_new_tech.status_svc.") ||
                command.startsWith("trpc.o3.ecdh_access.") ||
+               command.startsWith("trpc.qlive.") ||
+               command.startsWith("trpc.aio.") ||
                command.startsWith("MessageSvc.") ||
                command.startsWith("RegPrxySvc.") ||
                command.startsWith("Heartbeat.") ||
@@ -67,6 +70,7 @@ public class NetworkReportHook {
                command.startsWith("Friendlist.") ||
                command.startsWith("trpc.login.ecdh.access") ||
                command.startsWith("trpc.group_mall.") ||
+               command.startsWith("OidbSvcTrpcTcp.") ||
                (command.startsWith("StatSvc.") && !command.contains("Offline")) ||
                (command.startsWith("OidbSvc.") && !command.contains("0xd79"));
     }
