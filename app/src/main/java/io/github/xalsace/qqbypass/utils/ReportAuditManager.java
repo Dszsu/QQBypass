@@ -847,7 +847,7 @@ public class ReportAuditManager {
             case "250": return "Injected Third-Party DSOs Scanner (Bennet)";
             case "251": return "Dual App / Multi-User Flag (Binary)";
             case "252": return "Virtual Environment / Container Check";
-            case "253": return "Device Hardware Spec D (Kiwifruit.d)";
+            case "253": return "USB Connection & ADB Configured State (Kiwifruit.d)";
             case "254": return "Device Hardware Spec B (Kiwifruit.b)";
             case "255": return "Screen Density & Metric Scale (public)";
             case "256": return "Debugger / Memory Tool Process Scanner";
@@ -858,7 +858,7 @@ public class ReportAuditManager {
             case "267": return "Sensor & Motion Hardware Scan Token";
             case "268": return "Non-System Root Daemon Process Scanner";
             case "269": return "Rockchip SoC Library Scanner (/system/lib)";
-            case "270": return "OS Flavor & HarmonyOS Detection (Kiwifruit.a)";
+            case "270": return "ADB & Developer Options & Debuggable State (Kiwifruit.a)";
             case "272": return "Open TCP Ports Scanner (/proc/net/tcp)";
             case "273": return "User Touch / Motion Gesture Buffer (Tough)";
             case "274": return "Telephony Device IMEI (Privileged)";

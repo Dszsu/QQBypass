@@ -221,7 +221,7 @@ public class HookUtils {
             }
         }
         if (hasMethod) {
-            hookAllMethods(clazz, methodName, callback);
+            hookAllMethodsIfExists(clazz, methodName, callback);
             return true;
         }
         return false;

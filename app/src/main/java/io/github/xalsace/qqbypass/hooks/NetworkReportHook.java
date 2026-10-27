@@ -985,7 +985,7 @@ public class NetworkReportHook {
             "onRecvServerTip"
         };
         for (String mName : kickMethods) {
-            HookUtils.hookIfMethodExists(ehCls, mName, new XC_MethodHook() {
+            HookUtils.hookAllMethodsIfExists(ehCls, mName, new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     Object fromServiceMsg = null;
@@ -1009,7 +1009,7 @@ public class NetworkReportHook {
             });
         }
 
-        HookUtils.hookIfMethodExists(ehCls, "popupNotification", new XC_MethodHook() {
+        HookUtils.hookAllMethodsIfExists(ehCls, "popupNotification", new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 StringBuilder details = new StringBuilder("popupNotification called with args: [");
@@ -1026,7 +1026,7 @@ public class NetworkReportHook {
             }
         });
 
-        HookUtils.hookIfMethodExists(ehCls, "popupNotificationEx", new XC_MethodHook() {
+        HookUtils.hookAllMethodsIfExists(ehCls, "popupNotificationEx", new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 StringBuilder details = new StringBuilder("popupNotificationEx (SecKick) called with args: [");

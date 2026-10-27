@@ -773,7 +773,8 @@ public class QQ950PatchHook {
         String[] classes = {
             "com.tencent.tfd.sdk.wxa.TuringRiskService",
             "com.tencent.turingfd.sdk.xq.TuringRiskService",
-            "com.tencent.turingfd.sdk.tbs.TuringRiskService"
+            "com.tencent.turingfd.sdk.tbs.TuringRiskService",
+            "com.tencent.turingface.sdk.mfa.TuringRiskService"
         };
         for (final String cls : classes) {
             Class<?> clazz = XposedHelpers.findClassIfExists(cls, cl);
@@ -813,7 +814,8 @@ public class QQ950PatchHook {
         String[] o2Classes = {
             "com.tencent.turingfd.sdk.xq.o2",
             "com.tencent.tfd.sdk.wxa.o2",
-            "com.tencent.turingfd.sdk.tbs.o2"
+            "com.tencent.turingfd.sdk.tbs.o2",
+            "com.tencent.turingface.sdk.mfa.o2"
         };
         for (String o2Cls : o2Classes) {
             Class<?> clazz = XposedHelpers.findClassIfExists(o2Cls, cl);
@@ -1799,6 +1801,123 @@ public class QQ950PatchHook {
                     }
                 }
             });
+        }
+
+        // 14. IdentificationIpcServer: normalize FaceGetRecognitionResult / action_upload EIPCResult error 413 to 0
+        final String ipcServerCls = "com.tencent.mobileqq.identification.IdentificationIpcServer";
+        Class<?> ipcServerClass = XposedHelpers.findClassIfExists(ipcServerCls, cl);
+        if (ipcServerClass != null && sHookedFaceClasses.add(ipcServerClass)) {
+            HookUtils.hookAllMethodsIfExists(ipcServerClass, "callbackResult", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length > 1 && param.args[1] != null) {
+                        Object resObj = param.args[1];
+                        if (resObj.getClass().getName().contains("EIPCResult")) {
+                            try {
+                                Object dataObj = XposedHelpers.getObjectField(resObj, "data");
+                                if (dataObj instanceof android.os.Bundle) {
+                                    android.os.Bundle b = (android.os.Bundle) dataObj;
+                                    int ret = b.getInt("ret", 0);
+                                    String errMsg = b.getString("errMsg", "");
+                                    if (ret == 413 || (errMsg != null && (errMsg.contains("环境异常") || errMsg.contains("安全设备")))) {
+                                        XposedHelpers.setIntField(resObj, "code", 0);
+                                        b.putInt("ret", 0);
+                                        b.putString("errMsg", "");
+                                        if (android.text.TextUtils.isEmpty(b.getString("idKey", ""))) {
+                                            b.putString("idKey", "auth_ok");
+                                        }
+                                        XposedEntry.log("[FacePatch] Normalized IdentificationIpcServer.callbackResult 413/EnvRisk -> ret=0/success");
+                                    }
+                                }
+                            } catch (Throwable t) {
+                                XposedEntry.logError("[FacePatch] Error normalizing IdentificationIpcServer callbackResult: " + t.getMessage(), t);
+                            }
+                        }
+                    }
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked IdentificationIpcServer.callbackResult for 413/EnvRisk normalization");
+        }
+
+        // 15. IdentificationResultCheckHelper (an): normalize IPC response in child process
+        final String anCls = "com.tencent.mobileqq.identification.an";
+        Class<?> anClass = XposedHelpers.findClassIfExists(anCls, cl);
+        if (anClass != null && sHookedFaceClasses.add(anClass)) {
+            HookUtils.hookAllMethodsIfExists(anClass, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length > 1 && param.args[1] != null) {
+                        Object resObj = param.args[1];
+                        if (resObj.getClass().getName().contains("EIPCResult")) {
+                            try {
+                                Object dataObj = XposedHelpers.getObjectField(resObj, "data");
+                                if (dataObj instanceof android.os.Bundle) {
+                                    android.os.Bundle b = (android.os.Bundle) dataObj;
+                                    int ret = b.getInt("ret", 0);
+                                    String errMsg = b.getString("errMsg", "");
+                                    if (ret == 413 || (errMsg != null && (errMsg.contains("环境异常") || errMsg.contains("安全设备")))) {
+                                        XposedHelpers.setIntField(resObj, "code", 0);
+                                        b.putInt("ret", 0);
+                                        b.putString("errMsg", "");
+                                        if (android.text.TextUtils.isEmpty(b.getString("idKey", ""))) {
+                                            b.putString("idKey", "auth_ok");
+                                        }
+                                        XposedEntry.log("[FacePatch] Normalized an.a EIPCResult 413/EnvRisk -> ret=0/success");
+                                    }
+                                }
+                            } catch (Throwable t) {
+                                XposedEntry.logError("[FacePatch] Error normalizing an.a EIPCResult: " + t.getMessage(), t);
+                            }
+                        }
+                    }
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked an.a for 413/EnvRisk normalization");
+        }
+
+        // 16. IdentificationGuideFragment callback (jc): normalize verification finish bundle in UI process
+        final String jcCls = "com.tencent.mobileqq.activity.jc";
+        Class<?> jcClass = XposedHelpers.findClassIfExists(jcCls, cl);
+        if (jcClass != null && sHookedFaceClasses.add(jcClass)) {
+            HookUtils.hookAllMethodsIfExists(jcClass, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length >= 2 && param.args[1] instanceof android.os.Bundle) {
+                        android.os.Bundle bundle = (android.os.Bundle) param.args[1];
+                        int ret = bundle.getInt("ret", 0);
+                        String errMsg = bundle.getString("errMsg", "");
+                        if (ret == 413 || (errMsg != null && (errMsg.contains("环境异常") || errMsg.contains("安全设备")))) {
+                            param.args[0] = 1; // code = 1 (onRequestFinish success)
+                            bundle.putInt("ret", 0);
+                            bundle.putString("errMsg", "");
+                            if (android.text.TextUtils.isEmpty(bundle.getString("idKey", ""))) {
+                                bundle.putString("idKey", "auth_ok");
+                            }
+                            XposedEntry.log("[FacePatch] Normalized jc.a Bundle 413/EnvRisk -> ret=0/success");
+                        }
+                    }
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked jc.a for 413/EnvRisk normalization");
+        }
+
+        // 17. IdentificationGuideFragment: normalize rf(error_code) pre-check and autoLogin completion
+        final String igfCls = "com.tencent.mobileqq.activity.IdentificationGuideFragment";
+        Class<?> igfClass = XposedHelpers.findClassIfExists(igfCls, cl);
+        if (igfClass != null && sHookedFaceClasses.add(igfClass)) {
+            HookUtils.hookAllMethodsIfExists(igfClass, "rf", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length > 0 && param.args[0] instanceof Number) {
+                        int err = ((Number) param.args[0]).intValue();
+                        if (err != 0) {
+                            param.args[0] = 0;
+                            XposedEntry.log("[FacePatch] Normalized IdentificationGuideFragment.rf huiyanSdkErrorCode=" + err + " -> 0");
+                        }
+                    }
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked IdentificationGuideFragment.rf for null-safety and 0-error pass");
         }
     }
 
@@ -4967,9 +5086,11 @@ public class QQ950PatchHook {
             "com.tencent.turingfd.sdk.xq.TNative$aa",
             "com.tencent.tfd.sdk.wxa.TNative$aa",
             "com.tencent.turingfd.sdk.tbs.TNative$aa",
+            "com.tencent.turingface.sdk.mfa.TNative$aa",
             "com.tencent.turingfd.sdk.xq.TNative",
             "com.tencent.tfd.sdk.wxa.TNative",
-            "com.tencent.turingfd.sdk.tbs.TNative"
+            "com.tencent.turingfd.sdk.tbs.TNative",
+            "com.tencent.turingface.sdk.mfa.TNative"
         };
 
         for (String clsName : tnativeClasses) {
@@ -4979,6 +5100,8 @@ public class QQ950PatchHook {
                     io.github.xalsace.qqbypass.NativeBypass.patchLibrary("lib108168wxa.so");
                 } else if (clsName.contains(".tbs.")) {
                     io.github.xalsace.qqbypass.NativeBypass.patchLibrary("libturingtbs.so");
+                } else if (clsName.contains(".mfa.") || clsName.contains("turingface")) {
+                    io.github.xalsace.qqbypass.NativeBypass.patchLibrary("libturingmfa.so");
                 } else {
                     io.github.xalsace.qqbypass.NativeBypass.patchLibrary("libturingxq.so");
                 }
@@ -5173,6 +5296,49 @@ public class QQ950PatchHook {
                                                         putRiskValue(map, 280, "");
                                                         sanitized = true;
                                                         sanitizedDetails.add("280(DiagExec)");
+                                                    }
+                                                }
+
+                                                // Key 270: Kiwifruit.a ADB, developer settings and debuggable flags (clean baseline: "0")
+                                                if (hasRiskKey(map, 270)) {
+                                                    Object v = getRiskValue(map, 270);
+                                                    if (v != null && !"0".equals(v.toString())) {
+                                                        putRiskValue(map, 270, "0");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("270(AdbDevSettings)");
+                                                    }
+                                                }
+
+                                                // Key 253: Kiwifruit.d USB connection & ADB configured state (clean baseline: "0")
+                                                if (hasRiskKey(map, 253)) {
+                                                    Object v = getRiskValue(map, 253);
+                                                    if (v != null && !"0".equals(v.toString())) {
+                                                        putRiskValue(map, 253, "0");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("253(UsbAdbState)");
+                                                    }
+                                                }
+
+                                                // Key 291: USB State action broadcast extras (scrub adb:1 / adb:true)
+                                                if (hasRiskKey(map, 291)) {
+                                                    Object v = getRiskValue(map, 291);
+                                                    if (v != null) {
+                                                        String s = v.toString();
+                                                        if (s.contains("adb:1") || s.contains("adb:true")) {
+                                                            putRiskValue(map, 291, s.replace("adb:1", "adb:0").replace("adb:true", "adb:false"));
+                                                            sanitized = true;
+                                                            sanitizedDetails.add("291(UsbAdbScrubbed)");
+                                                        }
+                                                    }
+                                                }
+
+                                                // Key 205: Caelum container / dual app detection (clean baseline: "0")
+                                                if (hasRiskKey(map, 205)) {
+                                                    Object v = getRiskValue(map, 205);
+                                                    if (v != null && !"0".equals(v.toString())) {
+                                                        putRiskValue(map, 205, "0");
+                                                        sanitized = true;
+                                                        sanitizedDetails.add("205(ContainerDualApp)");
                                                     }
                                                 }
 
