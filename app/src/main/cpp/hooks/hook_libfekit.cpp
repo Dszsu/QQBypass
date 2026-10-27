@@ -207,6 +207,31 @@ static FILE* get_fekit_redirected_stream(const char* pathname) {
         LOGI("FEKit redirected net/tcp: %s", pathname);
         return hook_libc::build_filtered_net_tcp(strstr(pathname, "tcp6") != nullptr);
     }
+    if (hook_libc::is_proc_net_if_inet6_path(pathname)) {
+        audit_native_probe("FEKit", "file_net_if_inet6", "redirected to clean net_if_inet6");
+        LOGI("FEKit redirected net/if_inet6: %s", pathname);
+        return hook_libc::build_filtered_net_if_inet6();
+    }
+    if (hook_libc::is_proc_net_dev_path(pathname)) {
+        audit_native_probe("FEKit", "file_net_dev", "redirected to clean net_dev");
+        LOGI("FEKit redirected net/dev: %s", pathname);
+        return hook_libc::build_filtered_net_dev();
+    }
+    if (hook_libc::is_proc_net_route_path(pathname)) {
+        audit_native_probe("FEKit", "file_net_route", "redirected to clean net_route");
+        LOGI("FEKit redirected net/route: %s", pathname);
+        return hook_libc::build_filtered_net_route();
+    }
+    if (hook_libc::is_proc_net_ipv6_route_path(pathname)) {
+        audit_native_probe("FEKit", "file_net_ipv6_route", "redirected to clean net_ipv6_route");
+        LOGI("FEKit redirected net/ipv6_route: %s", pathname);
+        return hook_libc::build_filtered_net_ipv6_route();
+    }
+    if (hook_libc::is_sys_class_net_virtual_path(pathname)) {
+        audit_native_probe("FEKit", "virtual_net_blocked", pathname);
+        LOGI("FEKit blocked virtual net interface: %s", pathname);
+        return nullptr;
+    }
     if (strstr(pathname, "attr/current")) {
         audit_native_probe("FEKit", "file_attr_current", "redirected to clean selinux_attr");
         LOGI("FEKit redirected attr/current: %s", pathname);
@@ -409,10 +434,12 @@ static ssize_t fake_fekit_readlinkat(int dirfd, const char* pathname, char* buf,
 }
 
 #if defined(__aarch64__)
-// Universal ARM64 Proximity Trampoline (34 instructions + 8 bytes literal pool = 144 bytes)
-[[maybe_unused]] static const uint32_t TRAMPOLINE_TEMPLATE[] = {
+// Universal ARM64 Register-Preserving Common Trampoline (34 instructions + 8 bytes literal pool = 144 bytes)
+// Passes (a0..a5, syscall_num, caller_pc) to c_fekit_syscall_handler, preserves original x30 and x16,
+// and returns to the instruction following the original inline svc #0 via "br x16" without corrupting x30.
+static const uint32_t COMMON_TRAMPOLINE_TEMPLATE[] = {
     0xd10383ff, // sub sp, sp, #0xe0
-    0xa90d7bfd, // stp x29, x30, [sp, #0xd0]
+    0xa90d7bfd, // stp x29, x30, [sp, #0xd0]  (preserves original x30)
     0xa9010be1, // stp x1, x2, [sp, #0x10]
     0xa90213e3, // stp x3, x4, [sp, #0x20]
     0xa9031be5, // stp x5, x6, [sp, #0x30]
@@ -420,20 +447,20 @@ static ssize_t fake_fekit_readlinkat(int dirfd, const char* pathname, char* buf,
     0xa9052be9, // stp x9, x10, [sp, #0x50]
     0xa90633eb, // stp x11, x12, [sp, #0x60]
     0xa9073bed, // stp x13, x14, [sp, #0x70]
-    0xa90843ef, // stp x15, x16, [sp, #0x80]
+    0xa90843ef, // stp x15, x16, [sp, #0x80]  (x16 holds return_address)
     0xa9094bf1, // stp x17, x18, [sp, #0x90]
     0x6d0a07e0, // stp d0, d1, [sp, #0xa0]
     0x6d0b0fe2, // stp d2, d3, [sp, #0xb0]
     0x6d0c17e4, // stp d4, d5, [sp, #0xc0]
-    0xaa0803e6, // mov x6, x8
-    0xaa1e03e7, // mov x7, x30
-    0x58000250, // ldr x16, [pc, #72] (loads literal pool at offset 0x88)
-    0xd63f0200, // blr x16
+    0xaa0803e6, // mov x6, x8                 (arg 6 = syscall_num)
+    0xaa1003e7, // mov x7, x16                (arg 7 = caller_pc / return_address)
+    0x58000251, // ldr x17, [pc, #72]         (load c_fekit_syscall_handler func ptr)
+    0xd63f0220, // blr x17                    (invoke c_fekit_syscall_handler)
     0x6d4c17e4, // ldp d4, d5, [sp, #0xc0]
     0x6d4b0fe2, // ldp d2, d3, [sp, #0xb0]
     0x6d4a07e0, // ldp d0, d1, [sp, #0xa0]
     0xa9494bf1, // ldp x17, x18, [sp, #0x90]
-    0xa94843ef, // ldp x15, x16, [sp, #0x80]
+    0xa94843ef, // ldp x15, x16, [sp, #0x80]  (restores x16 = return_address)
     0xa9473bed, // ldp x13, x14, [sp, #0x70]
     0xa94633eb, // ldp x11, x12, [sp, #0x60]
     0xa9452be9, // ldp x9, x10, [sp, #0x50]
@@ -441,10 +468,10 @@ static ssize_t fake_fekit_readlinkat(int dirfd, const char* pathname, char* buf,
     0xa9431be5, // ldp x5, x6, [sp, #0x30]
     0xa94213e3, // ldp x3, x4, [sp, #0x20]
     0xa9410be1, // ldp x1, x2, [sp, #0x10]
-    0xa94d7bfd, // ldp x29, x30, [sp, #0xd0]
+    0xa94d7bfd, // ldp x29, x30, [sp, #0xd0]  (restores original x30)
     0x910383ff, // add sp, sp, #0xe0
-    0xd65f03c0, // ret
-    0xd503201f  // nop (padding for 8-byte alignment)
+    0xd61f0200, // br x16                     (branch to return_address without touching x30!)
+    0xd503201f  // nop (alignment padding)
     // Followed by uint64_t target_func_ptr at offset 0x88 (136 bytes)
 };
 
@@ -458,6 +485,36 @@ extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long
                 audit_native_probe("FEKit", "openat_blocked", path);
                 LOGD("FEKit inline syscall openat blocked: %s (dirfd=%d, caller=%p)", path, dirfd, caller_pc);
                 return -ENOENT;
+            }
+            if (hook_libc::is_proc_net_if_inet6_path(path)) {
+                return hook_libc::open_virtual_file(hook_libc::build_filtered_net_if_inet6());
+            }
+            if (hook_libc::is_proc_net_dev_path(path)) {
+                return hook_libc::open_virtual_file(hook_libc::build_filtered_net_dev());
+            }
+            if (hook_libc::is_proc_net_route_path(path)) {
+                return hook_libc::open_virtual_file(hook_libc::build_filtered_net_route());
+            }
+            if (hook_libc::is_proc_net_ipv6_route_path(path)) {
+                return hook_libc::open_virtual_file(hook_libc::build_filtered_net_ipv6_route());
+            }
+            if (hook_libc::is_sys_class_net_virtual_path(path)) {
+                return -ENOENT;
+            }
+            if (hook_libc::is_proc_cmdline_path(path)) {
+                return hook_libc::open_virtual_file(hook_libc::build_virtual_cmdline(path));
+            }
+            if (strcmp(path, "/proc/self/maps") == 0 || (strstr(path, "/proc/") && strstr(path, "/maps"))) {
+                return hook_libc::open_virtual_file(hook_libc::build_filtered_maps());
+            }
+            if (strstr(path, "smaps")) {
+                return hook_libc::open_virtual_file(hook_libc::build_filtered_smaps());
+            }
+            if (strstr(path, "mountinfo")) {
+                return hook_libc::open_virtual_file(hook_libc::build_filtered_mountinfo());
+            }
+            if (strstr(path, "mounts")) {
+                return hook_libc::open_virtual_file(hook_libc::build_filtered_mounts());
             }
             int fake_fd = get_fekit_redirected_fd(path);
             if (fake_fd >= 0) {
@@ -550,17 +607,185 @@ struct ElfSearchInfo {
     }
     return 0;
 }
+
+static void* allocate_proximity_page_near(uintptr_t target_addr) {
+    FILE* fp = fopen("/proc/self/maps", "r");
+    if (!fp) return nullptr;
+
+    char line[1024];
+    uintptr_t prev_end = 0;
+    uintptr_t best_gap = 0;
+    uintptr_t min_dist = (uintptr_t)-1;
+
+    while (fgets(line, sizeof(line), fp)) {
+        uintptr_t s = 0, e = 0;
+        if (sscanf(line, "%lx-%lx", &s, &e) == 2) {
+            if (prev_end > 0 && s > prev_end + 0x4000) {
+                uintptr_t cand = (prev_end + 4095) & ~4095;
+                intptr_t diff = (intptr_t)cand - (intptr_t)target_addr;
+                uintptr_t dist = diff < 0 ? (uintptr_t)(-diff) : (uintptr_t)diff;
+                if (dist < 0x03000000 && dist < min_dist) {
+                    min_dist = dist;
+                    best_gap = cand;
+                }
+            }
+            prev_end = e;
+        }
+    }
+    fclose(fp);
+
+    void* page = MAP_FAILED;
+    if (best_gap != 0) {
+        page = mmap((void*)best_gap, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    }
+    if (page == MAP_FAILED) {
+        page = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    }
+    if (page != MAP_FAILED) {
+        intptr_t diff = (intptr_t)page - (intptr_t)target_addr;
+        if (diff < -0x04000000 || diff > 0x03ffffff) {
+            LOGE("libfekit.so: Trampoline page %p is out of +/- 64MB branch range from %p", page, (void*)target_addr);
+            munmap(page, 4096);
+            return nullptr;
+        }
+    }
+    return page;
+}
 #endif
 
 static std::atomic<bool> s_fekit_patched{false};
 
 void patch_libfekit_in_memory() {
-    // No-op: Do NOT patch .text segment or inject proximity trampolines into libfekit.so.
-    // In-memory code patching triggers libfekit's internal code hash integrity checks,
-    // overwrites .rodata via MAP_FIXED, and fragments /proc/self/maps into 27 separate VMAs,
-    // which results in security sign verification failures and server-side kick w21.
-    if (s_fekit_patched.exchange(true)) return;
-    LOGI("libfekit.so: Preserving authentic text segment & code integrity (in-memory patching disabled)");
+#if defined(__aarch64__)
+    if (s_fekit_patched.load(std::memory_order_relaxed)) return;
+
+    ElfSearchInfo search{"libfekit.so", 0, 0, 0};
+    dl_iterate_phdr(find_fekit_callback, &search);
+
+    // Fallback: search /proc/self/maps if dl_iterate_phdr didn't find base
+    if (!search.base) {
+        FILE* fp = fopen("/proc/self/maps", "r");
+        if (fp) {
+            char line[1024];
+            while (fgets(line, sizeof(line), fp)) {
+                if (strstr(line, "libfekit.so") && strstr(line, "r-xp")) {
+                    uintptr_t start = 0, end = 0;
+                    if (sscanf(line, "%lx-%lx", &start, &end) == 2) {
+                        search.base = start;
+                        search.text_vaddr = 0;
+                        search.text_size = end - start;
+                        break;
+                    }
+                }
+            }
+            fclose(fp);
+        }
+    }
+
+    if (!search.base || !search.text_size) {
+        return;
+    }
+
+    uintptr_t text_start = search.base + search.text_vaddr;
+    uintptr_t text_end = text_start + search.text_size;
+
+    void* tramp_page = allocate_proximity_page_near(text_start);
+    if (!tramp_page || tramp_page == MAP_FAILED) {
+        LOGE("libfekit.so: Failed to allocate proximity trampoline page near %p", (void*)text_start);
+        return;
+    }
+
+    // Register trampoline range in hook_libc so build_filtered_maps completely conceals it
+    hook_libc::register_trampoline_range((uintptr_t)tramp_page, (uintptr_t)tramp_page + 4096);
+
+    // Setup common trampoline at offset 0
+    uint8_t* tp = (uint8_t*)tramp_page;
+    memcpy(tp, COMMON_TRAMPOLINE_TEMPLATE, sizeof(COMMON_TRAMPOLINE_TEMPLATE));
+    uint64_t target_fn = (uint64_t)&c_fekit_syscall_handler;
+    memcpy(tp + 136, &target_fn, sizeof(target_fn));
+
+    // Stubs start after common trampoline (offset 144)
+    size_t stub_offset = 144;
+    size_t patched_count = 0;
+
+    // Make text segment writable ONCE to avoid VMA splitting
+    if (mprotect((void*)text_start, search.text_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+        LOGE("libfekit.so: mprotect RX -> RWX failed (errno=%d)", errno);
+        munmap(tramp_page, 4096);
+        return;
+    }
+
+    uint32_t* p = (uint32_t*)text_start;
+    uint32_t* pend = (uint32_t*)(text_end - 4);
+
+    for (; p <= pend; p++) {
+        if (*p == 0xd4000001) { // svc #0
+            uint32_t prev = *(p - 1);
+            bool is_valid = false;
+            uint32_t sys_num = 0;
+            if ((prev & 0xffe0001f) == 0xd2800008) { // mov x8, #imm
+                sys_num = (prev >> 5) & 0xffff;
+                is_valid = true;
+            } else if ((prev & 0xffe0001f) == 0x52800008) { // mov w8, #imm
+                sys_num = (prev >> 5) & 0xffff;
+                is_valid = true;
+            } else if (p >= (uint32_t*)text_start + 2) {
+                uint32_t prev2 = *(p - 2);
+                if ((prev2 & 0xffe0001f) == 0xd2800008 || (prev2 & 0xffe0001f) == 0x52800008) {
+                    sys_num = (prev2 >> 5) & 0xffff;
+                    is_valid = true;
+                }
+            }
+
+            if (is_valid && stub_offset + 16 <= 4096) {
+                uintptr_t stub_addr = (uintptr_t)tramp_page + stub_offset;
+                intptr_t delta_to_stub = (intptr_t)stub_addr - (intptr_t)p;
+                intptr_t delta_to_common = (intptr_t)tramp_page - (intptr_t)(stub_addr + 4);
+
+                if (delta_to_stub >= -0x8000000 && delta_to_stub <= 0x7fffffc &&
+                    delta_to_common >= -0x8000000 && delta_to_common <= 0x7fffffc) {
+
+                    // Construct stub:
+                    // [0..3]: ldr x16, [pc, #8] (0x58000050)
+                    // [4..7]: b common_trampoline
+                    // [8..15]: uint64_t return_address = (uintptr_t)(p + 1)
+                    uint32_t* stub_p = (uint32_t*)stub_addr;
+                    stub_p[0] = 0x58000050; // ldr x16, [pc, #8]
+                    uint32_t b_common = 0x14000000 | (uint32_t)((delta_to_common >> 2) & 0x03ffffff);
+                    stub_p[1] = b_common;   // b common_trampoline
+                    uint64_t ret_addr = (uint64_t)(p + 1);
+                    memcpy(&stub_p[2], &ret_addr, sizeof(ret_addr));
+
+                    // Patch svc #0 at p with "b stub_addr" (NEVER touches x30!)
+                    uint32_t b_stub = 0x14000000 | (uint32_t)((delta_to_stub >> 2) & 0x03ffffff);
+                    *p = b_stub;
+
+                    stub_offset += 16;
+                    patched_count++;
+                    (void)sys_num;
+                    LOGI("libfekit.so: Patched inline svc #0 (sys=%u) at %p (off 0x%lx) -> b stub %p (ret=%p)",
+                         sys_num, p, (unsigned long)((uintptr_t)p - search.base), (void*)stub_addr, (void*)ret_addr);
+                }
+            }
+        }
+    }
+
+    (void)patched_count;
+
+    // Flush cache for modified text
+    __builtin___clear_cache((char*)text_start, (char*)text_end);
+
+    // Restore text segment to PROT_READ | PROT_EXEC ONCE (preserving VMA continuity)
+    mprotect((void*)text_start, search.text_size, PROT_READ | PROT_EXEC);
+
+    // Protect trampoline page as PROT_READ | PROT_EXEC
+    mprotect(tramp_page, 4096, PROT_READ | PROT_EXEC);
+    __builtin___clear_cache((char*)tramp_page, (char*)tramp_page + 4096);
+
+    s_fekit_patched.store(true, std::memory_order_relaxed);
+    LOGI("libfekit.so inline syscall patching complete: %zu stubs redirected to proximity trampoline at %p (x30 strictly preserved)",
+         patched_count, tramp_page);
+#endif
 }
 
 void install_hooks() {

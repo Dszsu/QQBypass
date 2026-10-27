@@ -792,6 +792,22 @@ FILE* build_filtered_maps() {
         nullptr
     };
 
+    uintptr_t prev_start = 0, prev_end = 0, prev_offset = 0;
+    char prev_perms[8] = {0}, prev_dev[16] = {0}, prev_inode[32] = {0}, prev_path[1024] = {0};
+    bool has_prev = false;
+
+    auto flush_prev = [&]() {
+        if (!has_prev) return;
+        if (prev_path[0]) {
+            fprintf(fake, "%lx-%lx %s %08lx %s %s %s\n",
+                    prev_start, prev_end, prev_perms, prev_offset, prev_dev, prev_inode, prev_path);
+        } else {
+            fprintf(fake, "%lx-%lx %s %08lx %s %s\n",
+                    prev_start, prev_end, prev_perms, prev_offset, prev_dev, prev_inode);
+        }
+        has_prev = false;
+    };
+
     while (real_fgets_ptr(line, sizeof(line), real)) {
         bool filter = false;
         uintptr_t addr = (uintptr_t)strtoull(line, nullptr, 16);
@@ -821,8 +837,41 @@ FILE* build_filtered_maps() {
                 filter = true;
             }
         }
-        if (!filter) fputs(line, fake);
+        if (!filter) {
+            uintptr_t cur_start = 0, cur_end = 0, cur_offset = 0;
+            char cur_perms[8] = {0}, cur_dev[16] = {0}, cur_inode[32] = {0}, cur_path[1024] = {0};
+            int matched = sscanf(line, "%lx-%lx %7s %lx %15s %31s %1023[^\n]",
+                                 &cur_start, &cur_end, cur_perms, &cur_offset, cur_dev, cur_inode, cur_path);
+            if (matched >= 6 && has_prev && prev_end == cur_start &&
+                strcmp(prev_perms, cur_perms) == 0 &&
+                strcmp(prev_dev, cur_dev) == 0 &&
+                strcmp(prev_inode, cur_inode) == 0 &&
+                strcmp(prev_path, cur_path) == 0 &&
+                prev_path[0] != '\0') {
+                // Merge contiguous VMA segment of the same file to normalize DSO layout
+                prev_end = cur_end;
+            } else {
+                flush_prev();
+                if (matched >= 6) {
+                    prev_start = cur_start;
+                    prev_end = cur_end;
+                    prev_offset = cur_offset;
+                    strncpy(prev_perms, cur_perms, sizeof(prev_perms) - 1);
+                    prev_perms[sizeof(prev_perms) - 1] = '\0';
+                    strncpy(prev_dev, cur_dev, sizeof(prev_dev) - 1);
+                    prev_dev[sizeof(prev_dev) - 1] = '\0';
+                    strncpy(prev_inode, cur_inode, sizeof(prev_inode) - 1);
+                    prev_inode[sizeof(prev_inode) - 1] = '\0';
+                    strncpy(prev_path, cur_path, sizeof(prev_path) - 1);
+                    prev_path[sizeof(prev_path) - 1] = '\0';
+                    has_prev = true;
+                } else {
+                    fputs(line, fake);
+                }
+            }
+        }
     }
+    flush_prev();
     fclose(real);
     rewind(fake);
     return fake;

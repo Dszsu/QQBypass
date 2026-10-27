@@ -1472,6 +1472,18 @@ public class NetworkReportHook {
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args == null || param.args.length < 2) return;
                     String cmd = param.args[0] instanceof String ? (String) param.args[0] : "unknown";
+                    if (cmd.startsWith("trpc.o3.ecdh_access.")) {
+                        long callbackId = 0L;
+                        if (param.args.length >= 5 && param.args[4] instanceof Number) {
+                            callbackId = ((Number) param.args[4]).longValue();
+                        } else if (param.args.length == 4 && param.args[3] instanceof Number) {
+                            callbackId = ((Number) param.args[3]).longValue();
+                        }
+                        byte[] data = param.args[1] instanceof byte[] ? (byte[]) param.args[1] : null;
+                        int resCode = (param.args.length >= 4 && param.args[3] instanceof Number) ? ((Number) param.args[3]).intValue() : 1000;
+                        XposedEntry.log("[FEKit_ECDH] Inbound " + param.method.getName() + " cmd=" + cmd
+                            + ", resCode=" + resCode + ", callbackId=" + callbackId + ", dataLen=" + (data != null ? data.length : 0));
+                    }
                     if (isCoreProtocolCommand(cmd)) return;
 
                     byte[] data = param.args[1] instanceof byte[] ? (byte[]) param.args[1] : null;
