@@ -860,6 +860,93 @@ public class QQ950PatchHook {
                 }
             });
         }
+
+        // Direct Turing risk inspection normalization at detection origin (clean baseline values)
+        String[] turingPackages = {
+            "com.tencent.turingfd.sdk.xq",
+            "com.tencent.tfd.sdk.wxa",
+            "com.tencent.turingfd.sdk.tbs",
+            "com.tencent.turingface.sdk.mfa"
+        };
+        for (String pkg : turingPackages) {
+            // Kiwifruit: Key 270 (ADB/dev settings/debugger -> 0) & Key 253 (USB state -> 0)
+            Class<?> kiwiCls = XposedHelpers.findClassIfExists(pkg + ".Kiwifruit", cl);
+            if (kiwiCls != null && sHookedTuringClasses.add(kiwiCls)) {
+                HookUtils.hookAllMethodsIfExists(kiwiCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
+                            param.setResult(0);
+                        }
+                    }
+                });
+                HookUtils.hookAllMethodsIfExists(kiwiCls, "d", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
+                            param.setResult(0);
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Kiwifruit (Key 270/253) for clean environment baseline");
+            }
+
+            // Caelum: Key 205 (container / dual app detection -> "0")
+            Class<?> caelumCls = XposedHelpers.findClassIfExists(pkg + ".Caelum", cl);
+            if (caelumCls != null && sHookedTuringClasses.add(caelumCls)) {
+                HookUtils.hookAllMethodsIfExists(caelumCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
+                            param.setResult("0");
+                        } else if (param.args == null || param.args.length == 0) {
+                            param.setResult(false);
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Caelum (Key 205) for clean container baseline");
+            }
+
+            // Bennet: Key 250 (maps DSO baseline -> "") & Key 269 (DSO scan -> "")
+            Class<?> bennetCls = XposedHelpers.findClassIfExists(pkg + ".Bennet", cl);
+            if (bennetCls != null && sHookedTuringClasses.add(bennetCls)) {
+                HookUtils.hookAllMethodsIfExists(bennetCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult("");
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Bennet (Key 250/269) for clean DSO baseline");
+            }
+
+            // Berry: Key 272 (TCP scan -> "")
+            Class<?> berryCls = XposedHelpers.findClassIfExists(pkg + ".Berry", cl);
+            if (berryCls != null && sHookedTuringClasses.add(berryCls)) {
+                HookUtils.hookAllMethodsIfExists(berryCls, "b", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args == null || param.args.length == 0) {
+                            param.setResult("");
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Berry (Key 272) for clean TCP baseline");
+            }
+
+            // l3: Key 251 & 288 (root baseline -> 0)
+            Class<?> l3Cls = XposedHelpers.findClassIfExists(pkg + ".l3", cl);
+            if (l3Cls != null && sHookedTuringClasses.add(l3Cls)) {
+                HookUtils.hookAllMethodsIfExists(l3Cls, "b", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
+                            param.setResult(0);
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".l3 (Key 251/288) for clean root baseline");
+            }
+        }
     }
 
     /**
@@ -1175,7 +1262,7 @@ public class QQ950PatchHook {
                 h = XposedHelpers.getObjectField(otvrm, "h");
             } catch (Throwable ignored) {}
 
-            XposedEntry.log("[FacePatch] OTVRM uninitialized (g=" + g + ", b=" + (b != null) + "), repairing state...");
+            XposedEntry.log("[FacePatch] OTVRM uninitialized (g=" + g + ", b=" + (b != null) + "), repairing state with authentic hostUrl...");
             android.content.Context ctx = fallbackContext;
             if (ctx == null) {
                 try {
@@ -1194,6 +1281,7 @@ public class QQ950PatchHook {
                 }
                 try {
                     XposedHelpers.callMethod(builder, "setIsHardwareAcceleration", true);
+                    XposedHelpers.callMethod(builder, "setHostUrl", "https://sdk.faceid.qq.com/api/turing_new");
                 } catch (Throwable ignored) {}
                 if (h == null) {
                     try {
@@ -1258,28 +1346,6 @@ public class QQ950PatchHook {
                 }
             });
 
-            HookUtils.hookAllMethods(tfdClass, "init", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    Object res = param.getResult();
-                    if (res instanceof Number && ((Number) res).intValue() != 0) {
-                        param.setResult(0);
-                        XposedEntry.log("[FacePatch] Normalized TuringFaceDefender.init -> 0");
-                    }
-                }
-            });
-
-            HookUtils.hookAllMethods(tfdClass, "activeSign", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    Object res = param.getResult();
-                    if (res instanceof Number && ((Number) res).longValue() != 0L) {
-                        param.setResult(0L);
-                        XposedEntry.log("[FacePatch] Normalized TuringFaceDefender.activeSign -> 0L");
-                    }
-                }
-            });
-
             HookUtils.hookAllMethods(tfdClass, "signData", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -1287,43 +1353,30 @@ public class QQ950PatchHook {
                     if (res != null) {
                         try {
                             long code = XposedHelpers.getLongField(res, "code");
-                            String signMsg = (String) XposedHelpers.getObjectField(res, "signMsg");
-                            if (code != 0L || signMsg == null || signMsg.isEmpty() || signMsg.startsWith("error")) {
+                            if (code != 0L) {
                                 XposedHelpers.setLongField(res, "code", 0L);
-                                if (signMsg == null || signMsg.isEmpty() || signMsg.startsWith("error")) {
-                                    XposedHelpers.setObjectField(res, "signMsg", generateSafeTuringSignMsg());
-                                }
-                                XposedEntry.log("[FacePatch] Normalized TuringFaceDefender.signData: code=" + code + " -> 0L");
+                                XposedEntry.log("[FacePatch] Normalized TuringFaceDefender.signData code: " + code + " -> 0L (preserved authentic signMsg)");
                             }
                         } catch (Throwable t) {
-                            XposedEntry.logError("[FacePatch] Error sanitizing SignResult: " + t.getMessage(), t);
-                        }
-                    } else {
-                        Class<?> srCls = XposedHelpers.findClassIfExists("com.tencent.turingcam.SignResult", cl);
-                        if (srCls != null) {
                             try {
-                                param.setResult(XposedHelpers.newInstance(srCls, 0L, generateSafeTuringSignMsg()));
+                                int codeInt = XposedHelpers.getIntField(res, "code");
+                                if (codeInt != 0) {
+                                    XposedHelpers.setIntField(res, "code", 0);
+                                    XposedEntry.log("[FacePatch] Normalized TuringFaceDefender.signData code: " + codeInt + " -> 0 (preserved authentic signMsg)");
+                                }
                             } catch (Throwable ignored) {}
                         }
                     }
                 }
             });
-            XposedEntry.log("[FacePatch] Hooked TuringFaceDefender for null-safety and clean sign guards");
+            XposedEntry.log("[FacePatch] Hooked TuringFaceDefender for null-safety and authentic sign guards");
         }
 
-        // 1.1 OTVRM: direct defense in depth for constructors, setPreviewDisplay and start methods
+        // 1.1 OTVRM: argument null-safety guard for method a
         final String otvrmCls = "com.tencent.turingcam.OTVRM";
         Class<?> otvrmClass = XposedHelpers.findClassIfExists(otvrmCls, cl);
         if (otvrmClass != null && !sHookedFaceClasses.contains(otvrmClass)) {
             sHookedFaceClasses.add(otvrmClass);
-            HookUtils.hookAllConstructors(otvrmClass, new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.thisObject != null) {
-                        ensureOtvrmInitialized(param.thisObject, cl, null);
-                    }
-                }
-            });
             HookUtils.hookAllMethods(otvrmClass, "a", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -1338,7 +1391,100 @@ public class QQ950PatchHook {
                     }
                 }
             });
-            XposedEntry.log("[FacePatch] Hooked OTVRM constructors & a methods with universal null-safe guard");
+            XposedEntry.log("[FacePatch] Hooked OTVRM.a methods with null-safe guard");
+        }
+
+        // 1.2 TuringCam direct environment check normalization (inspection at the source)
+        final String ejxAsCls = "com.tencent.turingcam.EjxAs";
+        Class<?> ejxAsClass = XposedHelpers.findClassIfExists(ejxAsCls, cl);
+        if (ejxAsClass != null && sHookedFaceClasses.add(ejxAsClass)) {
+            // Key 270: AdbDevSettings (adb_enabled, development_settings_enabled, debuggable, isDebuggerConnected -> clean 0)
+            HookUtils.hookAllMethodsIfExists(ejxAsClass, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
+                        param.setResult(0);
+                    } else if (param.args == null || param.args.length == 0) {
+                        // Key 256: suspicious process inspection C -> clean ""
+                        param.setResult("");
+                    }
+                }
+            });
+            // Key 253: UsbAdbState (USB connection / ADB configured state -> clean 0)
+            HookUtils.hookAllMethodsIfExists(ejxAsClass, "d", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    param.setResult(0);
+                }
+            });
+            // Key 268: suspicious process inspection D -> clean ""
+            HookUtils.hookAllMethodsIfExists(ejxAsClass, "b", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length == 0) {
+                        param.setResult("");
+                    }
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked TuringCam EjxAs (Key 270/253/256/268) for clean environment inspection");
+        }
+
+        final String stvdhCls = "com.tencent.turingcam.Stvdh";
+        Class<?> stvdhClass = XposedHelpers.findClassIfExists(stvdhCls, cl);
+        if (stvdhClass != null && sHookedFaceClasses.add(stvdhClass)) {
+            // Key 205: container / dual app check -> clean "0"
+            HookUtils.hookAllMethodsIfExists(stvdhClass, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
+                        param.setResult("0");
+                    } else if (param.args == null || param.args.length == 0) {
+                        param.setResult(false);
+                    }
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked TuringCam Stvdh (Key 205) for clean container baseline");
+        }
+
+        final String kwqwrCls = "com.tencent.turingcam.KwqWR";
+        Class<?> kwqwrClass = XposedHelpers.findClassIfExists(kwqwrCls, cl);
+        if (kwqwrClass != null && sHookedFaceClasses.add(kwqwrClass)) {
+            // Key 251 / 288: root app inspection -> clean 0
+            HookUtils.hookAllMethodsIfExists(kwqwrClass, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    param.setResult(0);
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked TuringCam KwqWR (Key 251/288) for clean root baseline");
+        }
+
+        final String v124rCls = "com.tencent.turingcam.V124r";
+        Class<?> v124rClass = XposedHelpers.findClassIfExists(v124rCls, cl);
+        if (v124rClass != null && sHookedFaceClasses.add(v124rClass)) {
+            // Key 250 (a(Context)) & Key 269 (a()): DSO memory & filesystem scan -> clean ""
+            HookUtils.hookAllMethodsIfExists(v124rClass, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    param.setResult("");
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked TuringCam V124r (Key 250/269) for clean DSO baseline");
+        }
+
+        final String pzzwfCls = "com.tencent.turingcam.pZZwF";
+        Class<?> pzzwfClass = XposedHelpers.findClassIfExists(pzzwfCls, cl);
+        if (pzzwfClass != null && sHookedFaceClasses.add(pzzwfClass)) {
+            // Key 272: TCP scan -> clean ""
+            HookUtils.hookAllMethodsIfExists(pzzwfClass, "b", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length == 0) {
+                        param.setResult("");
+                    }
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked TuringCam pZZwF (Key 272) for clean TCP baseline");
         }
 
         // 2. TuringSdkImp: b(Context) hardware init & argument null-safety
@@ -1364,32 +1510,6 @@ public class QQ950PatchHook {
                         if (param.args != null && param.args.length == 2) {
                             if (param.args[0] == null) param.args[0] = "";
                             if (param.args[1] == null) param.args[1] = "";
-                        } else if (m.getReturnType() == int.class && param.args != null && param.args.length == 3) {
-                            // a(View, CameraHolder, String) defender start
-                            try {
-                                android.content.Context ctx = null;
-                                if (param.args[0] instanceof android.view.View) {
-                                    ctx = ((android.view.View) param.args[0]).getContext();
-                                }
-                                Class<?> bi3eTClass = XposedHelpers.findClassIfExists("com.tencent.turingcam.OTVRM$Bi3eT", cl);
-                                if (bi3eTClass != null) {
-                                    Object otvrm = XposedHelpers.getStaticObjectField(bi3eTClass, "a");
-                                    ensureOtvrmInitialized(otvrm, cl, ctx);
-                                }
-                            } catch (Throwable t) {
-                                XposedEntry.log("[FacePatch] Error pre-initializing OTVRM before TuringSdkImp.a: " + t.getMessage());
-                            }
-                        }
-                    }
-                }
-
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length == 2 && param.getResult() instanceof String) {
-                        String res = (String) param.getResult();
-                        if (res.startsWith("error")) {
-                            param.setResult(generateSafeTuringSignMsg());
-                            XposedEntry.log("[FacePatch] Intercepted TuringSdkImp.a error result: " + res + " -> sanitized");
                         }
                     }
                 }
@@ -1549,7 +1669,7 @@ public class QQ950PatchHook {
             XposedEntry.log("[FacePatch] Hooked TuringResultCacheEntity.setTuringEnvErrorStr, getTuringEnvErrorStr, isNeedFrameCheck");
         }
 
-        // 8. HuiYanSdkImp: sendBuriedPointInfo & doOnFail
+        // 8. HuiYanSdkImp: sendBuriedPointInfo
         final String huiyanSdkCls = "com.tencent.could.huiyansdk.api.HuiYanSdkImp";
         Class<?> huiyanSdkClass = XposedHelpers.findClassIfExists(huiyanSdkCls, cl);
         if (huiyanSdkClass != null && !sHookedFaceClasses.contains(huiyanSdkClass)) {
@@ -1566,47 +1686,7 @@ public class QQ950PatchHook {
                     }
                 }
             });
-            HookUtils.hookAllMethods(huiyanSdkClass, "doOnFail", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length >= 2) {
-                        String msg = String.valueOf(param.args[1]);
-                        int code = param.args[0] instanceof Number ? ((Number) param.args[0]).intValue() : 0;
-                        if (msg.contains("400103") || msg.contains("Turing") || msg.contains("Env") || msg.contains("环境")) {
-                            param.args[1] = "活体检测未通过，请重试";
-                            if (code == 214 || code == 216 || code == 224 || code == 285) {
-                                param.args[0] = 1007;
-                            }
-                            XposedEntry.log("[FacePatch] Sanitized HuiYanSdkImp.doOnFail: code=" + code + ", msg=" + msg + " -> 1007/活体检测未通过，请重试");
-                        }
-                    }
-                }
-            });
-            XposedEntry.log("[FacePatch] Hooked HuiYanSdkImp.sendBuriedPointInfo & doOnFail");
-        }
-
-        // 9. CommonUtils: sendErrorAndExitAuth
-        final String commonUtilsCls = "com.tencent.could.huiyansdk.utils.CommonUtils";
-        Class<?> commonUtilsClass = XposedHelpers.findClassIfExists(commonUtilsCls, cl);
-        if (commonUtilsClass != null && !sHookedFaceClasses.contains(commonUtilsClass)) {
-            sHookedFaceClasses.add(commonUtilsClass);
-            HookUtils.hookAllMethods(commonUtilsClass, "sendErrorAndExitAuth", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length >= 2) {
-                        String msg = String.valueOf(param.args[1]);
-                        int code = param.args[0] instanceof Number ? ((Number) param.args[0]).intValue() : 0;
-                        if (msg.contains("400103") || msg.contains("Turing") || msg.contains("Env") || msg.contains("环境")) {
-                            param.args[1] = "活体检测未通过，请重试";
-                            if (code == 214 || code == 216 || code == 224 || code == 285) {
-                                param.args[0] = 1007;
-                            }
-                            XposedEntry.log("[FacePatch] Sanitized CommonUtils.sendErrorAndExitAuth: code=" + code + ", msg=" + msg + " -> 1007/活体检测未通过，请重试");
-                        }
-                    }
-                }
-            });
-            XposedEntry.log("[FacePatch] Hooked CommonUtils.sendErrorAndExitAuth");
+            XposedEntry.log("[FacePatch] Hooked HuiYanSdkImp.sendBuriedPointInfo");
         }
 
         // 10. Youtu LiveStyle Reflection & Sensor Fallback (fixes "长时间接收中" and sensor missing lux=-10000)
@@ -1752,26 +1832,7 @@ public class QQ950PatchHook {
             XposedEntry.log("[FacePatch] Hooked YTAGReflectLiveCheckJNIInterface.FRInit for Youtu livecheck safety");
         }
 
-        // 12. IdentificationResultFragment: sanitize device environment error to user-friendly retry message
-        final String identResultFragCls = "com.tencent.mobileqq.activity.IdentificationResultFragment";
-        Class<?> irfClass = XposedHelpers.findClassIfExists(identResultFragCls, cl);
-        if (irfClass != null && sHookedFaceClasses.add(irfClass)) {
-            HookUtils.hookIfMethodExists(irfClass, "getErrMsg", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    Object res = param.getResult();
-                    if (res instanceof String) {
-                        String str = (String) res;
-                        if (str.contains("设备环境异常") || str.contains("环境异常") || str.contains("更换成安全设备")) {
-                            param.setResult("人脸识别未通过，请重试");
-                            XposedEntry.log("[FacePatch] Sanitized IdentificationResultFragment.getErrMsg: " + str + " -> 人脸识别未通过，请重试");
-                        }
-                    }
-                }
-            });
-        }
-
-        // 13. MainProcess2Fe: sanitize display_report and face_detect risk telemetry
+        // 12. MainProcess2Fe: sanitize display_report and face_detect risk telemetry
         final String mp2feCls = "com.tencent.mobileqq.dt.app.MainProcess2Fe";
         Class<?> mp2feClass = XposedHelpers.findClassIfExists(mp2feCls, cl);
         if (mp2feClass != null && sHookedFaceClasses.add(mp2feClass)) {
@@ -1801,123 +1862,6 @@ public class QQ950PatchHook {
                     }
                 }
             });
-        }
-
-        // 14. IdentificationIpcServer: normalize FaceGetRecognitionResult / action_upload EIPCResult error 413 to 0
-        final String ipcServerCls = "com.tencent.mobileqq.identification.IdentificationIpcServer";
-        Class<?> ipcServerClass = XposedHelpers.findClassIfExists(ipcServerCls, cl);
-        if (ipcServerClass != null && sHookedFaceClasses.add(ipcServerClass)) {
-            HookUtils.hookAllMethodsIfExists(ipcServerClass, "callbackResult", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length > 1 && param.args[1] != null) {
-                        Object resObj = param.args[1];
-                        if (resObj.getClass().getName().contains("EIPCResult")) {
-                            try {
-                                Object dataObj = XposedHelpers.getObjectField(resObj, "data");
-                                if (dataObj instanceof android.os.Bundle) {
-                                    android.os.Bundle b = (android.os.Bundle) dataObj;
-                                    int ret = b.getInt("ret", 0);
-                                    String errMsg = b.getString("errMsg", "");
-                                    if (ret == 413 || (errMsg != null && (errMsg.contains("环境异常") || errMsg.contains("安全设备")))) {
-                                        XposedHelpers.setIntField(resObj, "code", 0);
-                                        b.putInt("ret", 0);
-                                        b.putString("errMsg", "");
-                                        if (android.text.TextUtils.isEmpty(b.getString("idKey", ""))) {
-                                            b.putString("idKey", "auth_ok");
-                                        }
-                                        XposedEntry.log("[FacePatch] Normalized IdentificationIpcServer.callbackResult 413/EnvRisk -> ret=0/success");
-                                    }
-                                }
-                            } catch (Throwable t) {
-                                XposedEntry.logError("[FacePatch] Error normalizing IdentificationIpcServer callbackResult: " + t.getMessage(), t);
-                            }
-                        }
-                    }
-                }
-            });
-            XposedEntry.log("[FacePatch] Hooked IdentificationIpcServer.callbackResult for 413/EnvRisk normalization");
-        }
-
-        // 15. IdentificationResultCheckHelper (an): normalize IPC response in child process
-        final String anCls = "com.tencent.mobileqq.identification.an";
-        Class<?> anClass = XposedHelpers.findClassIfExists(anCls, cl);
-        if (anClass != null && sHookedFaceClasses.add(anClass)) {
-            HookUtils.hookAllMethodsIfExists(anClass, "a", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length > 1 && param.args[1] != null) {
-                        Object resObj = param.args[1];
-                        if (resObj.getClass().getName().contains("EIPCResult")) {
-                            try {
-                                Object dataObj = XposedHelpers.getObjectField(resObj, "data");
-                                if (dataObj instanceof android.os.Bundle) {
-                                    android.os.Bundle b = (android.os.Bundle) dataObj;
-                                    int ret = b.getInt("ret", 0);
-                                    String errMsg = b.getString("errMsg", "");
-                                    if (ret == 413 || (errMsg != null && (errMsg.contains("环境异常") || errMsg.contains("安全设备")))) {
-                                        XposedHelpers.setIntField(resObj, "code", 0);
-                                        b.putInt("ret", 0);
-                                        b.putString("errMsg", "");
-                                        if (android.text.TextUtils.isEmpty(b.getString("idKey", ""))) {
-                                            b.putString("idKey", "auth_ok");
-                                        }
-                                        XposedEntry.log("[FacePatch] Normalized an.a EIPCResult 413/EnvRisk -> ret=0/success");
-                                    }
-                                }
-                            } catch (Throwable t) {
-                                XposedEntry.logError("[FacePatch] Error normalizing an.a EIPCResult: " + t.getMessage(), t);
-                            }
-                        }
-                    }
-                }
-            });
-            XposedEntry.log("[FacePatch] Hooked an.a for 413/EnvRisk normalization");
-        }
-
-        // 16. IdentificationGuideFragment callback (jc): normalize verification finish bundle in UI process
-        final String jcCls = "com.tencent.mobileqq.activity.jc";
-        Class<?> jcClass = XposedHelpers.findClassIfExists(jcCls, cl);
-        if (jcClass != null && sHookedFaceClasses.add(jcClass)) {
-            HookUtils.hookAllMethodsIfExists(jcClass, "a", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length >= 2 && param.args[1] instanceof android.os.Bundle) {
-                        android.os.Bundle bundle = (android.os.Bundle) param.args[1];
-                        int ret = bundle.getInt("ret", 0);
-                        String errMsg = bundle.getString("errMsg", "");
-                        if (ret == 413 || (errMsg != null && (errMsg.contains("环境异常") || errMsg.contains("安全设备")))) {
-                            param.args[0] = 1; // code = 1 (onRequestFinish success)
-                            bundle.putInt("ret", 0);
-                            bundle.putString("errMsg", "");
-                            if (android.text.TextUtils.isEmpty(bundle.getString("idKey", ""))) {
-                                bundle.putString("idKey", "auth_ok");
-                            }
-                            XposedEntry.log("[FacePatch] Normalized jc.a Bundle 413/EnvRisk -> ret=0/success");
-                        }
-                    }
-                }
-            });
-            XposedEntry.log("[FacePatch] Hooked jc.a for 413/EnvRisk normalization");
-        }
-
-        // 17. IdentificationGuideFragment: normalize rf(error_code) pre-check and autoLogin completion
-        final String igfCls = "com.tencent.mobileqq.activity.IdentificationGuideFragment";
-        Class<?> igfClass = XposedHelpers.findClassIfExists(igfCls, cl);
-        if (igfClass != null && sHookedFaceClasses.add(igfClass)) {
-            HookUtils.hookAllMethodsIfExists(igfClass, "rf", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length > 0 && param.args[0] instanceof Number) {
-                        int err = ((Number) param.args[0]).intValue();
-                        if (err != 0) {
-                            param.args[0] = 0;
-                            XposedEntry.log("[FacePatch] Normalized IdentificationGuideFragment.rf huiyanSdkErrorCode=" + err + " -> 0");
-                        }
-                    }
-                }
-            });
-            XposedEntry.log("[FacePatch] Hooked IdentificationGuideFragment.rf for null-safety and 0-error pass");
         }
     }
 
