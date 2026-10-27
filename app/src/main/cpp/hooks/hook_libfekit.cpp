@@ -268,6 +268,7 @@ static int fake_fekit_access(const char* pathname, int mode) {
     SAFE_BYTEHOOK_SCOPE();
     if (!pathname) return -1;
     if (is_fekit_blocked_path(pathname)) {
+        audit_native_probe("FEKit", "access_blocked", pathname);
         LOGD("FEKit blocked access: %s", pathname);
         errno = ENOENT;
         return -1;
@@ -282,6 +283,7 @@ static int fake_fekit_faccessat(int dirfd, const char* pathname, int mode, int f
     SAFE_BYTEHOOK_SCOPE();
     if (!pathname) return -1;
     if (is_fekit_blocked_path(dirfd, pathname)) {
+        audit_native_probe("FEKit", "faccessat_blocked", pathname);
         LOGD("FEKit blocked faccessat: %s (dirfd=%d)", pathname, dirfd);
         errno = ENOENT;
         return -1;
@@ -297,6 +299,7 @@ static int fake_fekit_stat(const char* pathname, struct stat* statbuf) {
     SAFE_BYTEHOOK_SCOPE();
     if (!pathname) return -1;
     if (is_fekit_blocked_path(pathname)) {
+        audit_native_probe("FEKit", "stat_blocked", pathname);
         LOGD("FEKit blocked stat: %s", pathname);
         errno = ENOENT;
         return -1;
@@ -311,6 +314,7 @@ static int fake_fekit_lstat(const char* pathname, struct stat* statbuf) {
     SAFE_BYTEHOOK_SCOPE();
     if (!pathname) return -1;
     if (is_fekit_blocked_path(pathname)) {
+        audit_native_probe("FEKit", "lstat_blocked", pathname);
         LOGD("FEKit blocked lstat: %s", pathname);
         errno = ENOENT;
         return -1;
@@ -326,6 +330,7 @@ static int fake_fekit_open(const char* pathname, int flags, ...) {
     SAFE_BYTEHOOK_SCOPE();
     if (!pathname) return -1;
     if (is_fekit_blocked_path(pathname)) {
+        audit_native_probe("FEKit", "open_blocked", pathname);
         LOGD("FEKit blocked open: %s", pathname);
         errno = ENOENT;
         return -1;

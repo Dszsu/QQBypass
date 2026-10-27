@@ -47,6 +47,13 @@
 
 namespace hook_libc {
 
+// In ByteHook automatic mode, __builtin_return_address(0) inside a hooked function points
+// to ByteHook's trampoline hub, NOT the actual caller DSO. BYTEHOOK_RETURN_ADDRESS() uses
+// ByteHook's thread-local shadow stack to retrieve the genuine caller return address.
+static inline void* get_effective_caller() {
+    return BYTEHOOK_RETURN_ADDRESS();
+}
+
 // 真实函数指针（支持 LSPosed inline hook backup 与 dlsym 回退）
 static FILE* (*real_fopen_ptr)(const char*, const char*) = nullptr;
 static char* (*real_fgets_ptr)(char*, int, FILE*) = nullptr;
@@ -283,6 +290,21 @@ bool is_root_proc_path(const char* path);
 bool is_sensitive_path(const char* path) {
     if (!path) return false;
     if (is_root_proc_path(path)) return true;
+
+    // Fast path: check filename directly for su / root binaries across any directory
+    const char* slash = strrchr(path, '/');
+    const char* fname = slash ? slash + 1 : path;
+    if (strcmp(fname, "su") == 0 ||
+        strcmp(fname, "busybox") == 0 ||
+        strcmp(fname, "magisk") == 0 ||
+        strcmp(fname, "magiskd") == 0 ||
+        strcmp(fname, "ksud") == 0 ||
+        strcmp(fname, "daemonsu") == 0 ||
+        strcmp(fname, "supersu") == 0 ||
+        strcmp(fname, "superuser") == 0) {
+        return true;
+    }
+
     const char* hidden[] = {
         "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su",
         "/data/local/su", "/data/local/bin/su", "/data/local/xbin/su",
@@ -501,10 +523,8 @@ static inline bool is_security_hidden_path(const char* path, void* return_addres
     }
 
     // 3. Sensitive root/xposed paths
+    // Root binaries and framework paths MUST ALWAYS be hidden from all callers!
     if (is_sensitive_path(path) || (is_sys_class_net_virtual_path(path) && is_caller_security_dso(return_address))) {
-        if (is_caller_qa(return_address)) {
-            return false;
-        }
         audit_native_probe("libc", "sensitive_path_blocked", path);
         return true;
     }
@@ -538,10 +558,7 @@ static inline bool is_security_hidden_path(const char* path, void* return_addres
 
 static bool is_sensitive_name_for_caller(const char* name, void* return_address) {
     if (!name || !name[0]) return false;
-    // CRITICAL: Module callers must have full access to their own files and configs!
-    if (is_caller_qa(return_address)) {
-        return false;
-    }
+    // Root binary names are ALWAYS blocked for all callers
     if (strcmp(name, "su") == 0 ||
         strcmp(name, "agy") == 0 ||
         strcmp(name, "magisk") == 0 ||
@@ -557,6 +574,10 @@ static bool is_sensitive_name_for_caller(const char* name, void* return_address)
         strcmp(name, "shuamesu") == 0 ||
         strcmp(name, "ku.sud") == 0) {
         return true;
+    }
+    // CRITICAL: Module callers must have full access to their own files and configs!
+    if (is_caller_qa(return_address)) {
+        return false;
     }
     const char* root_patterns[] = {
         "magisk", "lsposed", "xposed", "edxposed", "dexkit",
@@ -1729,8 +1750,9 @@ int open_virtual_file(FILE* fake) {
 FILE* fake_fopen(const char* pathname, const char* mode) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
+    void* caller_addr = get_effective_caller();
 
-    if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+    if (is_security_hidden_path(pathname, caller_addr)) {
         simulate_vfs_lookup_delay();
         LOGD("Hidden path fopen: %s", pathname);
         errno = ENOENT;
@@ -1783,7 +1805,7 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
             return nullptr;
         }
         if (strstr(pathname, "smaps")) {
-            if (should_filter_proc_maps(__builtin_return_address(0))) {
+            if (should_filter_proc_maps(caller_addr)) {
                 audit_native_probe("libc", "fopen_smaps", "redirected to clean smaps");
                 LOGI("Intercepted fopen smaps: %s", pathname);
                 FILE* fake = build_filtered_smaps();
@@ -1792,7 +1814,7 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
         }
         else if (strcmp(pathname, "/proc/self/maps") == 0 ||
             (strstr(pathname, "/proc/") && strstr(pathname, "/maps"))) {
-            if (should_filter_proc_maps(__builtin_return_address(0))) {
+            if (should_filter_proc_maps(caller_addr)) {
                 audit_native_probe("libc", "fopen_maps", "redirected to clean maps");
                 LOGI("Intercepted fopen maps: %s", pathname);
                 FILE* fake = build_filtered_maps();
@@ -1825,7 +1847,7 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
             if (fake) return fake;
         }
         if (is_proc_net_dev_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 audit_native_probe("libc", "fopen_net_dev", "redirected to clean net_dev");
                 LOGI("Intercepted fopen net/dev: %s", pathname);
                 FILE* fake = build_filtered_net_dev();
@@ -1833,7 +1855,7 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
             }
         }
         if (is_proc_net_route_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 audit_native_probe("libc", "fopen_net_route", "redirected to clean net_route");
                 LOGI("Intercepted fopen net/route: %s", pathname);
                 FILE* fake = build_filtered_net_route();
@@ -1841,7 +1863,7 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
             }
         }
         if (is_proc_net_if_inet6_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 audit_native_probe("libc", "fopen_net_if_inet6", "redirected to clean net_if_inet6");
                 LOGI("Intercepted fopen net/if_inet6: %s", pathname);
                 FILE* fake = build_filtered_net_if_inet6();
@@ -1849,7 +1871,7 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
             }
         }
         if (is_proc_net_ipv6_route_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 audit_native_probe("libc", "fopen_net_ipv6_route", "redirected to clean net_ipv6_route");
                 LOGI("Intercepted fopen net/ipv6_route: %s", pathname);
                 FILE* fake = build_filtered_net_ipv6_route();
@@ -1917,6 +1939,7 @@ static char* fake_fgets_chk(char* s, int size, size_t buflen, FILE* stream) {
 
 int fake_open(const char* pathname, int flags, ...) {
     SAFE_BYTEHOOK_SCOPE();
+    void* caller_addr = get_effective_caller();
 
     mode_t mode = 0;
     if (flags & O_CREAT) {
@@ -1926,7 +1949,7 @@ int fake_open(const char* pathname, int flags, ...) {
         va_end(args);
     }
 
-    if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+    if (is_security_hidden_path(pathname, caller_addr)) {
         simulate_vfs_lookup_delay();
         LOGD("Hidden path open: %s", pathname);
         errno = ENOENT;
@@ -1979,7 +2002,7 @@ int fake_open(const char* pathname, int flags, ...) {
             return -1;
         }
         if (strstr(pathname, "smaps")) {
-            if (should_filter_proc_maps(__builtin_return_address(0))) {
+            if (should_filter_proc_maps(caller_addr)) {
                 audit_native_probe("libc", "open_smaps", "redirected to clean smaps");
                 LOGI("Intercepted open smaps: %s", pathname);
                 FILE* fake = build_filtered_smaps();
@@ -1992,7 +2015,7 @@ int fake_open(const char* pathname, int flags, ...) {
         }
         else if (strcmp(pathname, "/proc/self/maps") == 0 ||
             (strstr(pathname, "/proc/") && strstr(pathname, "/maps"))) {
-            if (should_filter_proc_maps(__builtin_return_address(0))) {
+            if (should_filter_proc_maps(caller_addr)) {
                 audit_native_probe("libc", "open_maps", "redirected to clean maps");
                 LOGI("Intercepted open maps: %s", pathname);
                 FILE* fake = build_filtered_maps();
@@ -2042,25 +2065,25 @@ int fake_open(const char* pathname, int flags, ...) {
             }
         }
         if (is_proc_net_dev_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 LOGI("Intercepted open net/dev: %s", pathname);
                 return open_virtual_file(build_filtered_net_dev());
             }
         }
         if (is_proc_net_route_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 LOGI("Intercepted open net/route: %s", pathname);
                 return open_virtual_file(build_filtered_net_route());
             }
         }
         if (is_proc_net_if_inet6_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 LOGI("Intercepted open net/if_inet6: %s", pathname);
                 return open_virtual_file(build_filtered_net_if_inet6());
             }
         }
         if (is_proc_net_ipv6_route_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 LOGI("Intercepted open net/ipv6_route: %s", pathname);
                 return open_virtual_file(build_filtered_net_ipv6_route());
             }
@@ -2121,7 +2144,7 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
         va_end(args);
     }
 
-    void* caller_addr = __builtin_return_address(0);
+    void* caller_addr = get_effective_caller();
     if (is_security_hidden_path(pathname, caller_addr) ||
         (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, pathname))) {
         simulate_vfs_lookup_delay();
@@ -2176,7 +2199,7 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
             return -1;
         }
         if (strstr(pathname, "smaps")) {
-            if (should_filter_proc_maps(__builtin_return_address(0))) {
+            if (should_filter_proc_maps(caller_addr)) {
                 audit_native_probe("libc", "openat_smaps", "redirected to clean smaps");
                 LOGI("Intercepted openat smaps: %s", pathname);
                 FILE* fake = build_filtered_smaps();
@@ -2189,7 +2212,7 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
         }
         else if (strcmp(pathname, "/proc/self/maps") == 0 ||
             (strstr(pathname, "/proc/") && strstr(pathname, "/maps"))) {
-            if (should_filter_proc_maps(__builtin_return_address(0))) {
+            if (should_filter_proc_maps(caller_addr)) {
                 audit_native_probe("libc", "openat_maps", "redirected to clean maps");
                 LOGI("Intercepted openat maps: %s", pathname);
                 FILE* fake = build_filtered_maps();
@@ -2239,25 +2262,25 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
             }
         }
         if (is_proc_net_dev_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 LOGI("Intercepted openat net/dev: %s", pathname);
                 return open_virtual_file(build_filtered_net_dev());
             }
         }
         if (is_proc_net_route_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 LOGI("Intercepted openat net/route: %s", pathname);
                 return open_virtual_file(build_filtered_net_route());
             }
         }
         if (is_proc_net_if_inet6_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 LOGI("Intercepted openat net/if_inet6: %s", pathname);
                 return open_virtual_file(build_filtered_net_if_inet6());
             }
         }
         if (is_proc_net_ipv6_route_path(pathname)) {
-            if (is_caller_security_dso(__builtin_return_address(0))) {
+            if (is_caller_security_dso(caller_addr)) {
                 LOGI("Intercepted openat net/ipv6_route: %s", pathname);
                 return open_virtual_file(build_filtered_net_ipv6_route());
             }
@@ -2318,7 +2341,7 @@ int fake_openat_2(int dirfd, const char* pathname, int flags) {
 DIR* fake_opendir(const char* name) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    void* caller_addr = __builtin_return_address(0);
+    void* caller_addr = get_effective_caller();
     if (is_security_hidden_path(name, caller_addr) ||
         (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(AT_FDCWD, name))) {
         LOGD("Hidden opendir: %s", name ? name : "(null)");
@@ -2333,7 +2356,7 @@ DIR* fake_opendir(const char* name) {
 struct dirent* fake_readdir(DIR* dirp) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    void* ret_addr = __builtin_return_address(0);
+    void* ret_addr = get_effective_caller();
     int dfd = dirp ? dirfd(dirp) : -1;
     struct dirent* entry = nullptr;
     while (true) {
@@ -2362,7 +2385,7 @@ struct dirent* fake_readdir(DIR* dirp) {
 static struct dirent64* fake_readdir64(DIR* dirp) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    void* ret_addr = __builtin_return_address(0);
+    void* ret_addr = get_effective_caller();
     int dfd = dirp ? dirfd(dirp) : -1;
     struct dirent64* entry = nullptr;
     while (true) {
@@ -2391,7 +2414,7 @@ static struct dirent64* fake_readdir64(DIR* dirp) {
 static int fake_readdir_r(DIR* dirp, struct dirent* entry, struct dirent** result) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    void* ret_addr = __builtin_return_address(0);
+    void* ret_addr = get_effective_caller();
     int dfd = dirp ? dirfd(dirp) : -1;
     while (true) {
         int ret = 0;
@@ -2424,7 +2447,7 @@ static int fake_readdir_r(DIR* dirp, struct dirent* entry, struct dirent** resul
 static int fake_readdir64_r(DIR* dirp, struct dirent64* entry, struct dirent64** result) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    void* ret_addr = __builtin_return_address(0);
+    void* ret_addr = get_effective_caller();
     int dfd = dirp ? dirfd(dirp) : -1;
     while (true) {
         int ret = 0;
@@ -2565,7 +2588,7 @@ static ssize_t sanitize_readlink_buffer(char* buf, size_t bufsiz, ssize_t ret, v
 
 ssize_t fake_readlink(const char* pathname, char* buf, size_t bufsiz) {
     SAFE_BYTEHOOK_SCOPE();
-    void* caller_addr = __builtin_return_address(0);
+    void* caller_addr = get_effective_caller();
 
     if (pathname && strcmp(pathname, "/proc/self/exe") == 0) {
         const char* fake_exe = "/system/bin/app_process64";
@@ -2625,7 +2648,7 @@ static ssize_t do_readlinkat(int dirfd, const char* pathname, char* buf, size_t 
 
 ssize_t fake_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsiz) {
     SAFE_BYTEHOOK_SCOPE();
-    void* caller_addr = __builtin_return_address(0);
+    void* caller_addr = get_effective_caller();
 
     if (pathname && strcmp(pathname, "/proc/self/exe") == 0) {
         const char* fake_exe = "/system/bin/app_process64";
@@ -2657,12 +2680,13 @@ ssize_t fake_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsi
 
 static int fake_dladdr(const void* addr, Dl_info* info) {
     SAFE_BYTEHOOK_SCOPE();
+    void* caller_addr = get_effective_caller();
     int result = 0;
     if (real_dladdr_ptr) result = real_dladdr_ptr(addr, info);
     else if (g_bytehook_hooks_installed) result = BYTEHOOK_CALL_PREV(fake_dladdr, addr, info);
     else result = dladdr(addr, info);
     if (result != 0 && info && info->dli_fname) {
-        if (!is_caller_qa(__builtin_return_address(0))) {
+        if (!is_caller_qa(caller_addr)) {
             const char* hidden[] = {
                 "libnative-bypass", "libbytehook", "xalsace",
                 "lsposed", "dexkit", "libdexkit",
@@ -2687,7 +2711,7 @@ static int fake_dladdr(const void* addr, Dl_info* info) {
         };
         for (int i = 0; qa_mt_hidden[i]; i++) {
             if (strcasestr(info->dli_fname, qa_mt_hidden[i])) {
-                if (!is_caller_qa(__builtin_return_address(0))) {
+                if (!is_caller_qa(caller_addr)) {
                     LOGD("Hidden dladdr QA/MT library: %s", info->dli_fname);
                     info->dli_fname = "/system/lib64/libc.so";
                     info->dli_fbase = nullptr;
@@ -2697,7 +2721,7 @@ static int fake_dladdr(const void* addr, Dl_info* info) {
                 }
             }
         }
-        if (is_caller_security_dso(__builtin_return_address(0))) {
+        if (is_caller_security_dso(caller_addr)) {
             const char* sec_hidden[] = {
                 "libbugly_shadowhook", "libshadowhook", "librmonitor_base",
                 "librmonitor", "libqqPerfNativeTool", "libandroid_desensitization",
@@ -2795,7 +2819,7 @@ static int dl_iterate_callback_wrapper(struct dl_phdr_info* info, size_t size, v
 
 static int fake_dl_iterate_phdr(int (*callback)(struct dl_phdr_info*, size_t, void*), void* data) {
     SAFE_BYTEHOOK_SCOPE();
-    dl_iterate_cookie cookie{callback, data, __builtin_return_address(0)};
+    dl_iterate_cookie cookie{callback, data, get_effective_caller()};
     if (real_dl_iterate_phdr_ptr) return real_dl_iterate_phdr_ptr(dl_iterate_callback_wrapper, &cookie);
     if (g_bytehook_hooks_installed) return BYTEHOOK_CALL_PREV(fake_dl_iterate_phdr, dl_iterate_callback_wrapper, &cookie);
     return dl_iterate_phdr(dl_iterate_callback_wrapper, &cookie);
@@ -2803,7 +2827,8 @@ static int fake_dl_iterate_phdr(int (*callback)(struct dl_phdr_info*, size_t, vo
 
 int fake_access(const char* pathname, int mode) {
     SAFE_BYTEHOOK_SCOPE();
-    if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+    void* caller_addr = get_effective_caller();
+    if (is_security_hidden_path(pathname, caller_addr)) {
         simulate_vfs_lookup_delay();
         LOGD("Hidden path access: %s", pathname);
         errno = ENOENT;
@@ -2819,7 +2844,7 @@ int fake_access(const char* pathname, int mode) {
 
 int fake_faccessat(int dirfd, const char* pathname, int mode, int flags) {
     SAFE_BYTEHOOK_SCOPE();
-    void* caller_addr = __builtin_return_address(0);
+    void* caller_addr = get_effective_caller();
     if (is_security_hidden_path(pathname, caller_addr) ||
         (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, pathname))) {
         simulate_vfs_lookup_delay();
@@ -2837,7 +2862,8 @@ int fake_faccessat(int dirfd, const char* pathname, int mode, int flags) {
 
 int fake_stat(const char* pathname, struct stat* statbuf) {
     SAFE_BYTEHOOK_SCOPE();
-    if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+    void* caller_addr = get_effective_caller();
+    if (is_security_hidden_path(pathname, caller_addr)) {
         simulate_vfs_lookup_delay();
         LOGD("Hidden path stat: %s", pathname);
         errno = ENOENT;
@@ -2857,7 +2883,8 @@ int fake_stat(const char* pathname, struct stat* statbuf) {
 
 int fake_lstat(const char* pathname, struct stat* statbuf) {
     SAFE_BYTEHOOK_SCOPE();
-    if (is_security_hidden_path(pathname, __builtin_return_address(0))) {
+    void* caller_addr = get_effective_caller();
+    if (is_security_hidden_path(pathname, caller_addr)) {
         simulate_vfs_lookup_delay();
         LOGD("Hidden path lstat: %s", pathname);
         errno = ENOENT;
@@ -2877,7 +2904,7 @@ int fake_lstat(const char* pathname, struct stat* statbuf) {
 
 int fake_fstatat(int dirfd, const char* pathname, struct stat* statbuf, int flags) {
     SAFE_BYTEHOOK_SCOPE();
-    void* caller_addr = __builtin_return_address(0);
+    void* caller_addr = get_effective_caller();
     if (is_security_hidden_path(pathname, caller_addr) ||
         (!is_caller_qa(caller_addr) && is_sensitive_proc_fd(dirfd, pathname))) {
         simulate_vfs_lookup_delay();
@@ -3322,7 +3349,7 @@ static bool is_anti_tamper_kill(pid_t tgid, pid_t tid, int sig, void* return_add
 static int fake_kill(pid_t pid, int sig) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    if (is_anti_tamper_kill(pid, 0, sig, __builtin_return_address(0))) {
+    if (is_anti_tamper_kill(pid, 0, sig, get_effective_caller())) {
         return 0;
     }
     if (real_kill_ptr) return real_kill_ptr(pid, sig);
@@ -3337,7 +3364,7 @@ static int fake_kill(pid_t pid, int sig) {
 static int fake_tkill(pid_t tid, int sig) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    if (is_anti_tamper_kill(getpid(), tid, sig, __builtin_return_address(0))) {
+    if (is_anti_tamper_kill(getpid(), tid, sig, get_effective_caller())) {
         return 0;
     }
     if (real_tkill_ptr) return real_tkill_ptr(tid, sig);
@@ -3352,7 +3379,7 @@ static int fake_tkill(pid_t tid, int sig) {
 static int fake_tgkill(pid_t tgid, pid_t tid, int sig) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    if (is_anti_tamper_kill(tgid, tid, sig, __builtin_return_address(0))) {
+    if (is_anti_tamper_kill(tgid, tid, sig, get_effective_caller())) {
         return 0;
     }
     if (real_tgkill_ptr) return real_tgkill_ptr(tgid, tid, sig);
@@ -3367,7 +3394,7 @@ static int fake_tgkill(pid_t tgid, pid_t tid, int sig) {
 static int fake_raise(int sig) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    if (is_anti_tamper_kill(getpid(), gettid(), sig, __builtin_return_address(0))) {
+    if (is_anti_tamper_kill(getpid(), gettid(), sig, get_effective_caller())) {
         return 0;
     }
     if (real_raise_ptr) return real_raise_ptr(sig);
@@ -3790,7 +3817,7 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
 
 long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5, void* a6) {
     SAFE_BYTEHOOK_SCOPE();
-    return fake_syscall_ex(number, a1, a2, a3, a4, a5, a6, __builtin_return_address(0));
+    return fake_syscall_ex(number, a1, a2, a3, a4, a5, a6, get_effective_caller());
 }
 
 static long fake_ptrace(int request, pid_t pid, void* addr, void* data) {
@@ -3820,8 +3847,9 @@ ssize_t fake_recvfrom(int fd, void* buf, size_t len, int flags, struct sockaddr*
 char* fake_if_indextoname(unsigned int ifindex, char* ifname) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
+    void* caller_addr = get_effective_caller();
     if (!ifname) return nullptr;
-    if (is_caller_security_dso(__builtin_return_address(0))) {
+    if (is_caller_security_dso(caller_addr)) {
         if (is_filtered_ifindex((int)ifindex)) {
             ifname[0] = '\0';
             errno = ENODEV;
@@ -3831,7 +3859,7 @@ char* fake_if_indextoname(unsigned int ifindex, char* ifname) {
     char* res = real_if_indextoname_ptr ? real_if_indextoname_ptr(ifindex, ifname)
                                         : (g_bytehook_hooks_installed ? BYTEHOOK_CALL_PREV(fake_if_indextoname, ifindex, ifname)
                                                                       : if_indextoname(ifindex, ifname));
-    if (res && is_caller_security_dso(__builtin_return_address(0)) && is_virtual_or_vpn_interface_name(res)) {
+    if (res && is_caller_security_dso(caller_addr) && is_virtual_or_vpn_interface_name(res)) {
         record_filtered_ifindex((int)ifindex);
         ifname[0] = '\0';
         errno = ENODEV;
@@ -3843,12 +3871,13 @@ char* fake_if_indextoname(unsigned int ifindex, char* ifname) {
 int fake_ioctl(int fd, unsigned long request, ...) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
+    void* caller_addr = get_effective_caller();
     va_list args;
     va_start(args, request);
     void* arg = va_arg(args, void*);
     va_end(args);
 
-    if (is_caller_security_dso(__builtin_return_address(0))) {
+    if (is_caller_security_dso(caller_addr)) {
         if (request == SIOCGIFFLAGS || request == SIOCGIFADDR || request == SIOCGIFHWADDR ||
             request == SIOCGIFNETMASK || request == SIOCGIFBRDADDR) {
             if (arg) {
@@ -3868,13 +3897,14 @@ int fake_ioctl(int fd, unsigned long request, ...) {
 int fake_getifaddrs(struct ifaddrs** ifap) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
+    void* caller_addr = get_effective_caller();
     if (!ifap) return -1;
     int res = real_getifaddrs_ptr ? real_getifaddrs_ptr(ifap)
                                   : (g_bytehook_hooks_installed ? BYTEHOOK_CALL_PREV(fake_getifaddrs, ifap)
                                                                 : getifaddrs(ifap));
     if (res != 0 || !*ifap) return res;
 
-    if (!is_caller_security_dso(__builtin_return_address(0))) {
+    if (!is_caller_security_dso(caller_addr)) {
         return 0;
     }
 

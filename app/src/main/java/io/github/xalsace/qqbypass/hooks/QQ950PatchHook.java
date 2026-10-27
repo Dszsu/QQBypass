@@ -3768,7 +3768,7 @@ public class QQ950PatchHook {
 
         // 2. AntEst & QSec: DO NOT force empty string!
         // Empty strings trigger missing-security-token heuristics on Tencent backend risk servers.
-        // Under our native Dobby/maps/getprop environment filtering, native QsecEst produces clean normal tokens.
+        // Under our reinforced native ByteHook/maps/getprop/libc environment filtering, native QsecEst produces clean normal tokens.
         // If native returns null or empty, provide the authentic "e_null" fallback.
         Class<?> qsecEstCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.qsec.qsecest.QsecEst", cl);
         if (qsecEstCls != null && sHooked9375Classes.add(qsecEstCls)) {
@@ -3777,6 +3777,18 @@ public class QQ950PatchHook {
                 protected void afterHookedMethod(MethodHookParam p) throws Throwable {
                     if (p.getResult() == null || "".equals(p.getResult())) {
                         p.setResult("e_null"); // Official fallback token when not initialized
+                    }
+                }
+            });
+        }
+
+        Class<?> antEstCls = XposedHelpers.findClassIfExists("com.tencent.qqprotect.xps.core.AntEst", cl);
+        if (antEstCls != null && sHooked9375Classes.add(antEstCls)) {
+            HookUtils.hookAllMethods(antEstCls, "d", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
+                    if (p.getResult() == null || "".equals(p.getResult())) {
+                        p.setResult("e_null");
                     }
                 }
             });
