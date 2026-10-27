@@ -186,9 +186,6 @@ public class QQ950PatchHook {
 
         // Tier 20: TVK Player CKey & CKeyGuard Security Neutralization
         hookCKeyAndTVKSecurity(cl);
-
-        // Tier 21: Transient SSO D2 Key & Session Eviction Defense (Anti-Premature Expiry)
-        hookSsoSessionDefense(lpparam, cl);
     }
 
     // ==================== Tier 1: void-return, crash-safe ====================
@@ -1020,7 +1017,6 @@ public class QQ950PatchHook {
             hookTuringBerryAndThisWithClassLoader(cl);
             hookTuringOutboundRiskMapWithClassLoader(cl);
             hookCKeyAndTVKSecurity(cl);
-            hookSsoSessionDefense(null, cl);
         } catch (Throwable t) {
             XposedEntry.logError("[LateStage] hookLateStage error: " + t.getMessage(), t);
         }
@@ -5419,217 +5415,13 @@ public class QQ950PatchHook {
         }
     }
 
-    private static final java.util.Set<String> sHookedSsoClasses =
-        java.util.concurrent.ConcurrentHashMap.newKeySet();
-
-    /**
-     * Tier 21: Transient SSO D2 Key & Token Session Defense
-     *
-     * Addresses client-side premature eviction on SSO gateway transient status codes:
-     * - SSO_CODE_D2KEY_NOT_EXISTED (-10004)
-     * - SSO_CODE_INVALID_D2 (-10003)
-     * - SSO_CODE_D2_EXPIRED (-10001)
-     *
-     * Principles:
-     * 1. Strictly complies with Iron Rule 4.1: Server-authoritative kick commands (StatSvc.ReqMSFOffline,
-     *    ReqForceOffline, failCode: 2012) are NOT intercepted.
-     * 2. When the SSO gateway cache misses D2 (-10004/-10003/-10001), MSF's b(int) logic
-     *    prematurely purges valid WTLogin credentials and broadcasts ACTION_ACCOUNT_EXPIRED.
-     * 3. Prevents local key erasure via AccountCenter.p, bypasses false-drop in AccountCenter.n (NT mode),
-     *    and triggers transparent asynchronous D2/ticket reloading from WTLogin while suppressing spurious UI popups.
-     */
-    public static void hookSsoSessionDefense(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
-        if (cl == null) return;
-        try {
-            // 1. MSF core.t: b(int i2) & a(ToServiceMsg, FromServiceMsg)
-            Class<?> msfTCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.t", cl);
-            if (msfTCls != null && sHookedSsoClasses.add(cl.hashCode() + "_msf.core.t")) {
-                HookUtils.hookAllMethods(msfTCls, "b", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length > 0 && param.args[0] instanceof Number) {
-                            int code = ((Number) param.args[0]).intValue();
-                            if (code == -10004 || code == -10003 || code == -10001) {
-                                param.setResult(false);
-                                XposedEntry.log("[SsoDefense] Suppressed MSF core.t.b tokenExpired for transient sso code=" + code);
-                            }
-                        }
-                    }
-                });
-
-                HookUtils.hookAllMethods(msfTCls, "a", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args == null || param.args.length < 1) return;
-                        Object fromServiceMsg = null;
-                        for (Object arg : param.args) {
-                            if (arg != null && arg.getClass().getName().contains("FromServiceMsg")) {
-                                fromServiceMsg = arg;
-                                break;
-                            }
-                        }
-                        if (fromServiceMsg != null) {
-                            int failCode = 0;
-                            try {
-                                failCode = ((Number) XposedHelpers.callMethod(fromServiceMsg, "getBusinessFailCode")).intValue();
-                            } catch (Throwable ignored) {}
-
-                            if (failCode == -10004 || failCode == -10003 || failCode == -10001) {
-                                String uin = null;
-                                try {
-                                    uin = (String) XposedHelpers.callMethod(fromServiceMsg, "getUin");
-                                } catch (Throwable ignored) {}
-                                if (uin != null && !uin.isEmpty() && !"0".equals(uin)) {
-                                    final String finalUin = uin;
-                                    XposedEntry.log("[SsoDefense] Caught transient SSO failCode=" + failCode + " for uin=" + finalUin + ", triggering background key reload");
-                                    new Thread(() -> {
-                                        try {
-                                            Class<?> msfServiceCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.service.MsfService", cl);
-                                            if (msfServiceCls != null) {
-                                                Object core = XposedHelpers.callStaticMethod(msfServiceCls, "getCore");
-                                                if (core != null) {
-                                                    Object ac = XposedHelpers.callMethod(core, "getAccountCenter");
-                                                    if (ac != null) {
-                                                        XposedHelpers.callMethod(ac, "a", finalUin, true);
-                                                        XposedHelpers.callMethod(ac, "r");
-                                                    }
-                                                }
-                                            }
-                                        } catch (Throwable t) {
-                                            XposedEntry.logError("[SsoDefense] Background key reload error: " + t.getMessage(), t);
-                                        }
-                                    }).start();
-                                }
-                            }
-                        }
-                    }
-                });
-                XposedEntry.log("[SsoDefense] Installed MSF core.t SSO session defense");
-            }
-
-            // 2. MSF core.auth.b: n(String str) & p(String str)
-            Class<?> authBCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.auth.b", cl);
-            if (authBCls != null && sHookedSsoClasses.add(cl.hashCode() + "_msf.core.auth.b")) {
-                HookUtils.hookAllMethods(authBCls, "n", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        String uin = param.args != null && param.args.length > 0 ? (String) param.args[0] : null;
-                        if (uin != null && !uin.isEmpty()) {
-                            try {
-                                XposedHelpers.callMethod(param.thisObject, "a", uin, true);
-                                XposedHelpers.callMethod(param.thisObject, "r");
-                                param.setResult(true);
-                                XposedEntry.log("[SsoDefense] Bypassed auth.b.n NTWtLogin false-drop, reloaded keys for uin=" + uin);
-                            } catch (Throwable t) {
-                                param.setResult(true);
-                            }
-                        }
-                    }
-                });
-                XposedEntry.log("[SsoDefense] Installed MSF auth.b SSO session defense");
-            }
-
-            // 3. UI Process: mqq.app.MainService$MyErrorHandler & MainService
-            Class<?> errorHandlerCls = XposedHelpers.findClassIfExists("mqq.app.MainService$MyErrorHandler", cl);
-            if (errorHandlerCls != null && sHookedSsoClasses.add(cl.hashCode() + "_MainService$MyErrorHandler")) {
-                HookUtils.hookAllMethods(errorHandlerCls, "onUserTokenExpired", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        Object fromServiceMsg = null;
-                        if (param.args != null) {
-                            for (Object arg : param.args) {
-                                if (arg != null && arg.getClass().getName().contains("FromServiceMsg")) {
-                                    fromServiceMsg = arg;
-                                    break;
-                                }
-                            }
-                        }
-                        if (fromServiceMsg != null) {
-                            int ssoErrorCode = 0;
-                            try {
-                                Object attr = XposedHelpers.callMethod(fromServiceMsg, "getAttribute", "attr_sso_error_code", 0);
-                                if (attr instanceof Number) {
-                                    ssoErrorCode = ((Number) attr).intValue();
-                                }
-                            } catch (Throwable ignored) {}
-
-                            if (ssoErrorCode == -10004 || ssoErrorCode == -10003 || ssoErrorCode == -10001) {
-                                XposedEntry.log("[TokenShield] Intercepted spurious onUserTokenExpired for transient ssoErrorCode=" + ssoErrorCode + ", maintaining UI session");
-                                param.setResult(null);
-                            }
-                        }
-                    }
-                });
-
-                HookUtils.hookAllMethods(errorHandlerCls, "popupNotification", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args == null || param.args.length < 1) return;
-                        String action = param.args[0] != null ? param.args[0].toString() : "";
-                        if ("mqq.intent.action.ACCOUNT_EXPIRED".equals(action)) {
-                            for (Object arg : param.args) {
-                                if (arg instanceof android.os.Bundle) {
-                                    android.os.Bundle b = (android.os.Bundle) arg;
-                                    int errCode = b.getInt("attr_sso_error_code", 0);
-                                    if (errCode == -10004 || errCode == -10003 || errCode == -10001) {
-                                        XposedEntry.log("[TokenShield] Blocked popupNotification(ACCOUNT_EXPIRED) with transient sso error code=" + errCode);
-                                        param.setResult(null);
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
-                XposedEntry.log("[TokenShield] Installed MainService$MyErrorHandler transient token defense");
-            }
-
-            // Also hook MainService to catch dynamic errorHandler
-            Class<?> mainServiceCls = XposedHelpers.findClassIfExists("mqq.app.MainService", cl);
-            if (mainServiceCls != null && sHookedSsoClasses.add(cl.hashCode() + "_MainService")) {
-                HookUtils.hookAllMethods(mainServiceCls, "setCustomErrorHandler", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length > 0 && param.args[0] != null) {
-                            Class<?> custEhCls = param.args[0].getClass();
-                            if (sHookedSsoClasses.add(custEhCls.getName())) {
-                                HookUtils.hookAllMethods(custEhCls, "onUserTokenExpired", new XC_MethodHook() {
-                                    @Override
-                                    protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                                        Object fromServiceMsg = null;
-                                        if (p.args != null) {
-                                            for (Object arg : p.args) {
-                                                if (arg != null && arg.getClass().getName().contains("FromServiceMsg")) {
-                                                    fromServiceMsg = arg;
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        if (fromServiceMsg != null) {
-                                            int ssoErrorCode = 0;
-                                            try {
-                                                Object attr = XposedHelpers.callMethod(fromServiceMsg, "getAttribute", "attr_sso_error_code", 0);
-                                                if (attr instanceof Number) {
-                                                    ssoErrorCode = ((Number) attr).intValue();
-                                                }
-                                            } catch (Throwable ignored) {}
-
-                                            if (ssoErrorCode == -10004 || ssoErrorCode == -10003 || ssoErrorCode == -10001) {
-                                                XposedEntry.log("[TokenShield] Intercepted custom onUserTokenExpired for transient ssoErrorCode=" + ssoErrorCode);
-                                                p.setResult(null);
-                                            }
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                    }
-                });
-            }
-        } catch (Throwable t) {
-            XposedEntry.logError("[SsoDefense] Error initializing SSO session defense", t);
-        }
-    }
+    // Note on SSO Token Expiration & Kick Compliance (Iron Rule 4.1):
+    // Forced logout and token invalidation (e.g. -10003 w21, -10001, StatSvc.ReqMSFOffline)
+    // are authoritative server-side state transitions. Swallowing or intercepting them in MSF
+    // (e.g. msf.core.t.b) or UI (MyErrorHandler.onUserTokenExpired / popupNotification) traps
+    // the client in an unrecoverable "Zombie Session" where all outgoing requests fail and UI
+    // remains falsely alive. Defenses MUST focus 100% on preventing anomalous telemetry triggers
+    // at the root cause, rather than suppressing legitimate server session state transitions.
 }
 
 

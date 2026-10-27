@@ -104,6 +104,20 @@ public class DynamicRootDetectionHook {
         }).start();
     }
 
+    public static boolean isVirtualOrVpnIface(String name) {
+        if (name == null || name.isEmpty()) return false;
+        String lower = name.toLowerCase();
+        return lower.startsWith("tun") || lower.startsWith("ppp") ||
+               lower.startsWith("p2p") || lower.startsWith("tap") ||
+               lower.startsWith("dummy") || lower.startsWith("ifb") ||
+               lower.startsWith("vgate") || lower.startsWith("ovnet") ||
+               lower.startsWith("ap") || lower.startsWith("wondertap") ||
+               lower.startsWith("veth") || lower.startsWith("docker") ||
+               lower.startsWith("virbr") || lower.startsWith("br-") ||
+               lower.startsWith("sit") || lower.startsWith("gre") ||
+               lower.startsWith("ip_vti") || lower.startsWith("ip6");
+    }
+
     private static void hookNetworkInterfaces() {
         try {
             HookUtils.hookMethod(NetworkInterface.class, "getNetworkInterfaces", new XC_MethodHook() {
@@ -116,23 +130,47 @@ public class DynamicRootDetectionHook {
                     while (en.hasMoreElements()) {
                         NetworkInterface ni = en.nextElement();
                         String name = ni.getName();
-                        if (name != null) {
-                            String lower = name.toLowerCase();
-                            if (lower.startsWith("tun") || lower.startsWith("ppp") ||
-                                lower.startsWith("p2p") || lower.startsWith("tap") ||
-                                lower.startsWith("dummy") || lower.startsWith("ifb") ||
-                                lower.startsWith("vgate") || lower.startsWith("ovnet") ||
-                                lower.startsWith("ap") || lower.startsWith("wondertap") ||
-                                lower.startsWith("veth") || lower.startsWith("docker") ||
-                                lower.startsWith("virbr") || lower.startsWith("br-") ||
-                                lower.startsWith("sit") || lower.startsWith("gre") ||
-                                lower.startsWith("ip_vti") || lower.startsWith("ip6")) {
-                                continue;
-                            }
+                        if (isVirtualOrVpnIface(name)) {
+                            continue;
                         }
                         filtered.add(ni);
                     }
                     param.setResult(Collections.enumeration(filtered));
+                }
+            });
+
+            HookUtils.hookMethod(NetworkInterface.class, "getByName", String.class, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
+                        String name = (String) param.args[0];
+                        if (isVirtualOrVpnIface(name)) {
+                            param.setResult(null);
+                        }
+                    }
+                }
+            });
+
+            HookUtils.hookMethod(NetworkInterface.class, "getByInetAddress", java.net.InetAddress.class, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length > 0 && param.args[0] instanceof java.net.InetAddress) {
+                        java.net.InetAddress addr = (java.net.InetAddress) param.args[0];
+                        String ip = addr.getHostAddress();
+                        if (ip != null && (ip.startsWith("198.18.") || ip.startsWith("172.30."))) {
+                            param.setResult(null);
+                        }
+                    }
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.getResult() instanceof NetworkInterface) {
+                        NetworkInterface ni = (NetworkInterface) param.getResult();
+                        if (isVirtualOrVpnIface(ni.getName())) {
+                            param.setResult(null);
+                        }
+                    }
                 }
             });
         } catch (Throwable t) {

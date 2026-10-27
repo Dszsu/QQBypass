@@ -558,7 +558,7 @@ static inline bool is_security_hidden_path(const char* path, void* return_addres
 
     // 3. Sensitive root/xposed paths
     // Root binaries and framework paths MUST ALWAYS be hidden from all callers!
-    if (is_sensitive_path(path) || (is_sys_class_net_virtual_path(path) && is_caller_security_dso(return_address))) {
+    if (is_sensitive_path(path) || is_sys_class_net_virtual_path(path)) {
         audit_native_probe("libc", "sensitive_path_blocked", path);
         return true;
     }
@@ -1881,36 +1881,28 @@ FILE* fake_fopen(const char* pathname, const char* mode) {
             if (fake) return fake;
         }
         if (is_proc_net_dev_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                audit_native_probe("libc", "fopen_net_dev", "redirected to clean net_dev");
-                LOGI("Intercepted fopen net/dev: %s", pathname);
-                FILE* fake = build_filtered_net_dev();
-                if (fake) return fake;
-            }
+            audit_native_probe("libc", "fopen_net_dev", "redirected to clean net_dev");
+            LOGI("Intercepted fopen net/dev: %s", pathname);
+            FILE* fake = build_filtered_net_dev();
+            if (fake) return fake;
         }
         if (is_proc_net_route_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                audit_native_probe("libc", "fopen_net_route", "redirected to clean net_route");
-                LOGI("Intercepted fopen net/route: %s", pathname);
-                FILE* fake = build_filtered_net_route();
-                if (fake) return fake;
-            }
+            audit_native_probe("libc", "fopen_net_route", "redirected to clean net_route");
+            LOGI("Intercepted fopen net/route: %s", pathname);
+            FILE* fake = build_filtered_net_route();
+            if (fake) return fake;
         }
         if (is_proc_net_if_inet6_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                audit_native_probe("libc", "fopen_net_if_inet6", "redirected to clean net_if_inet6");
-                LOGI("Intercepted fopen net/if_inet6: %s", pathname);
-                FILE* fake = build_filtered_net_if_inet6();
-                if (fake) return fake;
-            }
+            audit_native_probe("libc", "fopen_net_if_inet6", "redirected to clean net_if_inet6");
+            LOGI("Intercepted fopen net/if_inet6: %s", pathname);
+            FILE* fake = build_filtered_net_if_inet6();
+            if (fake) return fake;
         }
         if (is_proc_net_ipv6_route_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                audit_native_probe("libc", "fopen_net_ipv6_route", "redirected to clean net_ipv6_route");
-                LOGI("Intercepted fopen net/ipv6_route: %s", pathname);
-                FILE* fake = build_filtered_net_ipv6_route();
-                if (fake) return fake;
-            }
+            audit_native_probe("libc", "fopen_net_ipv6_route", "redirected to clean net_ipv6_route");
+            LOGI("Intercepted fopen net/ipv6_route: %s", pathname);
+            FILE* fake = build_filtered_net_ipv6_route();
+            if (fake) return fake;
         }
         if (is_proc_attr_current_path(pathname)) {
             LOGI("Intercepted fopen attr/current: %s", pathname);
@@ -2099,28 +2091,20 @@ int fake_open(const char* pathname, int flags, ...) {
             }
         }
         if (is_proc_net_dev_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                LOGI("Intercepted open net/dev: %s", pathname);
-                return open_virtual_file(build_filtered_net_dev());
-            }
+            LOGI("Intercepted open net/dev: %s", pathname);
+            return open_virtual_file(build_filtered_net_dev());
         }
         if (is_proc_net_route_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                LOGI("Intercepted open net/route: %s", pathname);
-                return open_virtual_file(build_filtered_net_route());
-            }
+            LOGI("Intercepted open net/route: %s", pathname);
+            return open_virtual_file(build_filtered_net_route());
         }
         if (is_proc_net_if_inet6_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                LOGI("Intercepted open net/if_inet6: %s", pathname);
-                return open_virtual_file(build_filtered_net_if_inet6());
-            }
+            LOGI("Intercepted open net/if_inet6: %s", pathname);
+            return open_virtual_file(build_filtered_net_if_inet6());
         }
         if (is_proc_net_ipv6_route_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                LOGI("Intercepted open net/ipv6_route: %s", pathname);
-                return open_virtual_file(build_filtered_net_ipv6_route());
-            }
+            LOGI("Intercepted open net/ipv6_route: %s", pathname);
+            return open_virtual_file(build_filtered_net_ipv6_route());
         }
         if (is_proc_attr_current_path(pathname)) {
             LOGI("Intercepted open attr/current: %s", pathname);
@@ -2296,28 +2280,20 @@ int fake_openat(int dirfd, const char* pathname, int flags, ...) {
             }
         }
         if (is_proc_net_dev_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                LOGI("Intercepted openat net/dev: %s", pathname);
-                return open_virtual_file(build_filtered_net_dev());
-            }
+            LOGI("Intercepted openat net/dev: %s", pathname);
+            return open_virtual_file(build_filtered_net_dev());
         }
         if (is_proc_net_route_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                LOGI("Intercepted openat net/route: %s", pathname);
-                return open_virtual_file(build_filtered_net_route());
-            }
+            LOGI("Intercepted openat net/route: %s", pathname);
+            return open_virtual_file(build_filtered_net_route());
         }
         if (is_proc_net_if_inet6_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                LOGI("Intercepted openat net/if_inet6: %s", pathname);
-                return open_virtual_file(build_filtered_net_if_inet6());
-            }
+            LOGI("Intercepted openat net/if_inet6: %s", pathname);
+            return open_virtual_file(build_filtered_net_if_inet6());
         }
         if (is_proc_net_ipv6_route_path(pathname)) {
-            if (is_caller_security_dso(caller_addr)) {
-                LOGI("Intercepted openat net/ipv6_route: %s", pathname);
-                return open_virtual_file(build_filtered_net_ipv6_route());
-            }
+            LOGI("Intercepted openat net/ipv6_route: %s", pathname);
+            return open_virtual_file(build_filtered_net_ipv6_route());
         }
         if (is_proc_attr_current_path(pathname)) {
             LOGI("Intercepted openat attr/current: %s", pathname);
@@ -3712,28 +3688,20 @@ long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* 
                 }
             }
             if (is_proc_net_dev_path(path)) {
-                if (is_caller_security_dso(caller_addr)) {
-                    LOGI("fake_syscall: openat net/dev redirected: %s", path);
-                    return open_virtual_file(build_filtered_net_dev());
-                }
+                LOGI("fake_syscall: openat net/dev redirected: %s", path);
+                return open_virtual_file(build_filtered_net_dev());
             }
             if (is_proc_net_route_path(path)) {
-                if (is_caller_security_dso(caller_addr)) {
-                    LOGI("fake_syscall: openat net/route redirected: %s", path);
-                    return open_virtual_file(build_filtered_net_route());
-                }
+                LOGI("fake_syscall: openat net/route redirected: %s", path);
+                return open_virtual_file(build_filtered_net_route());
             }
             if (is_proc_net_if_inet6_path(path)) {
-                if (is_caller_security_dso(caller_addr)) {
-                    LOGI("fake_syscall: openat net/if_inet6 redirected: %s", path);
-                    return open_virtual_file(build_filtered_net_if_inet6());
-                }
+                LOGI("fake_syscall: openat net/if_inet6 redirected: %s", path);
+                return open_virtual_file(build_filtered_net_if_inet6());
             }
             if (is_proc_net_ipv6_route_path(path)) {
-                if (is_caller_security_dso(caller_addr)) {
-                    LOGI("fake_syscall: openat net/ipv6_route redirected: %s", path);
-                    return open_virtual_file(build_filtered_net_ipv6_route());
-                }
+                LOGI("fake_syscall: openat net/ipv6_route redirected: %s", path);
+                return open_virtual_file(build_filtered_net_ipv6_route());
             }
             if (is_proc_attr_current_path(path)) {
                 LOGI("fake_syscall: openat attr/current redirected: %s", path);
@@ -4003,19 +3971,16 @@ ssize_t fake_recvfrom(int fd, void* buf, size_t len, int flags, struct sockaddr*
 char* fake_if_indextoname(unsigned int ifindex, char* ifname) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    void* caller_addr = get_effective_caller();
     if (!ifname) return nullptr;
-    if (is_caller_security_dso(caller_addr)) {
-        if (is_filtered_ifindex((int)ifindex)) {
-            ifname[0] = '\0';
-            errno = ENODEV;
-            return nullptr;
-        }
+    if (is_filtered_ifindex((int)ifindex)) {
+        ifname[0] = '\0';
+        errno = ENODEV;
+        return nullptr;
     }
     char* res = real_if_indextoname_ptr ? real_if_indextoname_ptr(ifindex, ifname)
                                         : (g_bytehook_hooks_installed ? BYTEHOOK_CALL_PREV(fake_if_indextoname, ifindex, ifname)
                                                                       : if_indextoname(ifindex, ifname));
-    if (res && is_caller_security_dso(caller_addr) && is_virtual_or_vpn_interface_name(res)) {
+    if (res && is_virtual_or_vpn_interface_name(res)) {
         record_filtered_ifindex((int)ifindex);
         ifname[0] = '\0';
         errno = ENODEV;
@@ -4027,21 +3992,18 @@ char* fake_if_indextoname(unsigned int ifindex, char* ifname) {
 int fake_ioctl(int fd, unsigned long request, ...) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    void* caller_addr = get_effective_caller();
     va_list args;
     va_start(args, request);
     void* arg = va_arg(args, void*);
     va_end(args);
 
-    if (is_caller_security_dso(caller_addr)) {
-        if (request == SIOCGIFFLAGS || request == SIOCGIFADDR || request == SIOCGIFHWADDR ||
-            request == SIOCGIFNETMASK || request == SIOCGIFBRDADDR) {
-            if (arg) {
-                struct ifreq* ifr = (struct ifreq*)arg;
-                if (is_virtual_or_vpn_interface_name(ifr->ifr_name)) {
-                    errno = ENODEV;
-                    return -1;
-                }
+    if (request == SIOCGIFFLAGS || request == SIOCGIFADDR || request == SIOCGIFHWADDR ||
+        request == SIOCGIFNETMASK || request == SIOCGIFBRDADDR) {
+        if (arg) {
+            struct ifreq* ifr = (struct ifreq*)arg;
+            if (is_virtual_or_vpn_interface_name(ifr->ifr_name)) {
+                errno = ENODEV;
+                return -1;
             }
         }
     }
@@ -4053,16 +4015,11 @@ int fake_ioctl(int fd, unsigned long request, ...) {
 int fake_getifaddrs(struct ifaddrs** ifap) {
     SAFE_BYTEHOOK_SCOPE();
     ensure_real_funcs();
-    void* caller_addr = get_effective_caller();
     if (!ifap) return -1;
     int res = real_getifaddrs_ptr ? real_getifaddrs_ptr(ifap)
                                   : (g_bytehook_hooks_installed ? BYTEHOOK_CALL_PREV(fake_getifaddrs, ifap)
                                                                 : getifaddrs(ifap));
     if (res != 0 || !*ifap) return res;
-
-    if (!is_caller_security_dso(caller_addr)) {
-        return 0;
-    }
 
     struct ifaddrs* prev = nullptr;
     struct ifaddrs* curr = *ifap;
