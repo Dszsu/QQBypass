@@ -5510,21 +5510,6 @@ public class QQ950PatchHook {
                         }
                     }
                 });
-
-                HookUtils.hookAllMethods(authBCls, "p", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        StackTraceElement[] stack = Thread.currentThread().getStackTrace();
-                        for (StackTraceElement elem : stack) {
-                            if (elem.getClassName().contains("com.tencent.mobileqq.msf.core.t")) {
-                                String uin = param.args != null && param.args.length > 0 ? String.valueOf(param.args[0]) : "";
-                                XposedEntry.log("[SsoDefense] Blocked AccountCenter.p(setAccountNoLogin) triggered by transient SSO failure for uin=" + uin);
-                                param.setResult(null);
-                                return;
-                            }
-                        }
-                    }
-                });
                 XposedEntry.log("[SsoDefense] Installed MSF auth.b SSO session defense");
             }
 
@@ -5624,28 +5609,6 @@ public class QQ950PatchHook {
                         }
                     }
                 });
-            }
-
-            // 4. UI Process: mqq.app.AppRuntime logout guard
-            Class<?> appRuntimeCls = XposedHelpers.findClassIfExists("mqq.app.AppRuntime", cl);
-            if (appRuntimeCls != null && sHookedSsoClasses.add(cl.hashCode() + "_AppRuntime")) {
-                HookUtils.hookAllMethods(appRuntimeCls, "logout", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        Object reason = param.args != null && param.args.length > 0 ? param.args[0] : null;
-                        if (reason != null && ("expired".equals(reason.toString()) || "Constants.LogoutReason.expired".equals(reason.toString()))) {
-                            StackTraceElement[] stack = Thread.currentThread().getStackTrace();
-                            for (StackTraceElement elem : stack) {
-                                if (elem.getClassName().contains("MainService") && elem.getMethodName().contains("onUserTokenExpired")) {
-                                    XposedEntry.log("[TokenShield] Suppressed AppRuntime.logout(expired) invoked from transient onUserTokenExpired");
-                                    param.setResult(null);
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                });
-                XposedEntry.log("[TokenShield] Installed AppRuntime.logout transient token defense");
             }
         } catch (Throwable t) {
             XposedEntry.logError("[SsoDefense] Error initializing SSO session defense", t);
