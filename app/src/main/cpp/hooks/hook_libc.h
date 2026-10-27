@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <ifaddrs.h>
 #include <dirent.h>
+#include <dlfcn.h>
 #include <sys/system_properties.h>
 
 namespace hook_libc {
@@ -81,6 +82,8 @@ int fake_system_property_read(const prop_info* pi, char* name, char* value);
 long fake_syscall(long number, void* a1, void* a2, void* a3, void* a4, void* a5, void* a6);
 long fake_syscall_ex(long number, void* a1, void* a2, void* a3, void* a4, void* a5, void* a6, void* caller_addr);
 void register_trampoline_range(uintptr_t start, uintptr_t end);
+int fake_dladdr(const void* addr, Dl_info* info);
+Dl_info get_clean_libc_info();
 
 } // namespace hook_libc
 

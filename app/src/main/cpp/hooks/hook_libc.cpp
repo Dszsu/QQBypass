@@ -152,6 +152,40 @@ static void ensure_real_funcs() {
     if (!real_freeifaddrs_ptr) real_freeifaddrs_ptr = (void (*)(struct ifaddrs*))dlsym(RTLD_DEFAULT, "freeifaddrs");
 }
 
+static Dl_info g_clean_libc_info = {};
+static char g_clean_libc_fname[512] = {0};
+static bool g_clean_libc_inited = false;
+
+static void ensure_clean_libc_info() {
+    if (g_clean_libc_inited) return;
+    ensure_real_funcs();
+    Dl_info temp_info = {};
+    void* probe_sym = real_open_ptr ? (void*)real_open_ptr : dlsym(RTLD_DEFAULT, "open");
+    if (!probe_sym) probe_sym = (void*)real_dladdr_ptr;
+    if (probe_sym) {
+        int ret = real_dladdr_ptr ? real_dladdr_ptr(probe_sym, &temp_info) : dladdr(probe_sym, &temp_info);
+        if (ret != 0 && temp_info.dli_fname) {
+            strncpy(g_clean_libc_fname, temp_info.dli_fname, sizeof(g_clean_libc_fname) - 1);
+            g_clean_libc_info.dli_fname = g_clean_libc_fname;
+            g_clean_libc_info.dli_fbase = temp_info.dli_fbase;
+            g_clean_libc_info.dli_sname = "open";
+            g_clean_libc_info.dli_saddr = probe_sym;
+            g_clean_libc_inited = true;
+            LOGI("Initialized clean libc info: fname=%s, fbase=%p", g_clean_libc_fname, g_clean_libc_info.dli_fbase);
+        }
+    }
+    if (!g_clean_libc_inited) {
+        strncpy(g_clean_libc_fname, "/apex/com.android.runtime/lib64/bionic/libc.so", sizeof(g_clean_libc_fname) - 1);
+        g_clean_libc_info.dli_fname = g_clean_libc_fname;
+        g_clean_libc_inited = true;
+    }
+}
+
+Dl_info get_clean_libc_info() {
+    ensure_clean_libc_info();
+    return g_clean_libc_info;
+}
+
 bool is_caller_security_dso(void* return_address) {
     if (!return_address) return false;
     Dl_info info;
@@ -2678,51 +2712,135 @@ ssize_t fake_readlinkat(int dirfd, const char* pathname, char* buf, size_t bufsi
     return sanitize_readlink_buffer(buf, bufsiz, ret, caller_addr);
 }
 
-static int fake_dladdr(const void* addr, Dl_info* info) {
+struct HookedSymbolEntry {
+    const char* sym_name;
+    void* fake_func;
+    void* real_func;
+};
+
+// Forward declarations of hooks implemented later in this file
+int fake_access(const char* pathname, int mode);
+int fake_faccessat(int dirfd, const char* pathname, int mode, int flags);
+int fake_stat(const char* pathname, struct stat* statbuf);
+int fake_lstat(const char* pathname, struct stat* statbuf);
+int fake_fstatat(int dirfd, const char* pathname, struct stat* statbuf, int flags);
+static int fake_dl_iterate_phdr(int (*callback)(struct dl_phdr_info*, size_t, void*), void* data);
+int fake_system_property_get(const char* name, char* value);
+const prop_info* fake_system_property_find(const char* name);
+int fake_system_property_read(const prop_info* pi, char* name, char* value);
+FILE* fake_popen(const char* command, const char* type);
+int fake_pclose(FILE* stream);
+int fake_statfs(const char* path, struct statfs* buf);
+static int fake_kill(pid_t pid, int sig);
+static long fake_ptrace(int request, pid_t pid, void* addr, void* data);
+
+static const HookedSymbolEntry* get_hooked_symbols() {
+    static const HookedSymbolEntry s_entries[] = {
+        {"open", (void*)fake_open, (void*)real_open_ptr},
+        {"open64", (void*)fake_open, (void*)real_open_ptr},
+        {"__open_2", (void*)fake_open_2, (void*)real_open_2_ptr},
+        {"openat", (void*)fake_openat, (void*)real_openat_ptr},
+        {"openat64", (void*)fake_openat, (void*)real_openat_ptr},
+        {"__openat_2", (void*)fake_openat_2, (void*)real_openat_2_ptr},
+        {"fopen", (void*)fake_fopen, (void*)real_fopen_ptr},
+        {"fopen64", (void*)fake_fopen, (void*)real_fopen_ptr},
+        {"fgets", (void*)fake_fgets, (void*)real_fgets_ptr},
+        {"opendir", (void*)fake_opendir, (void*)real_opendir_ptr},
+        {"access", (void*)fake_access, (void*)real_access_ptr},
+        {"faccessat", (void*)fake_faccessat, (void*)real_faccessat_ptr},
+        {"stat", (void*)fake_stat, (void*)real_stat_ptr},
+        {"stat64", (void*)fake_stat, (void*)real_stat_ptr},
+        {"lstat", (void*)fake_lstat, (void*)real_lstat_ptr},
+        {"lstat64", (void*)fake_lstat, (void*)real_lstat_ptr},
+        {"fstatat", (void*)fake_fstatat, (void*)real_fstatat_ptr},
+        {"fstatat64", (void*)fake_fstatat, (void*)real_fstatat_ptr},
+        {"readlink", (void*)fake_readlink, (void*)real_readlink_ptr},
+        {"readlinkat", (void*)fake_readlinkat, (void*)real_readlinkat_ptr},
+        {"dladdr", (void*)fake_dladdr, (void*)real_dladdr_ptr},
+        {"dl_iterate_phdr", (void*)fake_dl_iterate_phdr, (void*)real_dl_iterate_phdr_ptr},
+        {"syscall", (void*)fake_syscall, (void*)real_syscall_ptr},
+        {"ptrace", (void*)fake_ptrace, (void*)real_ptrace_ptr},
+        {"kill", (void*)fake_kill, (void*)real_kill_ptr},
+        {"__system_property_get", (void*)fake_system_property_get, (void*)real_system_property_get_ptr},
+        {"__system_property_find", (void*)fake_system_property_find, (void*)real_system_property_find_ptr},
+        {"popen", (void*)fake_popen, (void*)real_popen_ptr},
+        {"pclose", (void*)fake_pclose, (void*)real_pclose_ptr},
+        {"statfs", (void*)fake_statfs, (void*)real_statfs_ptr},
+        {nullptr, nullptr, nullptr}
+    };
+    return s_entries;
+}
+
+int fake_dladdr(const void* addr, Dl_info* info) {
     SAFE_BYTEHOOK_SCOPE();
     void* caller_addr = get_effective_caller();
+    ensure_clean_libc_info();
+
+    if (!info) return 0;
+
+    // 1. Proximity trampoline range check (libfekit / native inline syscall stubs)
+    if (is_in_trampoline_ranges((uintptr_t)addr)) {
+        LOGD("Hidden dladdr proximity trampoline range addr: %p", addr);
+        info->dli_fname = g_clean_libc_info.dli_fname;
+        info->dli_fbase = g_clean_libc_info.dli_fbase;
+        info->dli_sname = "syscall";
+        info->dli_saddr = real_syscall_ptr ? (void*)real_syscall_ptr : g_clean_libc_info.dli_fbase;
+        return 1;
+    }
+
+    // 2. Direct fake_* function address match (prevent address reflection on hook stubs)
+    const HookedSymbolEntry* entries = get_hooked_symbols();
+    for (size_t i = 0; entries[i].sym_name != nullptr; i++) {
+        uintptr_t fn_start = (uintptr_t)entries[i].fake_func;
+        if (fn_start != 0 && (uintptr_t)addr >= fn_start && (uintptr_t)addr < fn_start + 0x800) {
+            LOGD("Hidden dladdr direct fake function match: %s at %p", entries[i].sym_name, addr);
+            info->dli_fname = g_clean_libc_info.dli_fname;
+            info->dli_fbase = g_clean_libc_info.dli_fbase;
+            info->dli_sname = entries[i].sym_name;
+            info->dli_saddr = entries[i].real_func ? entries[i].real_func : (void*)dlsym(RTLD_DEFAULT, entries[i].sym_name);
+            return 1;
+        }
+    }
+
+    // 3. Call genuine dladdr
     int result = 0;
     if (real_dladdr_ptr) result = real_dladdr_ptr(addr, info);
     else if (g_bytehook_hooks_installed) result = BYTEHOOK_CALL_PREV(fake_dladdr, addr, info);
     else result = dladdr(addr, info);
-    if (result != 0 && info && info->dli_fname) {
+
+    // 4. Normalize hook framework / module DSO references to genuine libc.so
+    if (result != 0 && info->dli_fname) {
+        bool needs_masking = false;
         if (!is_caller_qa(caller_addr)) {
-            const char* hidden[] = {
-                "libnative-bypass", "libbytehook", "xalsace",
+            static const char* const hidden[] = {
+                "libnative-bypass", "libbytehook", "xalsace", "qqbypass",
                 "lsposed", "dexkit", "libdexkit",
                 "lspatch", "liblspatch", "libriru", "libzygisk",
                 "libapatch", "liball-jni", "moe.ono", "libcnm",
-                "substrate", "cydia", "xposed", nullptr
+                "substrate", "cydia", "xposed", "sandhook", "yahfa",
+                "libepic", "libpine", "taichi", nullptr
             };
             for (int i = 0; hidden[i]; i++) {
                 if (strcasestr(info->dli_fname, hidden[i])) {
-                    LOGD("Hidden dladdr library: %s", info->dli_fname);
-                    info->dli_fname = "/system/lib64/libc.so";
-                    info->dli_fbase = nullptr;
-                    info->dli_sname = nullptr;
-                    info->dli_saddr = nullptr;
-                    return result;
+                    needs_masking = true;
+                    break;
+                }
+            }
+            if (!needs_masking) {
+                static const char* const qa_mt_hidden[] = {
+                    "libqauxv", "libqauxv-core0", "libqauxv-core1", "qauxv",
+                    "bin.mt", "npatch", "bytebuddy", "lspilot", nullptr
+                };
+                for (int i = 0; qa_mt_hidden[i]; i++) {
+                    if (strcasestr(info->dli_fname, qa_mt_hidden[i])) {
+                        needs_masking = true;
+                        break;
+                    }
                 }
             }
         }
-        const char* qa_mt_hidden[] = {
-            "libqauxv", "libqauxv-core0", "libqauxv-core1", "qauxv",
-            "bin.mt", "npatch", "bytebuddy", "lspilot", nullptr
-        };
-        for (int i = 0; qa_mt_hidden[i]; i++) {
-            if (strcasestr(info->dli_fname, qa_mt_hidden[i])) {
-                if (!is_caller_qa(caller_addr)) {
-                    LOGD("Hidden dladdr QA/MT library: %s", info->dli_fname);
-                    info->dli_fname = "/system/lib64/libc.so";
-                    info->dli_fbase = nullptr;
-                    info->dli_sname = nullptr;
-                    info->dli_saddr = nullptr;
-                    return result;
-                }
-            }
-        }
-        if (is_caller_security_dso(caller_addr)) {
-            const char* sec_hidden[] = {
+        if (!needs_masking && is_caller_security_dso(caller_addr)) {
+            static const char* const sec_hidden[] = {
                 "libbugly_shadowhook", "libshadowhook", "librmonitor_base",
                 "librmonitor", "libqqPerfNativeTool", "libandroid_desensitization",
                 "librmonitor_memory", "libBugly-rqd", "libBugly_Native", "libBugly",
@@ -2730,16 +2848,50 @@ static int fake_dladdr(const void* addr, Dl_info* info) {
             };
             for (int i = 0; sec_hidden[i]; i++) {
                 if (strcasestr(info->dli_fname, sec_hidden[i])) {
-                    LOGD("Hidden dladdr security library for security DSO caller: %s", info->dli_fname);
-                    info->dli_fname = "/system/lib64/libc.so";
-                    info->dli_fbase = nullptr;
-                    info->dli_sname = nullptr;
-                    info->dli_saddr = nullptr;
-                    return result;
+                    needs_masking = true;
+                    break;
                 }
             }
         }
+
+        if (needs_masking) {
+            LOGD("Hidden dladdr library: %s (caller=%p)", info->dli_fname, caller_addr);
+            info->dli_fname = g_clean_libc_info.dli_fname;
+            info->dli_fbase = g_clean_libc_info.dli_fbase;
+
+            const char* real_sym_name = nullptr;
+            void* real_sym_addr = nullptr;
+
+            if (info->dli_sname) {
+                for (size_t i = 0; entries[i].sym_name != nullptr; i++) {
+                    if (strstr(info->dli_sname, entries[i].sym_name) != nullptr) {
+                        real_sym_name = entries[i].sym_name;
+                        real_sym_addr = entries[i].real_func;
+                        break;
+                    }
+                }
+            }
+            if (real_sym_name) {
+                info->dli_sname = real_sym_name;
+                info->dli_saddr = real_sym_addr ? real_sym_addr : (void*)dlsym(RTLD_DEFAULT, real_sym_name);
+            } else {
+                info->dli_sname = "libc.so";
+                info->dli_saddr = g_clean_libc_info.dli_fbase;
+            }
+            return 1;
+        }
     }
+
+    // 5. Neutralize EMPTY_SO trap: If dladdr returned 0 but caller is a security DSO querying an executable address
+    if (result == 0 && addr != nullptr && is_caller_security_dso(caller_addr)) {
+        LOGD("Hidden dladdr 0-return for security caller: %p (caller=%p)", addr, caller_addr);
+        info->dli_fname = g_clean_libc_info.dli_fname;
+        info->dli_fbase = g_clean_libc_info.dli_fbase;
+        info->dli_sname = "libc.so";
+        info->dli_saddr = g_clean_libc_info.dli_fbase;
+        return 1;
+    }
+
     return result;
 }
 
@@ -4082,6 +4234,7 @@ static bool libc_caller_filter(const char* caller_path_name, void* arg) {
 
 void install_hooks() {
     ensure_real_funcs();
+    ensure_clean_libc_info();
 
     HOOK_PARTIAL_LIBC("fopen", fake_fopen);
     HOOK_PARTIAL_LIBC("fopen64", fake_fopen);

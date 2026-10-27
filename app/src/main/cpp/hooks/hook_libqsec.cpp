@@ -115,72 +115,11 @@ static void* hooked_dlsym(void* handle, const char* symbol) {
 }
 
 /**
- * Hook dladdr - 防止地址反查检测 hook 框架
+ * Hook dladdr - 防止地址反查检测 hook 框架，全量依托 hook_libc::fake_dladdr 合规规范化
  */
 static int hooked_dladdr(const void* addr, Dl_info* info) {
     SAFE_BYTEHOOK_SCOPE();
-    int ret = 0;
-    void* prev = bytehook_get_prev_func((void*)hooked_dladdr);
-    if (prev) {
-        ret = ((int (*)(const void*, Dl_info*))prev)(addr, info);
-    } else {
-        ret = dladdr(addr, info);
-    }
-
-    if (ret != 0 && info && info->dli_fname) {
-        const char* fname = info->dli_fname;
-        // 如果查到的是 hook 框架，伪装成系统库
-        if (strcasestr(fname, "bytehook") ||
-            strcasestr(fname, "native-bypass") ||
-            strcasestr(fname, "xposed") ||
-            strcasestr(fname, "lsposed") ||
-            strcasestr(fname, "liblspd") ||
-            strcasestr(fname, "dexkit") ||
-            strcasestr(fname, "libdexkit") ||
-            strcasestr(fname, "sandhook") ||
-            strcasestr(fname, "yahfa") ||
-            strcasestr(fname, "libepic") ||
-            strcasestr(fname, "libpine") ||
-            strcasestr(fname, "taichi") ||
-            strcasestr(fname, "qqbypass") ||
-            strcasestr(fname, "xalsace") ||
-            strcasestr(fname, "qauxv") ||
-            strcasestr(fname, "io.github.qauxv") ||
-            strcasestr(fname, "libqauxv") ||
-            strcasestr(fname, "libqauxv-core") ||
-            strcasestr(fname, "bin.mt") ||
-            strcasestr(fname, "npatch") ||
-            strcasestr(fname, "bytebuddy") ||
-            strcasestr(fname, "cc.ioctl") ||
-            strcasestr(fname, "qnotified") ||
-            strcasestr(fname, "moe.ono") ||
-            strcasestr(fname, "ono_") ||
-            strcasestr(fname, "lzlnb") ||
-            strcasestr(fname, "cnm0") ||
-            strcasestr(fname, "libcnm") ||
-            strcasestr(fname, "liball-jni") ||
-            strcasestr(fname, "riru") ||
-            strcasestr(fname, "libriru") ||
-            strcasestr(fname, "zygisk") ||
-            strcasestr(fname, "libzygisk") ||
-            strcasestr(fname, "libapatch") ||
-            strcasestr(fname, "me.bmax.apatch") ||
-            strstr(fname, "/apatch/") ||
-            strstr(fname, "apatchd") ||
-            strcasestr(fname, "kernelsu") ||
-            strcasestr(fname, "ksud") ||
-            strstr(fname, "/ksu/") ||
-            strcasestr(fname, "magisk") ||
-            strcasestr(fname, "shamiko") ||
-            strcasestr(fname, "lspatch") ||
-            strcasestr(fname, "liblspatch")) {
-            LOGI("QSec dladdr masked: %s", info->dli_fname);
-            memset(info, 0, sizeof(*info));
-            return 0;
-        }
-    }
-
-    return ret;
+    return hook_libc::fake_dladdr(addr, info);
 }
 
 extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long a4, long a5, long syscall_num, void* caller_pc);

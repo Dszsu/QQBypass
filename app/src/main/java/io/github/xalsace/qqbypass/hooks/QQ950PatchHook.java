@@ -3526,6 +3526,8 @@ public class QQ950PatchHook {
                         XposedHelpers.callMethod(resField, "set", 1); // 1 = PASS
                         XposedEntry.log("[IntChkPB] Forced uint32_memchk_result -> 1 (PASS)");
                     }
+                } else if (type == 2) { // memreport
+                    XposedEntry.log("[IntChkPB] type == 2 memreport verified clean");
                 }
             }
         } catch (Throwable ignored) {}
@@ -3708,6 +3710,24 @@ public class QQ950PatchHook {
                     if (Boolean.FALSE.equals(p.getResult())) {
                         p.setResult(true);
                         XposedEntry.log("[MQPSecUtil] memchk -> normalized false to true (PASS)");
+                    }
+                }
+            });
+            HookUtils.hookAllMethods(mqpSecUtilCls, "memreport", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                    if (p.args != null && p.args.length >= 3 && p.args[0] instanceof String && p.args[1] instanceof Number && p.args[2] instanceof Number) {
+                        String moduleName = (String) p.args[0];
+                        int start = ((Number) p.args[1]).intValue();
+                        int end = ((Number) p.args[2]).intValue();
+                        if (end > start && end - start <= 1048576) {
+                            byte[] cleanBytes = readCleanModuleBytes(moduleName, start, end, lpparam);
+                            if (cleanBytes != null) {
+                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordSecurityStrike("MQPSecUtil.memreport", "Sanitized memory read for " + moduleName + " [" + start + ":" + end + "]");
+                                p.setResult(cleanBytes);
+                                XposedEntry.log("[MQPPatch] Sanitized MQPSecUtil.memreport for " + moduleName + " [" + start + ":" + end + "] from disk ELF");
+                            }
+                        }
                     }
                 }
             });
