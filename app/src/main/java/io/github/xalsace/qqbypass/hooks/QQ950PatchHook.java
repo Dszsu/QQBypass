@@ -891,14 +891,14 @@ public class QQ950PatchHook {
                 XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Kiwifruit (Key 270/253) for clean environment baseline");
             }
 
-            // Caelum: Key 205 (container / dual app detection -> "0")
+            // Caelum: Key 205 (container / dual app detection -> "")
             Class<?> caelumCls = XposedHelpers.findClassIfExists(pkg + ".Caelum", cl);
             if (caelumCls != null && sHookedTuringClasses.add(caelumCls)) {
                 HookUtils.hookAllMethodsIfExists(caelumCls, "a", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
-                            param.setResult("0");
+                            param.setResult("");
                         } else if (param.args == null || param.args.length == 0) {
                             param.setResult(false);
                         }
@@ -919,7 +919,7 @@ public class QQ950PatchHook {
                 XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Bennet (Key 250/269) for clean DSO baseline");
             }
 
-            // Berry: Key 272 (TCP scan -> "")
+            // Berry: Key 272 (TCP scan -> "") & Key 256/268 (process scan -> empty list)
             Class<?> berryCls = XposedHelpers.findClassIfExists(pkg + ".Berry", cl);
             if (berryCls != null && sHookedTuringClasses.add(berryCls)) {
                 HookUtils.hookAllMethodsIfExists(berryCls, "b", new XC_MethodHook() {
@@ -930,10 +930,18 @@ public class QQ950PatchHook {
                         }
                     }
                 });
-                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Berry (Key 272) for clean TCP baseline");
+                HookUtils.hookAllMethodsIfExists(berryCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args == null || param.args.length == 0) {
+                            param.setResult(new java.util.ArrayList<>());
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Berry (Key 272/proc) for clean TCP & process baseline");
             }
 
-            // l3: Key 251 & 288 (root baseline -> 0)
+            // l3: Key 251 & 288 (root baseline -> 0) & call stack check (a -> false)
             Class<?> l3Cls = XposedHelpers.findClassIfExists(pkg + ".l3", cl);
             if (l3Cls != null && sHookedTuringClasses.add(l3Cls)) {
                 HookUtils.hookAllMethodsIfExists(l3Cls, "b", new XC_MethodHook() {
@@ -944,7 +952,29 @@ public class QQ950PatchHook {
                         }
                     }
                 });
-                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".l3 (Key 251/288) for clean root baseline");
+                HookUtils.hookAllMethodsIfExists(l3Cls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
+                            param.setResult(false);
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".l3 (Key 251/288) for clean root & stack baseline");
+            }
+
+            // Cswitch: Key 280 (shell diagnostic execution -> "")
+            Class<?> cswitchCls = XposedHelpers.findClassIfExists(pkg + ".Cswitch", cl);
+            if (cswitchCls != null && sHookedTuringClasses.add(cswitchCls)) {
+                HookUtils.hookAllMethodsIfExists(cswitchCls, "a", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args == null || param.args.length == 0) {
+                            param.setResult("");
+                        }
+                    }
+                });
+                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Cswitch (Key 280) for clean diagnostic execution baseline");
             }
         }
     }
@@ -1346,7 +1376,81 @@ public class QQ950PatchHook {
                 }
             });
 
+            HookUtils.hookAllMethods(tfdClass, "activeSign", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length == 0 || param.args[0] == null || ((String) param.args[0]).isEmpty()) {
+                        param.setResult(0L);
+                        XposedEntry.log("[FacePatch] Normalized empty TuringFaceDefender.activeSign -> 0L (no active challenge)");
+                    }
+                }
+            });
+
             HookUtils.hookAllMethods(tfdClass, "signData", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    try {
+                        Class<?> eh5maCls = XposedHelpers.findClassIfExists("com.tencent.turingcam.eh5ma", cl);
+                        if (eh5maCls != null) {
+                            Object currA = XposedHelpers.getStaticObjectField(eh5maCls, "a");
+                            if (currA == null) {
+                                android.content.Context appCtx = (android.content.Context) XposedHelpers.callStaticMethod(
+                                    XposedHelpers.findClass("android.app.ActivityThread", null), "currentApplication");
+                                if (appCtx != null) {
+                                    XposedHelpers.setStaticObjectField(eh5maCls, "a", appCtx.getApplicationContext());
+                                    XposedEntry.log("[FacePatch] Injected Application context into eh5ma.a before signData");
+                                }
+                            }
+                        }
+                        Class<?> tLlmSCls = XposedHelpers.findClassIfExists("com.tencent.turingcam.tLlmS", cl);
+                        if (tLlmSCls != null) {
+                            java.util.concurrent.atomic.AtomicReference<?> ref =
+                                (java.util.concurrent.atomic.AtomicReference<?>) XposedHelpers.getStaticObjectField(tLlmSCls, "d");
+                            if (ref != null && ref.get() == null) {
+                                Class<?> xStYHCls = XposedHelpers.findClassIfExists("com.tencent.turingcam.XStYH", cl);
+                                Object fallbackBfUKf = null;
+                                if (xStYHCls != null) {
+                                    try {
+                                        fallbackBfUKf = XposedHelpers.callStaticMethod(xStYHCls, "a");
+                                    } catch (Throwable ignored) {}
+                                }
+                                if (fallbackBfUKf != null) {
+                                    ((java.util.concurrent.atomic.AtomicReference<Object>) ref).set(fallbackBfUKf);
+                                    XposedEntry.log("[FacePatch] Pre-populated tLlmS.d from XStYH.a() before signData");
+                                } else {
+                                    try {
+                                        String tokens = (String) XposedHelpers.callStaticMethod(tLlmSCls, "b");
+                                        if (tokens != null && !tokens.isEmpty()) {
+                                            String[] entries = tokens.split(",");
+                                            for (int i = entries.length - 1; i >= 0; i--) {
+                                                String entry = entries[i].trim();
+                                                int colon = entry.indexOf(':');
+                                                if (colon > 0 && colon < entry.length() - 1) {
+                                                    long ts = Long.parseLong(entry.substring(0, colon));
+                                                    String tok = entry.substring(colon + 1);
+                                                    if (!tok.isEmpty()) {
+                                                        Class<?> bfUKfCls = XposedHelpers.findClassIfExists("com.tencent.turingcam.BfUKf", cl);
+                                                        if (bfUKfCls != null) {
+                                                            Object bf = XposedHelpers.newInstance(bfUKfCls, tok, ts, tok);
+                                                            ((java.util.concurrent.atomic.AtomicReference<Object>) ref).set(bf);
+                                                            XposedEntry.log("[FacePatch] Pre-populated tLlmS.d from tLlmS.b() token before signData");
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } catch (Throwable t) {
+                                        XposedEntry.log("[FacePatch] Error reading tLlmS.b(): " + t.getMessage());
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Throwable t) {
+                        XposedEntry.log("[FacePatch] Error ensuring state before signData: " + t.getMessage());
+                    }
+                }
+
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     Object res = param.getResult();
@@ -1432,12 +1536,12 @@ public class QQ950PatchHook {
         final String stvdhCls = "com.tencent.turingcam.Stvdh";
         Class<?> stvdhClass = XposedHelpers.findClassIfExists(stvdhCls, cl);
         if (stvdhClass != null && sHookedFaceClasses.add(stvdhClass)) {
-            // Key 205: container / dual app check -> clean "0"
+            // Key 205: container / dual app check -> clean ""
             HookUtils.hookAllMethodsIfExists(stvdhClass, "a", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
-                        param.setResult("0");
+                        param.setResult("");
                     } else if (param.args == null || param.args.length == 0) {
                         param.setResult(false);
                     }
@@ -1453,7 +1557,11 @@ public class QQ950PatchHook {
             HookUtils.hookAllMethodsIfExists(kwqwrClass, "a", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult(0);
+                    if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
+                        param.setResult(0);
+                    } else if (param.args != null && param.args.length == 2) {
+                        param.setResult(false);
+                    }
                 }
             });
             XposedEntry.log("[FacePatch] Hooked TuringCam KwqWR (Key 251/288) for clean root baseline");
@@ -1484,7 +1592,31 @@ public class QQ950PatchHook {
                     }
                 }
             });
-            XposedEntry.log("[FacePatch] Hooked TuringCam pZZwF (Key 272) for clean TCP baseline");
+            // Key 256/268: suspicious process list -> empty list
+            HookUtils.hookAllMethodsIfExists(pzzwfClass, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length == 0) {
+                        param.setResult(new java.util.ArrayList<>());
+                    }
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked TuringCam pZZwF (Key 272/proc) for clean TCP & process baseline");
+        }
+
+        final String ukkacCls = "com.tencent.turingcam.ukkac";
+        Class<?> ukkacClass = XposedHelpers.findClassIfExists(ukkacCls, cl);
+        if (ukkacClass != null && sHookedFaceClasses.add(ukkacClass)) {
+            // Key 280: shell command inspection -> clean ""
+            HookUtils.hookAllMethodsIfExists(ukkacClass, "a", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args == null || param.args.length == 0) {
+                        param.setResult("");
+                    }
+                }
+            });
+            XposedEntry.log("[FacePatch] Hooked TuringCam ukkac (Key 280) for clean shell baseline");
         }
 
         // 2. TuringSdkImp: b(Context) hardware init & argument null-safety
@@ -5276,11 +5408,11 @@ public class QQ950PatchHook {
                                                     }
                                                 }
 
-                                                // Key 205: Caelum container / dual app detection (clean baseline: "0")
+                                                // Key 205: Caelum container / dual app detection (clean baseline: "")
                                                 if (hasRiskKey(map, 205)) {
                                                     Object v = getRiskValue(map, 205);
-                                                    if (v != null && !"0".equals(v.toString())) {
-                                                        putRiskValue(map, 205, "0");
+                                                    if (v != null && !v.toString().isEmpty()) {
+                                                        putRiskValue(map, 205, "");
                                                         sanitized = true;
                                                         sanitizedDetails.add("205(ContainerDualApp)");
                                                     }
