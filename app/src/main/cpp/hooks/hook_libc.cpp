@@ -191,7 +191,7 @@ bool is_caller_security_dso(void* return_address) {
     Dl_info info;
     if (dladdr(return_address, &info) && info.dli_fname) {
         const char* f = info.dli_fname;
-        if (strcasestr(f, "libmsf") || strcasestr(f, "libMSFKernel")) {
+        if (strcasestr(f, "libmsf") || strcasestr(f, "libMSFKernel") || strcasestr(f, "libkernel")) {
             return false;
         }
         if (strcasestr(f, "libfekit") || strcasestr(f, "libturing") ||
@@ -4129,9 +4129,10 @@ static bool libc_caller_filter(const char* caller_path_name, void* arg) {
         return false;
     }
 
-    // 3.1 NEVER hook QQ Mobile Service Framework (MSF) or network core
+    // 3.1 NEVER hook QQ Mobile Service Framework (MSF) or NT Kernel network/protocol core
     if (strstr(caller_path_name, "libMSFKernel") ||
-        strstr(caller_path_name, "libmsf")) {
+        strstr(caller_path_name, "libmsf") ||
+        strstr(caller_path_name, "libkernel")) {
         return false;
     }
 
@@ -4139,7 +4140,8 @@ static bool libc_caller_filter(const char* caller_path_name, void* arg) {
     // (a) Located inside QQ's app package or data directories
     if (strstr(caller_path_name, "com.tencent.mobileqq")) {
         if (strstr(caller_path_name, "libMSFKernel") ||
-            strstr(caller_path_name, "libmsf")) {
+            strstr(caller_path_name, "libmsf") ||
+            strstr(caller_path_name, "libkernel")) {
             return false;
         }
         return true;

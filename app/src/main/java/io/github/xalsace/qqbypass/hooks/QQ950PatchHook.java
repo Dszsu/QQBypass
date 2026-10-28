@@ -6207,136 +6207,37 @@ public class QQ950PatchHook {
         java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
     /**
-     * Tier 21: NT Login Ticket & WTLogin Session Expiration Defense
+     * Tier 21: NT Login Ticket Renewal Passive Audit (Non-intrusive)
      *
-     * Protects active user sessions against:
-     * 1. NTLoginTicketManager (com.tencent.mobileqq.login.ntlogin.ao):
-     *    - Neutralizes client-side self-kick (method f: kickAccount) when ticket refresh encounters
-     *      transient network/server errors (140022014, 140022015, 140022016, refreshMethodNeedKick).
-     *    - Suppresses spurious onKicked MSF notification (method a).
-     * 2. WTLogin Sig Expiration Guards (oicq.wlogin_sdk.sharemem.WloginSigInfo):
-     *    - iSExpireA2(long) -> returns false (A2 session ticket remains valid).
-     *    - isWtSessionTicketExpired() -> returns false.
-     *    - SetSigInfo -> extends _D2_expire_time (now + 30 days) to prevent 1-hour (3600s) D2 expiration kicks.
-     * 3. WtloginHelper (oicq.wlogin_sdk.request.WtloginHelper):
-     *    - IsNeedLoginWithPasswd(String, long) -> returns Boolean.FALSE for active accounts so MSF changeTokenAfterLogin
-     *      never flags the account with CODE_NO_LOGIN or wipes authentication keys.
-     * 4. MSF Interface Adapter (com.tencent.qphone.base.util.MSFInterfaceAdapter):
-     *    - isSwitchOn("101462", ...) -> returns true to enable MSF proactive D2 token renewal before 7-day timeout.
-     * 5. WTLogin Kick Gate (oicq.wlogin_sdk.tools.util):
-     *    - shouldKick(int) -> returns false for token refresh retries.
+     * In accordance with Iron Rule 1 (Strict Invariants) and User Directives:
+     * - Allows natural ticket renewal pipeline (NTLoginTicketManager -> IKernelLoginService.refreshLoginTicketsByUin -> TRPC SsoNTLoginRefreshTicket).
+     * - ZERO mutation of ticket expiration timestamps or validity flags (prevents zombie sessions).
+     * - ZERO swallowing or modification of kick/logout events.
+     * - Passive read-only audit logging for ticket refresh events.
      */
     public static void hookNTLoginAndSessionDefense(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
         if (cl == null) cl = HookConfig.getClassLoader();
         if (cl == null) return;
 
         try {
-            // 1. NTLoginTicketManager (com.tencent.mobileqq.login.ntlogin.ao)
+            // Passive read-only audit on NTLoginTicketManager (com.tencent.mobileqq.login.ntlogin.ao)
             final String aoName = "com.tencent.mobileqq.login.ntlogin.ao";
             Class<?> aoCls = XposedHelpers.findClassIfExists(aoName, cl);
             if (aoCls != null && sHookedNTLoginClasses.add(aoCls)) {
-                // Neutralize client-side self-kick
-                HookUtils.hookAllMethods(aoCls, "f", new XC_MethodHook() {
+                HookUtils.hookAllMethods(aoCls, "b", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        int code = param.args != null && param.args.length > 0 && param.args[0] instanceof Number ?
-                            ((Number) param.args[0]).intValue() : 0;
-                        String msg = param.args != null && param.args.length > 1 && param.args[1] instanceof String ?
-                            (String) param.args[1] : "";
-                        XposedEntry.log("[NTLoginPatch] Neutralized client-side self-kick: ret=" + code + ", msg=" + msg);
-                        param.setResult(null);
+                        int code = param.args != null && param.args.length > 3 && param.args[3] instanceof Number ?
+                            ((Number) param.args[3]).intValue() : -1;
+                        String msg = param.args != null && param.args.length > 4 && param.args[4] instanceof String ?
+                            (String) param.args[4] : "";
+                        XposedEntry.log("[NTLoginAudit] Natural ticket renewal callback: code=" + code + ", msg=" + msg);
                     }
                 });
-
-                // Suppress onKicked MSF notification dispatch
-                HookUtils.hookAllMethods(aoCls, "a", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        XposedEntry.log("[NTLoginPatch] Suppressed spurious ao.a() onKicked MSF notification");
-                        param.setResult(null);
-                    }
-                });
-                XposedEntry.log("[NTLoginPatch] Hooked NTLoginTicketManager: " + aoName);
-            }
-
-            // 2. WTLogin Sig Info (oicq.wlogin_sdk.sharemem.WloginSigInfo)
-            final String sigInfoName = "oicq.wlogin_sdk.sharemem.WloginSigInfo";
-            Class<?> sigInfoCls = XposedHelpers.findClassIfExists(sigInfoName, cl);
-            if (sigInfoCls != null && sHookedNTLoginClasses.add(sigInfoCls)) {
-                HookUtils.hookAllMethods(sigInfoCls, "iSExpireA2", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(false);
-                    }
-                });
-                HookUtils.hookAllMethods(sigInfoCls, "isWtSessionTicketExpired", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(false);
-                    }
-                });
-                HookUtils.hookAllMethods(sigInfoCls, "SetSigInfo", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        try {
-                            long nowSec = System.currentTimeMillis() / 1000L;
-                            long d2Exp = XposedHelpers.getLongField(param.thisObject, "_D2_expire_time");
-                            if (d2Exp > 0 && d2Exp < nowSec + 86400L * 7) {
-                                XposedHelpers.setLongField(param.thisObject, "_D2_expire_time", nowSec + 86400L * 30);
-                            }
-                        } catch (Throwable ignored) {}
-                    }
-                });
-                XposedEntry.log("[NTLoginPatch] Hooked WloginSigInfo ticket expiration guards");
-            }
-
-            // 3. WtloginHelper (oicq.wlogin_sdk.request.WtloginHelper)
-            final String wtHelperName = "oicq.wlogin_sdk.request.WtloginHelper";
-            Class<?> wtHelperCls = XposedHelpers.findClassIfExists(wtHelperName, cl);
-            if (wtHelperCls != null && sHookedNTLoginClasses.add(wtHelperCls)) {
-                HookUtils.hookAllMethods(wtHelperCls, "IsNeedLoginWithPasswd", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
-                            String uin = (String) param.args[0];
-                            if (uin != null && !uin.isEmpty() && !"0".equals(uin)) {
-                                param.setResult(Boolean.FALSE);
-                            }
-                        }
-                    }
-                });
-                XposedEntry.log("[NTLoginPatch] Hooked WtloginHelper.IsNeedLoginWithPasswd");
-            }
-
-            // 4. MSFInterfaceAdapter switch "101462" (proactive D2 refresh)
-            final String msfAdapterName = "com.tencent.qphone.base.util.MSFInterfaceAdapter";
-            Class<?> msfAdapterCls = XposedHelpers.findClassIfExists(msfAdapterName, cl);
-            if (msfAdapterCls != null && sHookedNTLoginClasses.add(msfAdapterCls)) {
-                HookUtils.hookAllMethods(msfAdapterCls, "isSwitchOn", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length > 0 && "101462".equals(param.args[0])) {
-                            param.setResult(true);
-                        }
-                    }
-                });
-                XposedEntry.log("[NTLoginPatch] Hooked MSFInterfaceAdapter.isSwitchOn(101462) -> true");
-            }
-
-            // 5. WTLogin util.shouldKick (oicq.wlogin_sdk.tools.util)
-            final String wtUtilName = "oicq.wlogin_sdk.tools.util";
-            Class<?> wtUtilCls = XposedHelpers.findClassIfExists(wtUtilName, cl);
-            if (wtUtilCls != null && sHookedNTLoginClasses.add(wtUtilCls)) {
-                HookUtils.hookAllMethods(wtUtilCls, "shouldKick", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(false);
-                    }
-                });
-                XposedEntry.log("[NTLoginPatch] Hooked util.shouldKick -> false");
+                XposedEntry.log("[NTLoginPatch] Installed passive ticket renewal audit on " + aoName);
             }
         } catch (Throwable t) {
-            XposedEntry.logError("[NTLoginPatch] Error installing NT login defenses: " + t.getMessage(), t);
+            XposedEntry.logError("[NTLoginPatch] Error installing NT login audit: " + t.getMessage(), t);
         }
     }
 

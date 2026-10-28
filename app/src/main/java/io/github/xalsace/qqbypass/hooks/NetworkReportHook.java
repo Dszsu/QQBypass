@@ -92,7 +92,7 @@ public class NetworkReportHook {
                command.startsWith("PttCenter.") ||
                command.startsWith("ShortVideo.") ||
                command.startsWith("OfflineFvr.") ||
-               command.startsWith("trpc.login.ecdh.access") ||
+               command.startsWith("trpc.login.") ||
                command.startsWith("trpc.group_mall.") ||
                command.startsWith("OidbSvcTrpcTcp.") ||
                (command.startsWith("StatSvc.") && !command.contains("Offline")) ||
@@ -964,11 +964,7 @@ public class NetworkReportHook {
                         try {
                             XposedHelpers.setStaticObjectField(wCls, "J", OFFICIAL_TENCENT_PKG_SIG_MD5.clone());
                             XposedHelpers.setStaticIntField(wCls, "Y", 0);
-                            XposedHelpers.setStaticIntField(wCls, "W", 0);
-                            XposedHelpers.setStaticIntField(wCls, "U", 0);
-                            int v = XposedHelpers.getStaticIntField(wCls, "V");
-                            XposedHelpers.setStaticIntField(wCls, "X", (v << 24));
-                            XposedEntry.log("[Wlogin] Intercepted Wlogin device fingerprint on " + wCls.getName() + " -> clean sig, w.Y=0, w.W=0, w.U=0, w.X=" + Integer.toHexString(v << 24));
+                            XposedEntry.log("[Wlogin] Intercepted Wlogin device fingerprint on " + wCls.getName() + " -> clean sig, w.Y=0");
                         } catch (Throwable ignored) {}
                     }
                 });
