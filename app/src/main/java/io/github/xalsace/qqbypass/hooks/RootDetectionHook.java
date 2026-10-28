@@ -51,25 +51,8 @@ public class RootDetectionHook {
     }
 
     private static void hookWloginRoot() {
-        // 1. Hook w.h() -> force reset static int w.Y = 0
-        HookUtils.hookAllMethods("oicq.wlogin_sdk.request.w", "h",
-            new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    try {
-                        Class<?> clazz = param.method != null ? param.method.getDeclaringClass() :
-                            (param.thisObject != null ? param.thisObject.getClass() : null);
-                        if (clazz != null) {
-                            Field fieldY = clazz.getDeclaredField("Y");
-                            fieldY.setAccessible(true);
-                            fieldY.setInt(null, 0);
-                            XposedEntry.log("[WloginRoot] Reset w.Y = 0");
-                        }
-                    } catch (Throwable ignored) {}
-                }
-            });
-
-        // 2. Hook util.isFileExist(String) -> false for su/root binaries & Bugly backdoors
+        // Zero intervention on w.h() to prevent session and signature desynchronization.
+        // Hook util.isFileExist(String) -> false for su/root binaries & Bugly backdoors
         HookUtils.hookMethod("oicq.wlogin_sdk.tools.util", "isFileExist", String.class,
             new XC_MethodHook() {
                 @Override
