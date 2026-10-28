@@ -51,7 +51,7 @@ public class RootDetectionHook {
     }
 
     private static void hookWloginRoot() {
-        // 1. Hook w.h() -> force reset static int w.Y = 0
+        // 1. Hook w.h() -> force reset static int w.Y = 0, w.W = 0, w.U = 0, w.S = 0, w.T = 1, w.V = 1, w.X = (1 << 24)
         HookUtils.hookAllMethods("oicq.wlogin_sdk.request.w", "h",
             new XC_MethodHook() {
                 @Override
@@ -60,10 +60,42 @@ public class RootDetectionHook {
                         Class<?> clazz = param.method != null ? param.method.getDeclaringClass() :
                             (param.thisObject != null ? param.thisObject.getClass() : null);
                         if (clazz != null) {
-                            Field fieldY = clazz.getDeclaredField("Y");
-                            fieldY.setAccessible(true);
-                            fieldY.setInt(null, 0);
-                            XposedEntry.log("[WloginRoot] Reset w.Y = 0");
+                            try {
+                                Field fieldY = clazz.getDeclaredField("Y");
+                                fieldY.setAccessible(true);
+                                fieldY.setInt(null, 0);
+                            } catch (Throwable ignored) {}
+                            try {
+                                Field fieldW = clazz.getDeclaredField("W");
+                                fieldW.setAccessible(true);
+                                fieldW.setInt(null, 0);
+                            } catch (Throwable ignored) {}
+                            try {
+                                Field fieldU = clazz.getDeclaredField("U");
+                                fieldU.setAccessible(true);
+                                fieldU.setInt(null, 0);
+                            } catch (Throwable ignored) {}
+                            try {
+                                Field fieldS = clazz.getDeclaredField("S");
+                                fieldS.setAccessible(true);
+                                fieldS.setInt(null, 0);
+                            } catch (Throwable ignored) {}
+                            try {
+                                Field fieldT = clazz.getDeclaredField("T");
+                                fieldT.setAccessible(true);
+                                fieldT.setInt(null, 1);
+                            } catch (Throwable ignored) {}
+                            try {
+                                Field fieldV = clazz.getDeclaredField("V");
+                                fieldV.setAccessible(true);
+                                fieldV.setInt(null, 1);
+                            } catch (Throwable ignored) {}
+                            try {
+                                Field fieldX = clazz.getDeclaredField("X");
+                                fieldX.setAccessible(true);
+                                fieldX.setInt(null, (1 << 24));
+                            } catch (Throwable ignored) {}
+                            XposedEntry.log("[WloginRoot] Reset w.Y=0, w.W=0, w.U=0, w.X=0x01000000");
                         }
                     } catch (Throwable ignored) {}
                 }

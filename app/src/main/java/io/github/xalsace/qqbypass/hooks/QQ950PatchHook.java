@@ -3808,6 +3808,22 @@ public class QQ950PatchHook {
         });
     }
 
+    public static boolean isQSecSuspiciousProbe(String cls) {
+        if (cls == null) return false;
+        String lower = cls.toLowerCase();
+        return DynamicXposedDetectionHook.isSuspiciousClass(cls)
+            || DynamicRootDetectionHook.isSuspiciousPackage(cls)
+            || lower.contains("xposed") || lower.contains("lsposed") || lower.contains("lspatch")
+            || lower.contains("canyie") || lower.contains("sandhook") || lower.contains("libepic")
+            || lower.contains("epic.") || lower.contains("libpine") || lower.contains("pine.")
+            || lower.contains("yahfa") || lower.contains("qqbypass") || lower.contains("native-bypass")
+            || lower.contains("bytehook") || lower.contains("frida") || lower.contains("substrate")
+            || lower.contains("magisk") || lower.contains("zygisk") || lower.contains("apatch")
+            || lower.contains("kernelsu") || lower.contains("termux") || lower.contains("supersu")
+            || lower.contains("superuser") || lower.contains("busybox") || lower.contains("root")
+            || lower.contains("dexkit");
+    }
+
     /**
      * Hook QSec detectMethod to prevent reflection-based framework detection,
      * and hook QSec.getFeKitAttach to ensure safe attach token fallback.
@@ -3820,13 +3836,26 @@ public class QQ950PatchHook {
                 if (p.args != null && p.args.length >= 2) {
                     String cls = (String) p.args[0];
                     String mtd = (String) p.args[1];
-                    if (cls != null && (cls.contains("xposed") || cls.contains("lsposed") ||
-                                       cls.contains("canyie") || cls.contains("sandhook") ||
-                                       cls.contains("libepic") || cls.contains("epic.") || cls.contains("libpine") || cls.contains("pine.") ||
-                                       cls.contains("yahfa") || cls.contains("qqbypass") ||
-                                       cls.contains("native-bypass") || cls.contains("bytehook"))) {
+                    if (isQSecSuspiciousProbe(cls)) {
                         p.setResult(false);
                         XposedEntry.log("[QSecPatch] Blocked detectMethod: " + cls + "->" + mtd);
+                    }
+                }
+            }
+        });
+
+        hookSafe(qsecCls, "reportLog", lpparam, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
+                if (p.args != null && p.args.length >= 3) {
+                    String eventType = (String) p.args[0];
+                    if ("chk_point".equals(eventType)) {
+                        String pointName = (String) p.args[1];
+                        String pointCode = (String) p.args[2];
+                        if (pointCode != null && !pointCode.equals("0")) {
+                            XposedEntry.log("[QSecPatch] Sanitized chk_point report: " + pointName + " [" + pointCode + " -> 0]");
+                            p.args[2] = "0";
+                        }
                     }
                 }
             }
