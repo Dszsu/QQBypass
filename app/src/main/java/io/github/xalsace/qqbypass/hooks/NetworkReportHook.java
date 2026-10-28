@@ -93,6 +93,8 @@ public class NetworkReportHook {
                command.startsWith("ShortVideo.") ||
                command.startsWith("OfflineFvr.") ||
                command.startsWith("trpc.login.") ||
+               command.startsWith("login.") ||
+               command.startsWith("wtlogin.") ||
                command.startsWith("trpc.group_mall.") ||
                command.startsWith("OidbSvcTrpcTcp.") ||
                (command.startsWith("StatSvc.") && !command.contains("Offline")) ||

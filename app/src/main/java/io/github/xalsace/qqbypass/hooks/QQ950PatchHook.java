@@ -6206,23 +6206,35 @@ public class QQ950PatchHook {
     private static final java.util.Set<Class<?>> sHookedNTLoginClasses =
         java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
+    private static volatile long sLastTicketRefreshTime = System.currentTimeMillis();
+    private static volatile long sLastAttemptTime = 0L;
+    private static final long TICKET_REFRESH_MIN_INTERVAL_MS = 20 * 60 * 1000L; // 20 minutes
+    private static final long TICKET_FORCE_REFRESH_INTERVAL_MS = 45 * 60 * 1000L; // 45 minutes
+
+    private static final java.util.concurrent.atomic.AtomicBoolean sTimerStarted =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+
     /**
-     * Tier 21: NT Login Ticket Renewal Passive Audit (Non-intrusive)
+     * Tier 21: Proactive Natural NT Login Ticket Renewal & Lifecycle Guard
      *
      * In accordance with Iron Rule 1 (Strict Invariants) and User Directives:
-     * - Allows natural ticket renewal pipeline (NTLoginTicketManager -> IKernelLoginService.refreshLoginTicketsByUin -> TRPC SsoNTLoginRefreshTicket).
-     * - ZERO mutation of ticket expiration timestamps or validity flags (prevents zombie sessions).
-     * - ZERO swallowing or modification of kick/logout events.
-     * - Passive read-only audit logging for ticket refresh events.
+     * 1. Preserves official natural ticket renewal pipeline (NTLoginTicketManager -> IKernelLoginService.refreshLoginTicketsByUin -> TRPC SsoNTLoginRefreshTicket).
+     * 2. Zero tampering with ticket expiration timestamps, flags, or return values.
+     * 3. Zero swallowing of legitimate server session kicks.
+     * 4. Fills in the missing background renewal mechanism:
+     *    - Base APK leaves onBackgroundTimeTick as an empty stub (intended for hotfix).
+     *    - When unattended in background for >2 hours, the server's session TTL expires, causing -10003 (w21).
+     *    - Hooks GuardManager background ticks and runs a proactive daemon in com.tencent.mobileqq to dispatch
+     *      ao.a.g(forceRefresh) before tickets ever expire (every 20-45 minutes), keeping D2 perpetually fresh naturally.
      */
     public static void hookNTLoginAndSessionDefense(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
-        if (cl == null) cl = HookConfig.getClassLoader();
-        if (cl == null) return;
+        final ClassLoader targetCl = (cl != null) ? cl : HookConfig.getClassLoader();
+        if (targetCl == null) return;
 
         try {
-            // Passive read-only audit on NTLoginTicketManager (com.tencent.mobileqq.login.ntlogin.ao)
+            // 1. Audit & Synchronization on NTLoginTicketManager (com.tencent.mobileqq.login.ntlogin.ao)
             final String aoName = "com.tencent.mobileqq.login.ntlogin.ao";
-            Class<?> aoCls = XposedHelpers.findClassIfExists(aoName, cl);
+            Class<?> aoCls = XposedHelpers.findClassIfExists(aoName, targetCl);
             if (aoCls != null && sHookedNTLoginClasses.add(aoCls)) {
                 HookUtils.hookAllMethods(aoCls, "b", new XC_MethodHook() {
                     @Override
@@ -6232,12 +6244,84 @@ public class QQ950PatchHook {
                         String msg = param.args != null && param.args.length > 4 && param.args[4] instanceof String ?
                             (String) param.args[4] : "";
                         XposedEntry.log("[NTLoginAudit] Natural ticket renewal callback: code=" + code + ", msg=" + msg);
+                        if (code == 0) {
+                            sLastTicketRefreshTime = System.currentTimeMillis();
+                            XposedEntry.log("[NTLoginAudit] Ticket successfully refreshed and synchronized at " + sLastTicketRefreshTime);
+                        }
                     }
                 });
                 XposedEntry.log("[NTLoginPatch] Installed passive ticket renewal audit on " + aoName);
+
+                // Start proactive background refresh daemon in main process
+                ensurePeriodicTicketRefreshTimer(targetCl);
+            }
+
+            // 2. Hook GuardManager background ticks on com.tencent.mobileqq.login.ntlogin.ao$a
+            final String guardCbName = "com.tencent.mobileqq.login.ntlogin.ao$a";
+            Class<?> guardCbCls = XposedHelpers.findClassIfExists(guardCbName, targetCl);
+            if (guardCbCls != null && sHookedNTLoginClasses.add(guardCbCls)) {
+                XC_MethodHook tickHook = new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        triggerProactiveTicketRefresh(targetCl, "GuardManager." + param.method.getName());
+                    }
+                };
+                HookUtils.hookAllMethods(guardCbCls, "onBackgroundTimeTick", tickHook);
+                HookUtils.hookAllMethods(guardCbCls, "onBackgroundUnguardTimeTick", tickHook);
+                HookUtils.hookAllMethods(guardCbCls, "onLiteTimeTick", tickHook);
+                HookUtils.hookAllMethods(guardCbCls, "onScreensStateChanged", tickHook);
+                XposedEntry.log("[NTLoginPatch] Hooked GuardManager ticks in " + guardCbName);
             }
         } catch (Throwable t) {
-            XposedEntry.logError("[NTLoginPatch] Error installing NT login audit: " + t.getMessage(), t);
+            XposedEntry.logError("[NTLoginPatch] Error installing NT login defenses: " + t.getMessage(), t);
+        }
+    }
+
+    private static void ensurePeriodicTicketRefreshTimer(ClassLoader cl) {
+        if (sTimerStarted.compareAndSet(false, true)) {
+            java.util.concurrent.ScheduledExecutorService executor =
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "NTTicketRefreshDaemon");
+                    t.setDaemon(true);
+                    return t;
+                });
+            // Initial delay 15 minutes, repeats every 20 minutes
+            executor.scheduleWithFixedDelay(() -> {
+                triggerProactiveTicketRefresh(cl, "PeriodicDaemon");
+            }, 15, 20, java.util.concurrent.TimeUnit.MINUTES);
+            XposedEntry.log("[NTLoginPatch] Started NTTicketRefreshDaemon (interval: 20 min)");
+        }
+    }
+
+    private static synchronized void triggerProactiveTicketRefresh(ClassLoader cl, String source) {
+        long now = System.currentTimeMillis();
+        long elapsed = now - sLastTicketRefreshTime;
+        if (elapsed < TICKET_REFRESH_MIN_INTERVAL_MS) {
+            return; // Ticket is still very fresh
+        }
+        if (now - sLastAttemptTime < 60 * 1000L) {
+            return; // Prevent rapid re-triggering
+        }
+        sLastAttemptTime = now;
+
+        final boolean force = elapsed >= TICKET_FORCE_REFRESH_INTERVAL_MS;
+
+        try {
+            Class<?> aoCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.login.ntlogin.ao", cl);
+            if (aoCls == null) return;
+            Object aoInstance = XposedHelpers.getStaticObjectField(aoCls, "a");
+            if (aoInstance == null) return;
+
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                try {
+                    XposedHelpers.callMethod(aoInstance, "g", force);
+                    XposedEntry.log("[NTLoginPatch] Dispatched natural ticket refresh via ao.g(" + force + ") from " + source + ", elapsed=" + (elapsed / 1000) + "s");
+                } catch (Throwable t) {
+                    XposedEntry.logError("[NTLoginPatch] Error executing ao.g: " + t.getMessage(), t);
+                }
+            });
+        } catch (Throwable t) {
+            XposedEntry.logError("[NTLoginPatch] Error triggering proactive ticket refresh: " + t.getMessage(), t);
         }
     }
 
