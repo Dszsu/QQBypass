@@ -440,8 +440,18 @@ public class DynamicRootDetectionHook {
                c.startsWith("gm_") || c.startsWith("notification_");
     }
 
+    private static boolean isSecurityRiskKey(String key) {
+        if (key == null || key.isEmpty()) return false;
+        String k = key.toLowerCase(Locale.ROOT);
+        return k.contains("root") || k.contains("xposed") || k.contains("magisk") ||
+               k.contains("jailbreak") || k.contains("risk") || k.contains("tamper") ||
+               k.contains("vpn") || k.contains("proxy") || k.contains("mock") ||
+               k.contains("detect") || k.contains("ssoserverip") || k.contains("sso_server");
+    }
+
     private static boolean isBusinessOrUiKey(String key) {
         if (key == null || key.isEmpty()) return true;
+        if (isSecurityRiskKey(key)) return false;
         String k = key.toLowerCase(Locale.ROOT);
         return k.equals("udf_kv") || k.equals("message_box") ||
                k.startsWith("dt_") || k.startsWith("qq_") || k.startsWith("aio_") ||
@@ -510,25 +520,46 @@ public class DynamicRootDetectionHook {
 
                             // Transparent data normalization: ONLY sanitize when event is not pure business/UI
                             // and the key is an explicit security/risk check key. NEVER touch business/UI analytics!
-                            if (params != null && !isBusinessOrUiEvent(eventCode)) {
+                            if (params != null) {
+                                // Step 1: Global Fake-IP/Proxy-IP Scrubbing across ALL Beacon events
                                 for (java.util.Map.Entry<String, String> entry : params.entrySet()) {
                                     String rawKey = entry.getKey();
-                                    if (rawKey == null || isBusinessOrUiKey(rawKey)) continue;
-
                                     String v = entry.getValue();
-                                    if (v == null) continue;
+                                    if (rawKey == null || v == null) continue;
 
-                                    if (isSecurityStatusKey(rawKey)) {
-                                        if (!"0".equals(v) && !"false".equalsIgnoreCase(v)) {
-                                            if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
-                                            sanitizedDetails.add(rawKey + ": " + v + " -> 0");
-                                            entry.setValue("0");
-                                        }
-                                    } else if (isSecurityDetailKey(rawKey)) {
-                                        if (!"none".equalsIgnoreCase(v) && !v.isEmpty()) {
-                                            if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
-                                            sanitizedDetails.add(rawKey + ": " + v + " -> none");
-                                            entry.setValue("none");
+                                    if (NetworkReportHook.isFakeOrPrivateIp(v)) {
+                                        entry.setValue("111.30.169.83");
+                                        if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
+                                        sanitizedDetails.add(rawKey + " (Fake-IP): " + v + " -> 111.30.169.83");
+                                    } else if (v.contains("198.18.") || v.contains("198.19.")) {
+                                        String cleanV = v.replaceAll("198\\.1[89]\\.[0-9]+\\.[0-9]+", "111.30.169.83");
+                                        entry.setValue(cleanV);
+                                        if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
+                                        sanitizedDetails.add(rawKey + " (Fake-IP subnet): " + v + " -> " + cleanV);
+                                    }
+                                }
+
+                                // Step 2: Risk and Tamper Normalization for non-UI analytics
+                                if (!isBusinessOrUiEvent(eventCode)) {
+                                    for (java.util.Map.Entry<String, String> entry : params.entrySet()) {
+                                        String rawKey = entry.getKey();
+                                        if (rawKey == null || isBusinessOrUiKey(rawKey)) continue;
+
+                                        String v = entry.getValue();
+                                        if (v == null) continue;
+
+                                        if (isSecurityStatusKey(rawKey)) {
+                                            if (!"0".equals(v) && !"false".equalsIgnoreCase(v)) {
+                                                if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
+                                                sanitizedDetails.add(rawKey + ": " + v + " -> 0");
+                                                entry.setValue("0");
+                                            }
+                                        } else if (isSecurityDetailKey(rawKey)) {
+                                            if (!"none".equalsIgnoreCase(v) && !v.isEmpty()) {
+                                                if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
+                                                sanitizedDetails.add(rawKey + ": " + v + " -> none");
+                                                entry.setValue("none");
+                                            }
                                         }
                                     }
                                 }
