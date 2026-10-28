@@ -40,7 +40,8 @@ public class SecurityLibrariesEnhanceHook {
         "xposed", "lsposed", "lspatch", "qauxv", "qqbypass",
         "native-bypass", "bytehook", "sandhook", "pine", "yahfa",
         "riru", "zygisk", "magisk", "top.nkbe", "npatch",
-        "moe.ono", "ono", "lzlnb", "cnm", "xalsace", "canyie"
+        "moe.ono", "ono", "lzlnb", "cnm", "xalsace", "canyie",
+        "r8-map-id", "luckypray", "dexkit", "intercept", "proceed"
     };
 
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {

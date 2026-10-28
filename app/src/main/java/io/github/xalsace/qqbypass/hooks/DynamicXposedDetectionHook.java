@@ -293,7 +293,30 @@ public class DynamicXposedDetectionHook {
         for (StackTraceElement element : traces) {
             String cls = element.getClassName();
             String method = element.getMethodName();
+            String fileName = element.getFileName();
             if (cls == null) continue;
+
+            // 1. Conceal R8 / Proguard minified module call frames (e.g. r8-map-id-*)
+            if (fileName != null && (fileName.startsWith("r8-map-id") || fileName.contains("r8-map-id"))) {
+                continue;
+            }
+
+            // 2. Conceal hook interception / dispatch methods
+            if (method != null) {
+                if (method.equals("handleHookedMethod") ||
+                    method.equals("beforeHookedMethod") ||
+                    method.equals("afterHookedMethod") ||
+                    method.equals("invokedTargetMethod") ||
+                    method.equals("invokeOriginalMethod") ||
+                    method.equals("intercept") ||
+                    method.equals("proceed") ||
+                    method.equals("proceedWith") ||
+                    method.equals("onProceed") ||
+                    method.equals("dispatchHookedMethod")) {
+                    continue;
+                }
+            }
+
             String lower = cls.toLowerCase();
             if (lower.contains("de.robv.android.xposed") ||
                 lower.contains("org.lsposed") ||
@@ -309,6 +332,7 @@ public class DynamicXposedDetectionHook {
                 lower.contains("me.weishu") ||
                 lower.contains("me.bmax") ||
                 lower.contains("org.luckypray.dexkit") ||
+                lower.contains("luckypray") ||
                 lower.contains("com.elderdrivers.riru") ||
                 lower.contains("bytehook") ||
                 lower.contains("bin.mt") ||
@@ -329,16 +353,9 @@ public class DynamicXposedDetectionHook {
                 lower.contains("lzlnb") ||
                 lower.contains("cnm0") ||
                 lower.contains("neibuff") ||
-                lower.contains("qnotified")) {
+                lower.contains("qnotified") ||
+                (cls.length() <= 2 && (method != null && (method.equals("a") || method.equals("b") || method.equals("intercept") || method.equals("proceed"))))) {
                 continue;
-            }
-            if (method != null) {
-                if (method.equals("handleHookedMethod") ||
-                    method.equals("beforeHookedMethod") ||
-                    method.equals("afterHookedMethod") ||
-                    method.equals("invokedTargetMethod")) {
-                    continue;
-                }
             }
             clean.add(element);
         }
