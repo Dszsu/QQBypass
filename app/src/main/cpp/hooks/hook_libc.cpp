@@ -1182,15 +1182,16 @@ bool is_virtual_or_vpn_interface_name(const char* name) {
     while (*name == ' ' || *name == '\t') name++;
     if (!name[0]) return false;
 
+    // NEVER treat p2p (Wi-Fi Direct for QQ Face-to-Face transfer / 面对面快传) as virtual/VPN
     if (strncmp(name, "tun", 3) == 0 ||
         strncmp(name, "ppp", 3) == 0 ||
-        strncmp(name, "p2p", 3) == 0 ||
         strncmp(name, "tap", 3) == 0 ||
         strncmp(name, "dummy", 5) == 0 ||
         strncmp(name, "ifb", 3) == 0 ||
         strncmp(name, "vgate", 5) == 0 ||
         strncmp(name, "ovnet", 5) == 0 ||
-        strncmp(name, "ap", 2) == 0 ||
+        strncmp(name, "ap0", 3) == 0 ||
+        strncmp(name, "ap1", 3) == 0 ||
         strncmp(name, "wlan-ap", 7) == 0 ||
         strncmp(name, "softap", 6) == 0 ||
         strncmp(name, "wondertap", 9) == 0 ||

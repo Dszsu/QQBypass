@@ -4544,7 +4544,7 @@ public class QQ950PatchHook {
         if (str.contains("tun") || str.contains("198.18.") || str.contains("vgate") ||
             str.contains("ifb") || str.contains("dummy") || str.contains("ap0") ||
             str.contains("wondertap") || str.contains("ovnet") ||
-            str.contains("10.0.0.2") || str.contains("ppp") || str.contains("p2p")) {
+            str.contains("10.0.0.2") || str.contains("ppp")) {
             return true;
         }
         String[] parts = str.split(",");

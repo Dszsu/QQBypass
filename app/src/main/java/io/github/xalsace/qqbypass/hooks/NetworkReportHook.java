@@ -45,7 +45,19 @@ public class NetworkReportHook {
         "Heartbeat.",
         "StatSvc.",
         "MessageSvc.",
-        "RegPrxySvc."
+        "RegPrxySvc.",
+        "SharpSvr.",
+        "MultiVideo.",
+        "VideoSvc.",
+        "AVChatSvr.",
+        "VoipService.",
+        "trpc.voip.",
+        "trpc.group_av.",
+        "ImgStore.",
+        "PttStore.",
+        "PttCenter.",
+        "ShortVideo.",
+        "OfflineFvr."
     };
 
     /**
@@ -68,6 +80,18 @@ public class NetworkReportHook {
                command.startsWith("ConfigPushSvc.") ||
                command.startsWith("ProfileService.") ||
                command.startsWith("Friendlist.") ||
+               command.startsWith("SharpSvr.") ||
+               command.startsWith("MultiVideo.") ||
+               command.startsWith("VideoSvc.") ||
+               command.startsWith("AVChatSvr.") ||
+               command.startsWith("VoipService.") ||
+               command.startsWith("trpc.voip.") ||
+               command.startsWith("trpc.group_av.") ||
+               command.startsWith("ImgStore.") ||
+               command.startsWith("PttStore.") ||
+               command.startsWith("PttCenter.") ||
+               command.startsWith("ShortVideo.") ||
+               command.startsWith("OfflineFvr.") ||
                command.startsWith("trpc.login.ecdh.access") ||
                command.startsWith("trpc.group_mall.") ||
                command.startsWith("OidbSvcTrpcTcp.") ||

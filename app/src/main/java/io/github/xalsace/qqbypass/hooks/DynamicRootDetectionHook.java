@@ -107,11 +107,14 @@ public class DynamicRootDetectionHook {
     public static boolean isVirtualOrVpnIface(String name) {
         if (name == null || name.isEmpty()) return false;
         String lower = name.toLowerCase();
+        // NEVER treat p2p (Wi-Fi Direct for QQ Face-to-Face transfer / 面对面快传) as virtual/VPN!
         return lower.startsWith("tun") || lower.startsWith("ppp") ||
-               lower.startsWith("p2p") || lower.startsWith("tap") ||
+               lower.startsWith("tap") ||
                lower.startsWith("dummy") || lower.startsWith("ifb") ||
                lower.startsWith("vgate") || lower.startsWith("ovnet") ||
-               lower.startsWith("ap") || lower.startsWith("wondertap") ||
+               lower.equals("ap0") || lower.startsWith("ap0-") || lower.startsWith("ap1") ||
+               lower.startsWith("softap") || lower.startsWith("wlan-ap") ||
+               lower.startsWith("wondertap") ||
                lower.startsWith("veth") || lower.startsWith("docker") ||
                lower.startsWith("virbr") || lower.startsWith("br-") ||
                lower.startsWith("sit") || lower.startsWith("gre") ||
