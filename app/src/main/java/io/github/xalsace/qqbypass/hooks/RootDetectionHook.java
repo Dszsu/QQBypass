@@ -76,26 +76,14 @@ public class RootDetectionHook {
                                 fieldU.setInt(null, 0);
                             } catch (Throwable ignored) {}
                             try {
-                                Field fieldS = clazz.getDeclaredField("S");
-                                fieldS.setAccessible(true);
-                                fieldS.setInt(null, 0);
-                            } catch (Throwable ignored) {}
-                            try {
-                                Field fieldT = clazz.getDeclaredField("T");
-                                fieldT.setAccessible(true);
-                                fieldT.setInt(null, 1);
-                            } catch (Throwable ignored) {}
-                            try {
                                 Field fieldV = clazz.getDeclaredField("V");
                                 fieldV.setAccessible(true);
-                                fieldV.setInt(null, 1);
-                            } catch (Throwable ignored) {}
-                            try {
+                                int v = fieldV.getInt(null);
                                 Field fieldX = clazz.getDeclaredField("X");
                                 fieldX.setAccessible(true);
-                                fieldX.setInt(null, (1 << 24));
+                                fieldX.setInt(null, (v << 24));
                             } catch (Throwable ignored) {}
-                            XposedEntry.log("[WloginRoot] Reset w.Y=0, w.W=0, w.U=0, w.X=0x01000000");
+                            XposedEntry.log("[WloginRoot] Reset w.Y=0, w.W=0, w.U=0");
                         }
                     } catch (Throwable ignored) {}
                 }

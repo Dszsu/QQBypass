@@ -3844,23 +3844,6 @@ public class QQ950PatchHook {
             }
         });
 
-        hookSafe(qsecCls, "reportLog", lpparam, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) throws Throwable {
-                if (p.args != null && p.args.length >= 3) {
-                    String eventType = (String) p.args[0];
-                    if ("chk_point".equals(eventType)) {
-                        String pointName = (String) p.args[1];
-                        String pointCode = (String) p.args[2];
-                        if (pointCode != null && !pointCode.equals("0")) {
-                            XposedEntry.log("[QSecPatch] Sanitized chk_point report: " + pointName + " [" + pointCode + " -> 0]");
-                            p.args[2] = "0";
-                        }
-                    }
-                }
-            }
-        });
-
         // Note: Do NOT hook QSec.getFeKitAttach to inject new byte[]{0}!
         // Injected dummy bytes create invalid protobuf payloads in WTLogin tlv_553,
         // which causes server token exchange verification failure and invalidates sessions.

@@ -966,11 +966,9 @@ public class NetworkReportHook {
                             XposedHelpers.setStaticIntField(wCls, "Y", 0);
                             XposedHelpers.setStaticIntField(wCls, "W", 0);
                             XposedHelpers.setStaticIntField(wCls, "U", 0);
-                            XposedHelpers.setStaticIntField(wCls, "S", 0);
-                            XposedHelpers.setStaticIntField(wCls, "T", 1);
-                            XposedHelpers.setStaticIntField(wCls, "V", 1);
-                            XposedHelpers.setStaticIntField(wCls, "X", (1 << 24));
-                            XposedEntry.log("[Wlogin] Intercepted Wlogin device fingerprint on " + wCls.getName() + " -> enforced clean signature & w.Y=0, w.W=0, w.U=0, w.X=0x01000000");
+                            int v = XposedHelpers.getStaticIntField(wCls, "V");
+                            XposedHelpers.setStaticIntField(wCls, "X", (v << 24));
+                            XposedEntry.log("[Wlogin] Intercepted Wlogin device fingerprint on " + wCls.getName() + " -> clean sig, w.Y=0, w.W=0, w.U=0, w.X=" + Integer.toHexString(v << 24));
                         } catch (Throwable ignored) {}
                     }
                 });
@@ -983,22 +981,6 @@ public class NetworkReportHook {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         param.setResult(OFFICIAL_TENCENT_PKG_SIG_MD5.clone());
-                    }
-                });
-
-            HookUtils.hookAllMethods(utilCls, "get_last_flag",
-                new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(0);
-                    }
-                });
-
-            HookUtils.hookAllMethods(utilCls, "needChangeGuid",
-                new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(false);
                     }
                 });
 
@@ -1028,23 +1010,6 @@ public class NetworkReportHook {
                 });
         }
 
-        // Lock tlv_t128 device fingerprint mutation flags (V=1, W=0, U=0)
-        Class<?> tlv128Cls = XposedHelpers.findClassIfExists("oicq.wlogin_sdk.tlv_type.tlv_t128", cl);
-        if (tlv128Cls != null && sHookedNetworkClasses.add(cl.hashCode() + "_wlogin_tlv128")) {
-            HookUtils.hookAllMethods(tlv128Cls, "get_tlv_128", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length >= 4) {
-                        param.args[0] = 0; // S = 0
-                        param.args[1] = 1; // T = 1
-                        param.args[2] = 0; // U = 0
-                        param.args[3] = (1 << 24); // X = 0x01000000 (V=1, W=0)
-                        XposedEntry.log("[Wlogin] Enforced clean device state in tlv_t128: S=0, T=1, U=0, X=0x01000000");
-                    }
-                }
-            });
-        }
-
         // Enforce official signature in tlv_t147 (w.J)
         Class<?> tlv147Cls = XposedHelpers.findClassIfExists("oicq.wlogin_sdk.tlv_type.tlv_t147", cl);
         if (tlv147Cls != null && sHookedNetworkClasses.add(cl.hashCode() + "_wlogin_tlv147")) {
@@ -1053,20 +1018,6 @@ public class NetworkReportHook {
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args != null && param.args.length >= 3) {
                         param.args[2] = OFFICIAL_TENCENT_PKG_SIG_MD5.clone();
-                        XposedEntry.log("[Wlogin] Enforced official package signature in tlv_t147");
-                    }
-                }
-            });
-        }
-
-        // Enforce root=0 in tlv_t153 (w.Y)
-        Class<?> tlv153Cls = XposedHelpers.findClassIfExists("oicq.wlogin_sdk.tlv_type.tlv_t153", cl);
-        if (tlv153Cls != null && sHookedNetworkClasses.add(cl.hashCode() + "_wlogin_tlv153")) {
-            HookUtils.hookAllMethods(tlv153Cls, "get_tlv_153", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length >= 1) {
-                        param.args[0] = 0; // root = 0
                     }
                 }
             });

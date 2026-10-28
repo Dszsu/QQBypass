@@ -650,21 +650,6 @@ public class SecurityLibrariesEnhanceHook {
                         }
                     }
                 });
-
-                HookUtils.hookAllMethods(clazz, "reportLog", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length >= 3) {
-                            String eventType = (String) param.args[0];
-                            if ("chk_point".equals(eventType)) {
-                                String pointCode = (String) param.args[2];
-                                if (pointCode != null && !pointCode.equals("0")) {
-                                    param.args[2] = "0";
-                                }
-                            }
-                        }
-                    }
-                });
             }
         });
     }
