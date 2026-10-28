@@ -467,8 +467,10 @@ public class DynamicXposedDetectionHook {
 
     public static boolean isSuspiciousClass(String name) {
         if (name == null) return false;
-        String lower = name.toLowerCase();
+        String lower = name.replace('/', '.').toLowerCase();
         return lower.startsWith("de.robv.android.xposed.")
+            || lower.contains("xposed")
+            || lower.contains("xpatch")
             || lower.startsWith("org.lsposed.")
             || lower.contains("lspatch")
             || lower.startsWith("edxposed.")

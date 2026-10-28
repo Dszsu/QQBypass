@@ -43,11 +43,10 @@ public class RootDetectionHook {
         // Hook 6: Crash report isXposedInstalled sanitization
         hookCrashReportXposed();
 
-        // Generic file existence checks for su binaries
-        hookFileExists();
-
-        // Hook Runtime.exec to prevent su detection
-        hookRuntimeExec();
+        // Generic file existence checks and command execution checks are comprehensively
+        // handled with LRU-cache and QAuxv bypass by DynamicRootDetectionHook (hookFileChecks & hookProcessBuilderAndRuntimeExec).
+        // hookFileExists();
+        // hookRuntimeExec();
     }
 
     private static void hookWloginRoot() {

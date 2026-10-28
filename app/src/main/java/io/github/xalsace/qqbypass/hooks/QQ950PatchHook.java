@@ -5333,9 +5333,11 @@ public class QQ950PatchHook {
                         if (param.args != null && param.args.length >= 2 && "mPM".equals(param.args[1])) {
                             Object res = param.getResult();
                             if (res != null) {
+                                boolean isProxy = java.lang.reflect.Proxy.isProxyClass(res.getClass());
                                 ClassLoader objCl = res.getClass().getClassLoader();
-                                if (objCl != null && !objCl.getClass().getName().startsWith("java.") &&
-                                    !objCl.getClass().getName().startsWith("dalvik.system.")) {
+                                boolean foreignCl = (objCl != null && !objCl.getClass().getName().startsWith("java.") &&
+                                    !objCl.getClass().getName().startsWith("dalvik.system."));
+                                if (isProxy || foreignCl) {
                                     try {
                                         Class<?> smClass = Class.forName("android.os.ServiceManager");
                                         Method getService = smClass.getMethod("getService", String.class);
@@ -5691,6 +5693,26 @@ public class QQ950PatchHook {
                                                         putRiskValue(map, 205, "");
                                                         sanitized = true;
                                                         sanitizedDetails.add("205(ContainerDualApp)");
+                                                    }
+                                                }
+
+                                                // Key 2024: ART Method Hook Verification Target Methods (m_c_l_2)
+                                                // TuringFD natively inspects ArtMethod entry points of listed methods.
+                                                // Replace hooked framework methods (e.g. LoadedApk.getClassLoader) with
+                                                // unhooked authentic methods (LoadedApk.getPackageName) to preserve the
+                                                // cloud probe structure while guaranteeing 100% clean ART verification.
+                                                if (hasRiskKey(map, 2024)) {
+                                                    Object v = getRiskValue(map, 2024);
+                                                    if (v != null) {
+                                                        String s = v.toString();
+                                                        if (s.contains("LoadedApk") || s.contains("getClassLoader")) {
+                                                            String clean = s.replaceAll("LoadedApk:getClassLoader\\([^)]*\\)[^#,]*", "LoadedApk:getPackageName()Ljava/lang/String;");
+                                                            if (!clean.equals(s)) {
+                                                                putRiskValue(map, 2024, clean);
+                                                                sanitized = true;
+                                                                sanitizedDetails.add("2024(LoadedApk_Scrubbed)");
+                                                            }
+                                                        }
                                                     }
                                                 }
 
