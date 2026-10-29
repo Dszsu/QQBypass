@@ -527,7 +527,7 @@ public class DynamicRootDetectionHook {
                                     String v = entry.getValue();
                                     if (rawKey == null || v == null) continue;
 
-                                    if (NetworkReportHook.isFakeOrPrivateIp(v)) {
+                                    if (NetworkReportHook.isFakeIp(v)) {
                                         entry.setValue("111.30.169.83");
                                         if (sanitizedDetails == null) sanitizedDetails = new java.util.ArrayList<>();
                                         sanitizedDetails.add(rawKey + " (Fake-IP): " + v + " -> 111.30.169.83");

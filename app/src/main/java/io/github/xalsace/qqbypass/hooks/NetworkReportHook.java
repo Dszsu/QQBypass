@@ -457,61 +457,37 @@ public class NetworkReportHook {
     }
 
     /**
-     * Determines whether an IP address belongs to Fake-IP (RFC 2544), loopback, or private RFC ranges.
+     * Determines whether an IP address belongs to RFC 2544 Fake-IP range (198.18.0.0/15) used by TUN proxies.
+     * Note: Legitimate RFC 1918 private subnets (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and loopback
+     * are authentic device network characteristics and must NEVER be treated as Fake-IP or modified.
      */
-    public static boolean isFakeOrPrivateIp(String ip) {
+    public static boolean isFakeIp(String ip) {
         if (ip == null || ip.isEmpty()) return false;
         int colon = ip.indexOf(':');
         String cleanIp = (colon > 0 && ip.indexOf(':', colon + 1) < 0) ? ip.substring(0, colon) : ip;
         cleanIp = cleanIp.trim();
-        if (cleanIp.startsWith("198.18.") || cleanIp.startsWith("198.19.")) return true; // RFC 2544 / Clash Fake-IP
-        if (cleanIp.startsWith("127.")) return true; // Loopback
-        if (cleanIp.startsWith("10.")) return true; // Class A private
-        if (cleanIp.startsWith("192.168.")) return true; // Class C private
-        if (cleanIp.startsWith("172.")) {
-            try {
-                int secondOctet = Integer.parseInt(cleanIp.split("\\.")[1]);
-                if (secondOctet >= 16 && secondOctet <= 31) return true;
-            } catch (Throwable ignored) {}
-        }
-        return false;
+        return cleanIp.startsWith("198.18.") || cleanIp.startsWith("198.19.");
     }
 
-    /**
-     * Obtains a legitimate public fallback Tencent SSO server address.
-     */
+    @Deprecated
+    public static boolean isFakeOrPrivateIp(String ip) {
+        return isFakeIp(ip);
+    }
+
+    @Deprecated
     public static String getFallbackSsoAddress(Object msfCore) {
-        if (msfCore != null) {
-            try {
-                String gateway = (String) XposedHelpers.callMethod(msfCore, "getGatewayIp");
-                if (gateway != null && !gateway.isEmpty() && !isFakeOrPrivateIp(gateway)) {
-                    return gateway;
-                }
-            } catch (Throwable ignored) {}
-        }
         return "111.30.169.83";
     }
 
     /**
      * Layer 3: MsfCore.sendSsoMsg.
      * Service layer SSO dispatcher. Audits all SSO outgoing traffic and optional interception.
+     * Note: getNowUsedSsoAddress and _attr_sso_ip MUST remain 100% natural and untouched (Iron Invariant 1.4).
      */
     private static void hookMsfCore(ClassLoader cl) {
         if (cl == null) return;
         Class<?> clazz = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.MsfCore", cl);
         if (clazz == null || !sHookedNetworkClasses.add(cl.hashCode() + "_MsfCore")) return;
-
-        // Hook getNowUsedSsoAddress to normalize Clash/TUN Fake-IP (198.18.x.x) into genuine public SSO gateway IP
-        HookUtils.hookAllMethods(clazz, "getNowUsedSsoAddress", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                String addr = (String) param.getResult();
-                if (isFakeOrPrivateIp(addr)) {
-                    String clean = getFallbackSsoAddress(param.thisObject);
-                    param.setResult(clean);
-                }
-            }
-        });
 
         HookUtils.hookAllMethods(clazz, "sendSsoMsg",
             new XC_MethodHook() {
@@ -520,14 +496,6 @@ public class NetworkReportHook {
                     if (param.args == null || param.args.length < 1 || param.args[0] == null) return;
 
                     Object toServiceMsg = param.args[0];
-
-                    // Normalize _attr_sso_ip in outgoing ToServiceMsg to prevent leaking Fake-IP
-                    try {
-                        String ssoIp = (String) XposedHelpers.callMethod(toServiceMsg, "getAttribute", "_attr_sso_ip");
-                        if (isFakeOrPrivateIp(ssoIp)) {
-                            XposedHelpers.callMethod(toServiceMsg, "addAttribute", "_attr_sso_ip", getFallbackSsoAddress(param.thisObject));
-                        }
-                    } catch (Throwable ignored) {}
 
                     Object cmdObj = XposedHelpers.callMethod(toServiceMsg, "getServiceCmd");
                     String command = cmdObj == null ? null : cmdObj.toString();
