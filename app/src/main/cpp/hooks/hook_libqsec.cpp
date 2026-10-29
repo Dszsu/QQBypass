@@ -212,7 +212,7 @@ void install_qsec_hooks() {
         "libqq_la.so", "libqqdid.so", "libturingxq.so", "libturingmfa.so",
         "libtencentloc.so", "libMMANDKSignature.so", "liblogcathook.so",
         "libmqpintchk.so", "libckguard.so", "libckeygeneratorV2.so",
-        "libckeygenerator.so", "libmsfbootV2.so", "libMSFKernel.so",
+        "libckeygenerator.so",
         "libsec.so", "libtears.so", "libYTCommonLiveness.so",
         "libYTLiveness.so", "libhardcoder_new.so", "libgcloud.so",
         "librmonitor_base.so", "librmonitor_memory.so", "libBugly_Native.so",

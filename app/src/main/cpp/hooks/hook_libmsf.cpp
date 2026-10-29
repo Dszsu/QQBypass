@@ -21,7 +21,7 @@ namespace hook_libmsf {
 
 typedef jboolean (*IsSignatureValid_t)(JNIEnv*, jobject);
 
-static jboolean hooked_IsSignatureValid(JNIEnv* env, jobject context) {
+[[maybe_unused]] static jboolean hooked_IsSignatureValid(JNIEnv* env, jobject context) {
     (void)env;
     (void)context;
     LOGI("CMSFJavaUtil::IsSignatureValid intercepted! Bypassing signature verification (returning JNI_TRUE)");
@@ -30,7 +30,7 @@ static jboolean hooked_IsSignatureValid(JNIEnv* env, jobject context) {
 
 typedef void (*GetSignature_t)(JNIEnv*, jobject, void*);
 
-static void hooked_GetSignature(JNIEnv* env, jobject context, void* vec) {
+[[maybe_unused]] static void hooked_GetSignature(JNIEnv* env, jobject context, void* vec) {
     LOGI("libcodecwrapperV2 GetSignature intercepted, executing with spoofed Java PackageManager signatures");
     void* prev = bytehook_get_prev_func((void*)hooked_GetSignature);
     if (prev) {
@@ -39,42 +39,9 @@ static void hooked_GetSignature(JNIEnv* env, jobject context, void* vec) {
 }
 
 void install_hooks() {
-    // 1. Hook CMSFJavaUtil::IsSignatureValid
-    TRACK_NATIVE_HOOK_SINGLE(
-        "libmsfbootV2.so",
-        nullptr,
-        "_ZN12CMSFJavaUtil16IsSignatureValidEP7_JNIEnvP8_jobject",
-        (void*)hooked_IsSignatureValid,
-        nullptr,
-        nullptr
-    );
-
-    TRACK_NATIVE_HOOK_SINGLE(
-        "libMSFKernel.so",
-        nullptr,
-        "_ZN12CMSFJavaUtil16IsSignatureValidEP7_JNIEnvP8_jobject",
-        (void*)hooked_IsSignatureValid,
-        nullptr,
-        nullptr
-    );
-
-    TRACK_NATIVE_HOOK_ALL(
-        nullptr,
-        "_ZN12CMSFJavaUtil16IsSignatureValidEP7_JNIEnvP8_jobject",
-        (void*)hooked_IsSignatureValid,
-        nullptr,
-        nullptr
-    );
-
-    // 2. Hook GetSignature in libcodecwrapperV2.so (PLT hook)
-    TRACK_NATIVE_HOOK_SINGLE(
-        "libcodecwrapperV2.so",
-        nullptr,
-        "_Z12GetSignatureP7_JNIEnvP8_jobjectRNSt6__ndk16vectorINS3_12basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEENS8_ISA_EEEE",
-        (void*)hooked_GetSignature,
-        nullptr,
-        nullptr
-    );
+    // 100% exempt MSF and codec libraries from Native ByteHook to respect zero-intervention invariants.
+    // Official QQ runs natively with authentic Tencent signatures and does not need signature bypass hooks.
+    LOGI("hook_libmsf: MSF & codec libraries 100% exempted from native hooks");
 }
 
 } // namespace hook_libmsf

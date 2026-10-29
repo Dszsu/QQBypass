@@ -11,7 +11,7 @@
  * 这个函数将 qimei36 设备指纹注入到 MSF 协议层，是风控的核心数据源。
  * 拦截它可以防止异常设备指纹被上报。
  */
-static void hooked_setQimei36(JNIEnv* env, jobject thiz, jstring qimei36) {
+[[maybe_unused]] static void hooked_setQimei36(JNIEnv* env, jobject thiz, jstring qimei36) {
     const char* qimei_str = env->GetStringUTFChars(qimei36, nullptr);
 
     LOGI("MSFKernel setQimei36 intercepted: %s", qimei_str ? qimei_str : "(null)");
@@ -37,12 +37,7 @@ static void hooked_setQimei36(JNIEnv* env, jobject thiz, jstring qimei36) {
  * 安装 libMSFKernel 的 hook
  */
 void install_msfkernel_hooks() {
-    TRACK_NATIVE_HOOK_SINGLE(
-        "libMSFKernel.so",
-        nullptr,
-        "Java_com_tencent_mobileqq_msfcore_MSFKernelBridge_00024CppProxy_native_1setQimei36",
-        (void*)hooked_setQimei36,
-        nullptr,
-        nullptr
-    );
+    // 100% exempt libMSFKernel.so from Native ByteHook to respect zero-intervention invariants.
+    // Official QQ generates valid authentic qimei36; MSF protocol bridge runs naturally without modification.
+    LOGI("hook_libmsfkernel: libMSFKernel.so 100% exempted from native hooks");
 }

@@ -68,22 +68,6 @@ public class SecurityLibrariesEnhanceHook {
         hookQSec(cl);
     }
 
-    private static String getSafePropValue(String key) {
-        if (key == null) return "-1";
-        if ("ro.debuggable".equals(key)) return "0";
-        if ("ro.secure".equals(key)) return "1";
-        if ("ro.build.tags".equals(key)) return "release-keys";
-        if ("ro.boot.flash.locked".equals(key)) return "1";
-        if ("ro.boot.vbmeta.device_state".equals(key)) return "locked";
-        if ("ro.boot.verifiedbootstate".equals(key)) return "green";
-        if ("persist.sys.adb.engineermode".equals(key)) return "0";
-        if ("sys.usb.config".equals(key) || "sys.usb.state".equals(key) || "persist.sys.usb.config".equals(key)) return "none";
-        if ("init.svc.adbd".equals(key)) return "stopped";
-        if (key.contains("magisk") || key.contains("kernelsu") || key.contains("ksud") || key.contains("apatchd") || key.contains("ro.apatch") || key.contains("xposed") || "service.adb.root".equals(key)) {
-            return "-1";
-        }
-        return null;
-    }
 
     /**
      * 1. Neutralize FEKit RuntimeEnvCensor companion classes:
@@ -105,160 +89,13 @@ public class SecurityLibrariesEnhanceHook {
         // Delegate fe.utils.a to transparent normalization in QQ950PatchHook
         QQ950PatchHook.hookFeUtilsAWithClassLoader(cl);
 
-        final String dtcCls = "com.tencent.mobileqq.dt.app.Dtc";
-        hookSafe(cl, dtcCls, new ClassHookCallback() {
-            @Override
-            public void onClassFound(Class<?> clazz) {
-                // 1. isAbnormalConfig -> normalize to false in afterHookedMethod
-                HookUtils.hookAllMethods(clazz, "isAbnormalConfig", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.getResult() == Boolean.TRUE) {
-                            param.setResult(false);
-                        }
-                    }
-                });
-
-                // 2. checkAppInstalled -> sanitize in afterHookedMethod if suspicious package queried
-                HookUtils.hookAllMethods(clazz, "checkAppInstalled", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (DynamicRootDetectionHook.isCallerQAuxv()) return;
-                        if (param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
-                            String pkg = (String) param.args[0];
-                            if (DynamicRootDetectionHook.isSuspiciousPackage(pkg)) {
-                                param.setResult(false);
-                            }
-                        }
-                    }
-                });
-
-                // 3. getAccessibilityServiceList & getAccessibilityEnabledServiceList
-                XC_MethodHook assistListHook = new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Object res = param.getResult();
-                        if (res instanceof String) {
-                            String s = (String) res;
-                            if (DynamicRootDetectionHook.isSuspiciousPackage(s) || s.contains("xposed")) {
-                                param.setResult("[]");
-                            }
-                        }
-                    }
-                };
-                HookUtils.hookAllMethods(clazz, "getAccessibilityServiceList", assistListHook);
-                HookUtils.hookAllMethods(clazz, "getAccessibilityEnabledServiceList", assistListHook);
-
-                // 4. getAccessibilityEnabledStatus
-                HookUtils.hookAllMethods(clazz, "getAccessibilityEnabledStatus", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.getResult() instanceof Number && ((Number) param.getResult()).intValue() > 0) {
-                            param.setResult(0);
-                        }
-                    }
-                });
-
-                // 5. getPluginInfo & getNetworkInterfaceNames & getLibraryList:
-                // DO NOT hook getPluginInfo with fake "-1|-1|-1|-1|0|-1"!
-                // On real devices, Dtc.getPluginInfo() naturally computes:
-                // getMtpMode() + "|" + hasSimCard() + "|" + formatEmpty(getAccessibilityServiceList(true)) + "|" + formatEmpty(getAccessibilityEnabledServiceList(true)) + "|" + getAccessibilityEnabledStatus() + "|-1"
-                // which yields "none|1|[]|[]|0|-1", perfectly consistent with SIM presence and system properties.
-                // DO NOT hook getNetworkInterfaceNames with static "wlan0,rmnet_data0" (NetworkInterface.getNetworkInterfaces is already cleanly filtered).
-                // DO NOT hook getLibraryList with fake "12345678" (authentic Dtc.getLibraryList computes genuine system shared libraries hash).
-
-                // 6. getGoogleCertsVerify:
-                // Allow authentic GoogleAttestationParser.GetGoogleAttestation() to run naturally.
-                // DO NOT inject fake "STATUS_GOOGLE_HARDWARE_ROOT|...|normal"! Fake status strings trigger w21 server kicks.
-
-                // 7. getPropSafe & systemGetSafe -> sanitize sensitive keys in afterHookedMethod
-                HookUtils.hookAllMethods(clazz, "getPropSafe", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
-                            String key = (String) param.args[0];
-                            String mocked = getSafePropValue(key);
-                            if (mocked != null) {
-                                param.setResult(mocked);
-                            }
-                        }
-                    }
-                });
-                HookUtils.hookAllMethods(clazz, "systemGetSafe", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length > 0 && param.args[0] instanceof String) {
-                            String key = (String) param.args[0];
-                            String mocked = getSafePropValue(key);
-                            if (mocked != null) {
-                                param.setResult(mocked);
-                            }
-                        }
-                    }
-                });
-
-                // 8. getMtpMode -> sanitize adb in afterHookedMethod while preserving real mode
-                HookUtils.hookAllMethods(clazz, "getMtpMode", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Object res = param.getResult();
-                        if (res instanceof String) {
-                            String s = (String) res;
-                            if (s.contains("adb")) {
-                                String cleaned = s.replace(",adb", "").replace("adb,", "").replace("adb", "");
-                                param.setResult(cleaned.isEmpty() ? "none" : cleaned);
-                            }
-                        }
-                    }
-                });
-
-                // 9. checkRiskPermission -> 0 in afterHookedMethod
-                HookUtils.hookAllMethods(clazz, "checkRiskPermission", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.getResult() instanceof Integer && ((Integer) param.getResult()) != 0) {
-                            param.setResult(0);
-                        }
-                    }
-                });
-
-                // 11. dtcSendMessage: Allow normal sending of SSO reports with sanitized environment data & audit
-                HookUtils.hookAllMethods(clazz, "dtcSendMessage", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length > 0) {
-                            String cmd = String.valueOf(param.args[0]);
-                            byte[] data = param.args.length > 1 && param.args[1] instanceof byte[] ? (byte[]) param.args[1] : null;
-                            long cbId = param.args.length > 2 && param.args[2] instanceof Number ? ((Number) param.args[2]).longValue() : 0L;
-                            if (io.github.xalsace.qqbypass.config.CompileHookConfig.ENABLE_RECORD_QQ_REPORT) {
-                                io.github.xalsace.qqbypass.utils.ReportAuditManager.recordChannelManager("Dtc." + cmd, cbId, data != null ? data.length : 0, data);
-                            }
-                        }
-                    }
-                });
-            }
-        });
-
-        final String dtHCls = "com.tencent.mobileqq.dt.app.h";
-        hookSafe(cl, dtHCls, new ClassHookCallback() {
-            @Override
-            public void onClassFound(Class<?> clazz) {
-                XC_MethodHook emptyListHook = new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Object res = param.getResult();
-                        if (res instanceof List && !((List<?>) res).isEmpty()) {
-                            param.setResult(new java.util.ArrayList<>());
-                        }
-                    }
-                };
-                for (Method m : clazz.getDeclaredMethods()) {
-                    if (List.class.isAssignableFrom(m.getReturnType())) {
-                        HookUtils.hookMethod(m, emptyListHook);
-                    }
-                }
-            }
-        });
+        // DO NOT hook com.tencent.mobileqq.dt.app.Dtc or com.tencent.mobileqq.dt.app.h methods!
+        // Dtc is called directly via JNI by libfekit.so. Hooking its methods via Xposed modifies
+        // ART ArtMethod structs (entry_point_from_quick_compiled_code_), which is detected by
+        // libfekit.so's internal parse_libart.cpp engine. This triggers attr_key_security_sign_flag: 2
+        // and results in immediate server-side kicks (StatSvc.ReqMSFOffline "你的账号当前登录已失效").
+        // All underlying environmental attributes (system properties, installed packages, proc maps)
+        // are already cleanly and transparently sanitized at the Android API / libc syscall level.
     }
 
     /**

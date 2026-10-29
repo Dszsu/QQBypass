@@ -215,8 +215,11 @@ public class SideChannelDefense {
         // 6. Hook TrafficStats bytes counters
         hookTrafficStats();
 
-        // 7. Hook QSec physical sensor polling methods
-        hookQSecSensors(lpparam);
+        // 7. QSec physical sensor polling:
+        // Do NOT hook com.tencent.qqprotect.qsec.b/c/d methods!
+        // Faking dynamic sensor strings and modifying ArtMethod entry points of QSec companion classes
+        // causes server sign flag rejection (attr_key_security_sign_flag: 2) during sleep/wake transitions.
+        // Let physical sensors run naturally.
     }
 
     private static void hookBatteryReceiver() {
@@ -399,41 +402,6 @@ public class SideChannelDefense {
                 Object res = param.getResult();
                 if (res instanceof Long && ((Long) res) <= 0L) {
                     param.setResult(getDynamicTotalTxBytes());
-                }
-            }
-        });
-    }
-
-    private static void hookQSecSensors(XC_LoadPackage.LoadPackageParam lpparam) {
-        // Accelerometer
-        HookUtils.hookAllMethods("com.tencent.qqprotect.qsec.b", "b", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                Object res = param.getResult();
-                if (res == null || "-1".equals(res) || "".equals(res)) {
-                    param.setResult(getDynamicAccelerometerString());
-                }
-            }
-        });
-
-        // Gyroscope
-        HookUtils.hookAllMethods("com.tencent.qqprotect.qsec.c", "b", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                Object res = param.getResult();
-                if (res == null || "-1".equals(res) || "".equals(res)) {
-                    param.setResult(getDynamicGyroscopeString());
-                }
-            }
-        });
-
-        // Ambient Light
-        HookUtils.hookAllMethods("com.tencent.qqprotect.qsec.d", "b", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                Object res = param.getResult();
-                if (res == null || "-1".equals(res) || "".equals(res) || "-1.0".equals(res)) {
-                    param.setResult(String.format(Locale.US, "%.1f", getDynamicLux()));
                 }
             }
         });

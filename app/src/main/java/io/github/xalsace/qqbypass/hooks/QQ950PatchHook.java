@@ -801,10 +801,7 @@ public class QQ950PatchHook {
                                     } else if (sLastKnownDeviceToken != null && !sLastKnownDeviceToken.isEmpty()) {
                                         fb.set(wild, sLastKnownDeviceToken);
                                     }
-                                    // Ensure errorCode in Wild is normalized to 0 (No risk)
-                                    Field fa = wild.getClass().getDeclaredField("a");
-                                    fa.setAccessible(true);
-                                    fa.setInt(wild, 0);
+                                    // Official error codes are strictly preserved (no error code tampering)
                                 } catch (Throwable ignored) {}
                             }
                         } catch (Throwable ignored) {}
@@ -834,18 +831,6 @@ public class QQ950PatchHook {
                     }
                 }
             });
-            HookUtils.hookAllMethods(clazz, "getErrorCode", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(0L);
-                }
-            });
-            HookUtils.hookAllMethods(clazz, "isDowngrade", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam p) throws Throwable {
-                    p.setResult(false);
-                }
-            });
         }
 
         // Hook TuringSdkInitHelper (com.tencent.mobileqq.turingfd.i) method f(boolean)
@@ -862,123 +847,6 @@ public class QQ950PatchHook {
                     }
                 }
             });
-        }
-
-        // Direct Turing risk inspection normalization at detection origin (clean baseline values)
-        String[] turingPackages = {
-            "com.tencent.turingfd.sdk.xq",
-            "com.tencent.tfd.sdk.wxa",
-            "com.tencent.turingfd.sdk.tbs",
-            "com.tencent.turingface.sdk.mfa"
-        };
-        for (String pkg : turingPackages) {
-            // Kiwifruit: Key 270 (ADB/dev settings/debugger -> 0) & Key 253 (USB state -> 0)
-            Class<?> kiwiCls = XposedHelpers.findClassIfExists(pkg + ".Kiwifruit", cl);
-            if (kiwiCls != null && sHookedTuringClasses.add(kiwiCls)) {
-                HookUtils.hookAllMethodsIfExists(kiwiCls, "a", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
-                            param.setResult(0);
-                        }
-                    }
-                });
-                HookUtils.hookAllMethodsIfExists(kiwiCls, "d", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
-                            param.setResult(0);
-                        }
-                    }
-                });
-                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Kiwifruit (Key 270/253) for clean environment baseline");
-            }
-
-            // Caelum: Key 205 (container / dual app detection -> "")
-            Class<?> caelumCls = XposedHelpers.findClassIfExists(pkg + ".Caelum", cl);
-            if (caelumCls != null && sHookedTuringClasses.add(caelumCls)) {
-                HookUtils.hookAllMethodsIfExists(caelumCls, "a", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
-                            param.setResult("");
-                        } else if (param.args == null || param.args.length == 0) {
-                            param.setResult(false);
-                        }
-                    }
-                });
-                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Caelum (Key 205) for clean container baseline");
-            }
-
-            // Bennet: Key 250 (maps DSO baseline -> "") & Key 269 (DSO scan -> "")
-            Class<?> bennetCls = XposedHelpers.findClassIfExists(pkg + ".Bennet", cl);
-            if (bennetCls != null && sHookedTuringClasses.add(bennetCls)) {
-                HookUtils.hookAllMethodsIfExists(bennetCls, "a", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult("");
-                    }
-                });
-                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Bennet (Key 250/269) for clean DSO baseline");
-            }
-
-            // Berry: Key 272 (TCP scan -> "") & Key 256/268 (process scan -> empty list)
-            Class<?> berryCls = XposedHelpers.findClassIfExists(pkg + ".Berry", cl);
-            if (berryCls != null && sHookedTuringClasses.add(berryCls)) {
-                HookUtils.hookAllMethodsIfExists(berryCls, "b", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args == null || param.args.length == 0) {
-                            param.setResult("");
-                        }
-                    }
-                });
-                HookUtils.hookAllMethodsIfExists(berryCls, "a", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args == null || param.args.length == 0) {
-                            param.setResult(new java.util.ArrayList<>());
-                        }
-                    }
-                });
-                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Berry (Key 272/proc) for clean TCP & process baseline");
-            }
-
-            // l3: Key 251 & 288 (root baseline -> 0) & call stack check (a -> false)
-            Class<?> l3Cls = XposedHelpers.findClassIfExists(pkg + ".l3", cl);
-            if (l3Cls != null && sHookedTuringClasses.add(l3Cls)) {
-                HookUtils.hookAllMethodsIfExists(l3Cls, "b", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
-                            param.setResult(0);
-                        }
-                    }
-                });
-                HookUtils.hookAllMethodsIfExists(l3Cls, "a", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length == 1 && param.args[0] instanceof android.content.Context) {
-                            param.setResult(false);
-                        }
-                    }
-                });
-                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".l3 (Key 251/288) for clean root & stack baseline");
-            }
-
-            // Cswitch: Key 280 (shell diagnostic execution -> "")
-            Class<?> cswitchCls = XposedHelpers.findClassIfExists(pkg + ".Cswitch", cl);
-            if (cswitchCls != null && sHookedTuringClasses.add(cswitchCls)) {
-                HookUtils.hookAllMethodsIfExists(cswitchCls, "a", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args == null || param.args.length == 0) {
-                            param.setResult("");
-                        }
-                    }
-                });
-                XposedEntry.log("[TuringPatch] Hooked " + pkg + ".Cswitch (Key 280) for clean diagnostic execution baseline");
-            }
         }
     }
 

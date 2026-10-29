@@ -100,7 +100,7 @@ static FILE* fake_popen(const char* command, const char* type) {
 }
 
 // strstr 代理：仅拦截 libfekit.so 对敏感关键字的匹配
-static char* fake_strstr(const char* haystack, const char* needle) {
+[[maybe_unused]] static char* fake_strstr(const char* haystack, const char* needle) {
     SAFE_BYTEHOOK_SCOPE();
 
     char* result = real_fekit_strstr_ptr ? real_fekit_strstr_ptr(haystack, needle) : BYTEHOOK_CALL_PREV(fake_strstr, haystack, needle);
@@ -134,7 +134,7 @@ static char* fake_strstr(const char* haystack, const char* needle) {
 }
 
 // strcasestr 代理：拦截 libfekit.so 对敏感关键字的忽略大小写匹配
-static char* fake_strcasestr(const char* haystack, const char* needle) {
+[[maybe_unused]] static char* fake_strcasestr(const char* haystack, const char* needle) {
     SAFE_BYTEHOOK_SCOPE();
     char* result = BYTEHOOK_CALL_PREV(fake_strcasestr, haystack, needle);
     if (result && needle) {
@@ -677,9 +677,7 @@ void install_hooks() {
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "system", (void*)fake_system, nullptr, nullptr);
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "popen", (void*)fake_popen, nullptr, nullptr);
 
-    // 字符串匹配：仅对 libfekit.so 作为调用方拦截，避免全局性能损耗
-    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "strstr", (void*)fake_strstr, nullptr, nullptr);
-    TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "strcasestr", (void*)fake_strcasestr, nullptr, nullptr);
+    // Preserve authentic string processing within libfekit.so (strstr/strcasestr unhooked to prevent breaking token/sign serializers)
 
     // 文件访问与探测类：针对 libfekit.so 拦截所有探测 API
     TRACK_NATIVE_HOOK_SINGLE("libfekit.so", nullptr, "access", (void*)fake_fekit_access, nullptr, nullptr);
