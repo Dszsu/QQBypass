@@ -6225,7 +6225,7 @@ public class QQ950PatchHook {
     // Tier 21: Zero-Intervention Policy for Natural NT Ticket Renewal & Session Management
     // =========================================================================
 
-    private static final Set<String> sProtectedTicketClasses = new LinkedHashSet<>();
+    private static final Set<String> sProtectedTicketClasses = java.util.Collections.synchronizedSet(new LinkedHashSet<>());
 
     /**
      * Tier 21: Zero-Intervention Policy for Natural NT Ticket Renewal & Session Management
@@ -6264,6 +6264,34 @@ public class QQ950PatchHook {
             }
         } catch (Throwable t) {
             XposedEntry.logError("[KickAudit] Failed to install w.c audit: " + t.getMessage(), t);
+        }
+
+        try {
+            Class<?> tClass = XposedHelpers.findClassIfExists("com.tencent.mobileqq.msf.core.t", cl);
+            if (tClass != null && sProtectedTicketClasses.add(cl.hashCode() + "_msf_core_t_b")) {
+                HookUtils.hookMethod(tClass, "b", int.class, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args != null && param.args.length > 0 && param.args[0] instanceof Integer) {
+                            int failCode = (Integer) param.args[0];
+                            if (failCode == -10004) {
+                                // SSO_CODE_D2KEY_NOT_EXISTED (-10004):
+                                // Occurs when app processes thaw after deep sleep / power management freezer (e.g. ColorOS Hans).
+                                // The SSO gateway session socket times out, returning -10004 on stale in-flight packets.
+                                // Local master tickets (A1, A2, D2 in databases/tk_file) remain completely valid.
+                                // Demoting -10004 to false prevents MSF from falsely executing setAccountNoLogin / p(uin)
+                                // and broadcasting mqq.intent.action.ACCOUNT_EXPIRED.
+                                // Genuine kicks (210, -12003, -10001, -10003, -10006, -10103, -10106) remain 100% untouched.
+                                param.setResult(Boolean.FALSE);
+                                XposedEntry.log("[SessionDefense] Demoted transient SSO_CODE_D2KEY_NOT_EXISTED (-10004) to non-fatal RPC failure");
+                            }
+                        }
+                    }
+                });
+                XposedEntry.log("[SessionDefense] Installed MSF core.t.b -10004 defense on loader " + cl);
+            }
+        } catch (Throwable t) {
+            XposedEntry.logError("[SessionDefense] Failed to install t.b defense: " + t.getMessage(), t);
         }
     }
 
