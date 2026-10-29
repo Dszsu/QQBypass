@@ -274,7 +274,9 @@ public class DynamicXposedDetectionHook {
             if (cls == null) continue;
             if (cls.equals("java.lang.Thread") || cls.equals("java.lang.Throwable")
                     || cls.startsWith("de.robv.android.xposed.")
-                    || cls.startsWith("io.github.xalsace.")) {
+                    || cls.startsWith("io.github.xalsace.")
+                    || element.getLineNumber() == -4
+                    || element.getLineNumber() < -2) {
                 continue;
             }
             if (cls.startsWith("io.github.qauxv.") || cls.startsWith("cc.ioctl.")
@@ -296,6 +298,15 @@ public class DynamicXposedDetectionHook {
             String fileName = element.getFileName();
             if (cls == null) continue;
 
+            // 0. Conceal LSPosed dynamic hook wrapper / synthetic bridge frames.
+            // Standard Dalvik/ART line numbers are >= 1 (source line), -1 (no debug line info),
+            // or -2 (native method). LSPosed DexMaker / HookBridge generates synthetic wrapper
+            // methods with line number -4 (or invalid negative line < -2).
+            int lineNum = element.getLineNumber();
+            if (lineNum == -4 || lineNum < -2) {
+                continue;
+            }
+
             // 1. Conceal R8 / Proguard minified module call frames (e.g. r8-map-id-*)
             if (fileName != null && (fileName.startsWith("r8-map-id") || fileName.contains("r8-map-id"))) {
                 continue;
@@ -312,13 +323,16 @@ public class DynamicXposedDetectionHook {
                     method.equals("proceed") ||
                     method.equals("proceedWith") ||
                     method.equals("onProceed") ||
-                    method.equals("dispatchHookedMethod")) {
+                    method.equals("dispatchHookedMethod") ||
+                    method.equals("hook") ||
+                    method.equals("callHandler")) {
                     continue;
                 }
             }
 
             String lower = cls.toLowerCase();
-            if (lower.contains("de.robv.android.xposed") ||
+            if (isSuspiciousClass(cls) ||
+                lower.contains("de.robv.android.xposed") ||
                 lower.contains("org.lsposed") ||
                 lower.contains("lspatch") ||
                 lower.contains("io.github.xalsace") ||

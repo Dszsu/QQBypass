@@ -75,6 +75,7 @@ public class NetworkReportHook {
                command.startsWith("trpc.aio.") ||
                command.startsWith("MessageSvc.") ||
                command.startsWith("RegPrxySvc.") ||
+               command.startsWith("RegisterProxy.") ||
                command.startsWith("Heartbeat.") ||
                command.startsWith("OnlinePush.") ||
                command.startsWith("ConfigPushSvc.") ||
@@ -1665,180 +1666,27 @@ public class NetworkReportHook {
     private static void hookPlaintextSecurityDispatches(ClassLoader cl) {
         if (!CompileHookConfig.ENABLE_RECORD_QQ_REPORT || cl == null) return;
 
-        // 1. O3BusinessHandler: P2, Q2, S2
-        Class<?> o3HandlerCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.dt.web.O3BusinessHandler", cl);
-        if (o3HandlerCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_O3BusinessHandler_dispatches")) {
-            XC_MethodHook o3Hook = new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args == null || param.args.length < 2) return;
-                    String event = param.args[0] != null ? param.args[0].toString() : "unknown";
-                    if (isCoreProtocolCommand(event) && !isTrpcCommand(event)) return;
-                    String params = param.args[1] != null ? param.args[1].toString() : null;
-                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
-                        "O3BusinessHandler." + param.method.getName(),
-                        event, params, null, null);
-                }
-            };
-            HookUtils.hookAllMethodsIfExists(o3HandlerCls, "P2", o3Hook);
-            HookUtils.hookAllMethodsIfExists(o3HandlerCls, "Q2", o3Hook);
-            HookUtils.hookAllMethodsIfExists(o3HandlerCls, "S2", o3Hook);
-            XposedEntry.log("[NetworkReport] Hooked O3BusinessHandler P2/Q2/S2 plaintext dispatchers on loader " + cl);
-        }
+        // =========================================================================
+        // STRICT INVARIANT: ZERO HOOKING ON NATIVE JNI METHODS & SECURITY DISPATCH
+        // 1. DO NOT hook QQSecuritySign.getSign:
+        //    QQSecuritySign.getSign is a JNI native method linked directly to libfekit.so
+        //    (private native SignResult getSign(...)). Hooking it via Xposed replaces
+        //    the ART ArtMethod entry points with LSPosed trampolines, altering ArtMethod
+        //    flags and injecting synthetic proxy frames (e.g. android.telephony.Hendae:-4).
+        //    When libfekit.so runs parse_libart.cpp and caller stack integrity checks,
+        //    it detects the hooked JNI entry point and taints the signature with
+        //    attr_key_security_sign_flag: 2, causing the server to immediately push
+        //    StatSvc.ReqMSFOffline (strInfo="你的账号当前登录已失效，请重新登录。").
+        // 2. DO NOT hook FEKit.dispatchEvent / dispatchEventPB:
+        //    Direct low-level JNI dispatch pipeline into libfekit.so / libfekit_sec.so.
+        // 3. DO NOT hook Dtn.mainProcessDispatch:
+        //    Low-level DT dispatch pipeline.
+        // 4. DO NOT hook O3BusinessHandler P2/Q2/S2:
+        //    Low-level dispatchers coupled with native security libraries.
+        // These passive audit hooks provided 0 bypass value but triggered server kicks.
+        // =========================================================================
 
-        // 2. FEKit: dispatchEvent & dispatchEventPB
-        Class<?> feKitCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.fe.FEKit", cl);
-        if (feKitCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_FEKit_dispatchEvent")) {
-            XC_MethodHook feKitHook = new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args == null || param.args.length < 1) return;
-                    String event = param.args[0] != null ? param.args[0].toString() : "unknown";
-                    if (isCoreProtocolCommand(event) && !isTrpcCommand(event)) return;
-                    byte[] data = null;
-                    String strParams = null;
-                    if (param.args.length >= 2) {
-                        if (param.args[1] instanceof byte[]) {
-                            data = (byte[]) param.args[1];
-                        } else if (param.args[1] != null) {
-                            strParams = param.args[1].toString();
-                            if (param.args.length >= 3 && param.args[2] != null) {
-                                strParams += ", arg2=" + param.args[2];
-                            }
-                        }
-                    }
-                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
-                        "FEKit." + param.method.getName(),
-                        event, strParams, data, null);
-                }
-            };
-            HookUtils.hookAllMethodsIfExists(feKitCls, "dispatchEvent", feKitHook);
-            HookUtils.hookAllMethodsIfExists(feKitCls, "dispatchEventPB", feKitHook);
-            XposedEntry.log("[NetworkReport] Hooked FEKit dispatchEvent/dispatchEventPB on loader " + cl);
-        }
-
-        // 3. Dtn: mainProcessDispatch
-        Class<?> dtnCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.dt.Dtn", cl);
-        if (dtnCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_Dtn")) {
-            XC_MethodHook dtnHook = new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args == null || param.args.length < 1) return;
-                    String event = param.args[0] != null ? param.args[0].toString() : "unknown";
-                    if (isCoreProtocolCommand(event) && !isTrpcCommand(event)) return;
-                    byte[] data = null;
-                    String strParams = null;
-                    if (param.args.length >= 2) {
-                        if (param.args[1] instanceof byte[]) {
-                            data = (byte[]) param.args[1];
-                        } else if (param.args[1] != null) {
-                            strParams = param.args[1].toString();
-                        }
-                    }
-                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
-                        "Dtn." + param.method.getName(),
-                        event, strParams, data, null);
-                }
-            };
-            HookUtils.hookAllMethods(dtnCls, "mainProcessDispatch", dtnHook);
-            XposedEntry.log("[NetworkReport] Hooked Dtn mainProcessDispatch on loader " + cl);
-        }
-
-        // 4. QQSecuritySign: getSign & dispatchEvent
-        Class<?> secSignCls = XposedHelpers.findClassIfExists("com.tencent.mobileqq.sign.QQSecuritySign", cl);
-        if (secSignCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_QQSecuritySign")) {
-            HookUtils.hookAllMethods(secSignCls, "getSign", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args == null || param.args.length < 2) return;
-                    String uin = "";
-                    String cmd = "";
-                    byte[] buffer = null;
-
-                    // Deterministic parameter extraction based on method overload:
-                    // 6-arg native getSign: (QSec, String mExtra, String cmd, byte[] bArr, byte[] bArr2, String uin)
-                    // 5-arg Java getSign: (QSec, String cmd, byte[] bArr, byte[] bArr2, String uin)
-                    if (param.args.length >= 6) {
-                        cmd = param.args[2] instanceof String ? (String) param.args[2] : "";
-                        buffer = param.args[3] instanceof byte[] ? (byte[]) param.args[3] : null;
-                        uin = param.args[5] instanceof String ? (String) param.args[5] : "";
-                    } else if (param.args.length == 5) {
-                        cmd = param.args[1] instanceof String ? (String) param.args[1] : "";
-                        buffer = param.args[2] instanceof byte[] ? (byte[]) param.args[2] : null;
-                        uin = param.args[4] instanceof String ? (String) param.args[4] : "";
-                    } else {
-                        // Dynamic fallback heuristic
-                        for (Object arg : param.args) {
-                            if (arg instanceof String) {
-                                String s = (String) arg;
-                                if (s.contains(".") || s.contains("_") || s.length() > 5) {
-                                    if (cmd.isEmpty()) cmd = s;
-                                } else if (uin.isEmpty() && s.matches("\\d+")) {
-                                    uin = s;
-                                }
-                            } else if (arg instanceof byte[] && buffer == null) {
-                                buffer = (byte[]) arg;
-                            }
-                        }
-                    }
-
-                    if (cmd.isEmpty()) return;
-                    if (isCoreProtocolCommand(cmd)) {
-                        boolean isSec = io.github.xalsace.qqbypass.utils.ReportAuditManager.isSecurityOrEnvironmentEvent("QQSecuritySign.getSign", cmd, null, null);
-                        if (!isSec && !isTrpcCommand(cmd)) {
-                            return;
-                        }
-                    }
-
-                    Object signResult = param.getResult();
-                    StringBuilder extra = new StringBuilder();
-                    if (!uin.isEmpty()) extra.append("uin=").append(uin).append(", ");
-                    extra.append("cmd=").append(cmd);
-
-                    if (signResult != null) {
-                        try {
-                            Object sign = XposedHelpers.getObjectField(signResult, "sign");
-                            Object token = XposedHelpers.getObjectField(signResult, "token");
-                            Object extraObj = XposedHelpers.getObjectField(signResult, "extra");
-                            if (sign instanceof byte[]) extra.append(", signLen=").append(((byte[]) sign).length);
-                            if (token instanceof byte[]) extra.append(", tokenLen=").append(((byte[]) token).length);
-                            if (extraObj instanceof byte[]) extra.append(", extraLen=").append(((byte[]) extraObj).length);
-                        } catch (Throwable ignored) {}
-                    }
-                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
-                        "QQSecuritySign.getSign", cmd, null, buffer, extra.toString());
-                }
-            });
-
-            XC_MethodHook secDispatchHook = new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args == null || param.args.length < 1) return;
-                    String event = param.args[0] != null ? param.args[0].toString() : "unknown";
-                    if (isCoreProtocolCommand(event) && !isTrpcCommand(event)) return;
-                    byte[] data = null;
-                    String strParams = null;
-                    if (param.args.length >= 2) {
-                        if (param.args[1] instanceof byte[]) {
-                            data = (byte[]) param.args[1];
-                        } else if (param.args[1] != null) {
-                            strParams = param.args[1].toString();
-                        }
-                    }
-                    if (param.args.length >= 3 && param.args[2] instanceof byte[]) {
-                        data = (byte[]) param.args[2];
-                    }
-                    io.github.xalsace.qqbypass.utils.ReportAuditManager.recordPlaintextSecurityDispatch(
-                        "QQSecuritySign." + param.method.getName(),
-                        event, strParams, data, null);
-                }
-            };
-            HookUtils.hookAllMethodsIfExists(secSignCls, "dispatchEvent", secDispatchHook);
-            HookUtils.hookAllMethodsIfExists(secSignCls, "dispatchEventPB", secDispatchHook);
-            XposedEntry.log("[NetworkReport] Hooked QQSecuritySign getSign/dispatchEvent on loader " + cl);
-        }
-
-        // 5. ProtoServlet & TrpcProtoServlet: pre-encryption onSend & post-decryption onReceive
+        // 1. ProtoServlet & TrpcProtoServlet: pre-encryption onSend & post-decryption onReceive
         Class<?> protoServletCls = XposedHelpers.findClassIfExists("com.tencent.biz.ProtoServlet", cl);
         if (protoServletCls != null && sHookedNetworkClasses.add(cl.hashCode() + "_ProtoServlet")) {
             HookUtils.hookAllMethods(protoServletCls, "onSend", new XC_MethodHook() {

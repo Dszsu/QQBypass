@@ -442,7 +442,7 @@ static ssize_t fake_fekit_readlinkat(int dirfd, const char* pathname, char* buf,
 // Universal ARM64 Register-Preserving Common Trampoline (34 instructions + 8 bytes literal pool = 144 bytes)
 // Passes (a0..a5, syscall_num, caller_pc) to c_fekit_syscall_handler, preserves original x30 and x16,
 // and returns to the instruction following the original inline svc #0 via "br x16" without corrupting x30.
-static const uint32_t COMMON_TRAMPOLINE_TEMPLATE[] = {
+[[maybe_unused]] static const uint32_t COMMON_TRAMPOLINE_TEMPLATE[] = {
     0xd10383ff, // sub sp, sp, #0xe0
     0xa90d7bfd, // stp x29, x30, [sp, #0xd0]  (preserves original x30)
     0xa9010be1, // stp x1, x2, [sp, #0x10]
@@ -480,7 +480,7 @@ static const uint32_t COMMON_TRAMPOLINE_TEMPLATE[] = {
     // Followed by uint64_t target_func_ptr at offset 0x88 (136 bytes)
 };
 
-extern "C" long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long a4, long a5, long syscall_num, void* caller_pc) {
+extern "C" [[maybe_unused]] long c_fekit_syscall_handler(long a0, long a1, long a2, long a3, long a4, long a5, long syscall_num, void* caller_pc) {
     // Syscall 56: openat(int dirfd, const char *pathname, int flags, mode_t mode)
     if (syscall_num == 56 || syscall_num == 437) {
         int dirfd = (int)a0;
@@ -613,7 +613,7 @@ struct ElfSearchInfo {
     return 0;
 }
 
-static void* allocate_proximity_page_near(uintptr_t target_addr) {
+[[maybe_unused]] static void* allocate_proximity_page_near(uintptr_t target_addr) {
     FILE* fp = fopen("/proc/self/maps", "r");
     if (!fp) return nullptr;
 
@@ -661,136 +661,13 @@ static void* allocate_proximity_page_near(uintptr_t target_addr) {
 static std::atomic<bool> s_fekit_patched{false};
 
 void patch_libfekit_in_memory() {
-#if defined(__aarch64__)
-    if (s_fekit_patched.load(std::memory_order_relaxed)) return;
-
-    ElfSearchInfo search{"libfekit.so", 0, 0, 0};
-    dl_iterate_phdr(find_fekit_callback, &search);
-
-    // Fallback: search /proc/self/maps if dl_iterate_phdr didn't find base
-    if (!search.base) {
-        FILE* fp = fopen("/proc/self/maps", "r");
-        if (fp) {
-            char line[1024];
-            while (fgets(line, sizeof(line), fp)) {
-                if (strstr(line, "libfekit.so") && strstr(line, "r-xp")) {
-                    uintptr_t start = 0, end = 0;
-                    if (sscanf(line, "%lx-%lx", &start, &end) == 2) {
-                        search.base = start;
-                        search.text_vaddr = 0;
-                        search.text_size = end - start;
-                        break;
-                    }
-                }
-            }
-            fclose(fp);
-        }
-    }
-
-    if (!search.base || !search.text_size) {
-        return;
-    }
-
-    uintptr_t text_start = search.base + search.text_vaddr;
-    uintptr_t text_end = text_start + search.text_size;
-
-    void* tramp_page = allocate_proximity_page_near(text_start);
-    if (!tramp_page || tramp_page == MAP_FAILED) {
-        LOGE("libfekit.so: Failed to allocate proximity trampoline page near %p", (void*)text_start);
-        return;
-    }
-
-    // Register trampoline range in hook_libc so build_filtered_maps completely conceals it
-    hook_libc::register_trampoline_range((uintptr_t)tramp_page, (uintptr_t)tramp_page + 4096);
-
-    // Setup common trampoline at offset 0
-    uint8_t* tp = (uint8_t*)tramp_page;
-    memcpy(tp, COMMON_TRAMPOLINE_TEMPLATE, sizeof(COMMON_TRAMPOLINE_TEMPLATE));
-    uint64_t target_fn = (uint64_t)&c_fekit_syscall_handler;
-    memcpy(tp + 136, &target_fn, sizeof(target_fn));
-
-    // Stubs start after common trampoline (offset 144)
-    size_t stub_offset = 144;
-    size_t patched_count = 0;
-
-    // Make text segment writable ONCE to avoid VMA splitting
-    if (mprotect((void*)text_start, search.text_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-        LOGE("libfekit.so: mprotect RX -> RWX failed (errno=%d)", errno);
-        munmap(tramp_page, 4096);
-        return;
-    }
-
-    uint32_t* p = (uint32_t*)text_start;
-    uint32_t* pend = (uint32_t*)(text_end - 4);
-
-    for (; p <= pend; p++) {
-        if (*p == 0xd4000001) { // svc #0
-            uint32_t prev = *(p - 1);
-            bool is_valid = false;
-            uint32_t sys_num = 0;
-            if ((prev & 0xffe0001f) == 0xd2800008) { // mov x8, #imm
-                sys_num = (prev >> 5) & 0xffff;
-                is_valid = true;
-            } else if ((prev & 0xffe0001f) == 0x52800008) { // mov w8, #imm
-                sys_num = (prev >> 5) & 0xffff;
-                is_valid = true;
-            } else if (p >= (uint32_t*)text_start + 2) {
-                uint32_t prev2 = *(p - 2);
-                if ((prev2 & 0xffe0001f) == 0xd2800008 || (prev2 & 0xffe0001f) == 0x52800008) {
-                    sys_num = (prev2 >> 5) & 0xffff;
-                    is_valid = true;
-                }
-            }
-
-            if (is_valid && stub_offset + 16 <= 4096) {
-                uintptr_t stub_addr = (uintptr_t)tramp_page + stub_offset;
-                intptr_t delta_to_stub = (intptr_t)stub_addr - (intptr_t)p;
-                intptr_t delta_to_common = (intptr_t)tramp_page - (intptr_t)(stub_addr + 4);
-
-                if (delta_to_stub >= -0x8000000 && delta_to_stub <= 0x7fffffc &&
-                    delta_to_common >= -0x8000000 && delta_to_common <= 0x7fffffc) {
-
-                    // Construct stub:
-                    // [0..3]: ldr x16, [pc, #8] (0x58000050)
-                    // [4..7]: b common_trampoline
-                    // [8..15]: uint64_t return_address = (uintptr_t)(p + 1)
-                    uint32_t* stub_p = (uint32_t*)stub_addr;
-                    stub_p[0] = 0x58000050; // ldr x16, [pc, #8]
-                    uint32_t b_common = 0x14000000 | (uint32_t)((delta_to_common >> 2) & 0x03ffffff);
-                    stub_p[1] = b_common;   // b common_trampoline
-                    uint64_t ret_addr = (uint64_t)(p + 1);
-                    memcpy(&stub_p[2], &ret_addr, sizeof(ret_addr));
-
-                    // Patch svc #0 at p with "b stub_addr" (NEVER touches x30!)
-                    uint32_t b_stub = 0x14000000 | (uint32_t)((delta_to_stub >> 2) & 0x03ffffff);
-                    *p = b_stub;
-
-                    stub_offset += 16;
-                    patched_count++;
-                    (void)sys_num;
-                    LOGI("libfekit.so: Patched inline svc #0 (sys=%u) at %p (off 0x%lx) -> b stub %p (ret=%p)",
-                         sys_num, p, (unsigned long)((uintptr_t)p - search.base), (void*)stub_addr, (void*)ret_addr);
-                }
-            }
-        }
-    }
-
-    (void)patched_count;
-
-    // Flush cache for modified text
-    __builtin___clear_cache((char*)text_start, (char*)text_end);
-
-    // Restore text segment to PROT_READ | PROT_EXEC ONCE (preserving VMA continuity)
-    mprotect((void*)text_start, search.text_size, PROT_READ | PROT_EXEC);
-
-    // Protect trampoline page as PROT_READ | PROT_EXEC
-    mprotect(tramp_page, 4096, PROT_READ | PROT_EXEC);
-    __builtin___clear_cache((char*)tramp_page, (char*)tramp_page + 4096);
-
-    s_fekit_patched.store(true, std::memory_order_relaxed);
-    LOGI("libfekit.so inline syscall patching complete: %zu stubs redirected to proximity trampoline at %p (x30 strictly preserved)",
-         patched_count, tramp_page);
-#endif
+    // Preserve authentic text segment & code integrity of libfekit.so (in-memory patching disabled).
+    // Overwriting svc #0 instructions in .text alters the binary hash/checksum, causing
+    // Dandelion.energy (QSec.getLiteSign "810_f" / tlv_t544) to output an abnormal signature,
+    // which triggers Tencent server rejection: "cmd 810 subcmd f result 16 will clean sig for uin for safe".
+    // Disabling intrusive .text patching ensures 100% genuine code integrity and authentic ticket renewal.
+    if (s_fekit_patched.exchange(true)) return;
+    LOGI("libfekit.so: Preserving authentic text segment & code integrity (in-memory patching disabled)");
 }
 
 void install_hooks() {
