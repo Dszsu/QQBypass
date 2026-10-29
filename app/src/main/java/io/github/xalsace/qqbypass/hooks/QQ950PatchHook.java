@@ -6108,31 +6108,7 @@ public class QQ950PatchHook {
      * 4. Zero intervention allows Mobile QQ to naturally manage its ticket lifecycle completely unhindered.
      */
     public static void hookNTLoginAndSessionDefense(XC_LoadPackage.LoadPackageParam lpparam, ClassLoader cl) {
-        if (cl == null) {
-            cl = HookConfig.getClassLoader();
-        }
-        if (cl == null) return;
-
-        try {
-            Class<?> wClass = XposedHelpers.findClassIfExists("oicq.wlogin_sdk.request.w", cl);
-            if (wClass != null && sProtectedTicketClasses.add(cl.hashCode() + "_wlogin_w")) {
-                HookUtils.hookMethod(wClass, "c", long.class, long.class, new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args != null && param.args.length >= 2) {
-                            long uin = ((Number) param.args[0]).longValue();
-                            long appid = ((Number) param.args[1]).longValue();
-                            // Read-only audit only: never modify args, never call setResult, never block clear
-                            io.github.xalsace.qqbypass.utils.ReportAuditManager.recordKickEvent(
-                                "oicq.wlogin_sdk.request.w.c (Read-Only Audit)",
-                                null, "w.c called: uin=" + uin + ", appid=" + appid);
-                        }
-                    }
-                });
-            }
-        } catch (Throwable t) {
-            XposedEntry.logError("[KickAudit] Failed to install w.c audit: " + t.getMessage(), t);
-        }
+        // Zero intervention: allow Mobile QQ official WTLogin and ticket exchange mechanisms to execute unhindered.
     }
 
     // Note on SSO Token Expiration & Kick Compliance (Iron Rule 4.1):

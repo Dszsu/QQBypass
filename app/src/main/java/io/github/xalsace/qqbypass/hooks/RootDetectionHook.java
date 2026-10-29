@@ -25,9 +25,6 @@ public class RootDetectionHook {
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         if (!HookConfig.ENABLE_ROOT_BYPASS) return;
 
-        // Hook 1: Wlogin SDK root check & isFileExist
-        hookWloginRoot();
-
         // Hook 2: Light Device Utils
         hookLightDeviceRoot();
 
@@ -47,25 +44,6 @@ public class RootDetectionHook {
         // handled with LRU-cache and QAuxv bypass by DynamicRootDetectionHook (hookFileChecks & hookProcessBuilderAndRuntimeExec).
         // hookFileExists();
         // hookRuntimeExec();
-    }
-
-    private static void hookWloginRoot() {
-        // Zero intervention on w.h() to prevent session and signature desynchronization.
-        // Hook util.isFileExist(String) -> false for su/root binaries & Bugly backdoors
-        HookUtils.hookMethod("oicq.wlogin_sdk.tools.util", "isFileExist", String.class,
-            new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args.length > 0 && param.args[0] != null) {
-                        String p = (String) param.args[0];
-                        if (p.equals("/system/bin/su") || p.equals("/system/xbin/su") || p.equals("/sbin/su")
-                                || p.equals("/su/bin/su") || p.equals("/data/local/su") || p.equals("/data/local/bin/su")
-                                || DynamicRootDetectionHook.isSuspiciousPath(p)) {
-                            param.setResult(false);
-                        }
-                    }
-                }
-            });
     }
 
     private static void hookLightDeviceRoot() {
