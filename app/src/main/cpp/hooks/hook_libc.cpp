@@ -245,33 +245,23 @@ static bool is_graphics_caller(void* return_address) {
 
 static bool is_caller_qa(void* return_address) {
     if (!return_address) return false;
-    if (is_graphics_caller(return_address)) return true;
     Dl_info info;
     if (dladdr(return_address, &info) && info.dli_fname) {
         const char* f = info.dli_fname;
         if (strstr(f, "qauxv") || strstr(f, "qa_dyn_lib") || strstr(f, "libqauxv") || strstr(f, "io.github.qauxv") ||
-            strstr(f, "libmmkv") || strstr(f, "libjavacore") || strstr(f, "libopenjdk") ||
-            strstr(f, "libart") || strstr(f, "libartbase") || strstr(f, "libopenjdkjvm") ||
-            strstr(f, "libandroidio") || strstr(f, "libandroid_runtime") ||
-            strstr(f, "libnativehelper") || strstr(f, "libnativeloader") ||
-            strstr(f, "libziparchive") || strstr(f, "libdexfile") ||
-            strstr(f, "liblspd") || strstr(f, "libxposed") ||
+            strstr(f, "libmmkv") || strstr(f, "liblspd") || strstr(f, "libxposed") ||
             strstr(f, "qqbypass") || strstr(f, "libnative-bypass") || strstr(f, "dexkit") ||
             strstr(f, "liblspatch") || strstr(f, "lspatch") || strstr(f, "libpine") || strstr(f, "libsandhook") ||
             strstr(f, "libcnm") || strstr(f, "liball-jni") || strstr(f, "moe.ono") || strstr(f, "ono_") || strstr(f, "lzlnb") ||
             strstr(f, "cnm0") || strstr(f, "cn.jesse") || strstr(f, "luckypray") || strstr(f, "libdexkit")) {
             return true;
         }
-    } else {
-        // JIT-compiled Java bytecode or anonymous memory is NEVER a security DSO
-        return true;
     }
     return false;
 }
 
 static inline bool should_filter_proc_maps(void* return_address) {
     if (is_graphics_caller(return_address)) return false;
-    if (is_caller_qa(return_address)) return false;
     return true;
 }
 

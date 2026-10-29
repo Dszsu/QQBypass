@@ -439,27 +439,8 @@ public class DynamicXposedDetectionHook {
                 }
             });
 
-            // Native VMStack stack trace hook (prevents direct VMStack.getThreadStackTrace bypass)
-            try {
-                Class<?> vmStackClass = Class.forName("dalvik.system.VMStack");
-                HookUtils.hookMethod(vmStackClass, "getThreadStackTrace", Thread.class, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (Boolean.TRUE.equals(bypassStackFilter.get())) return;
-                        Object res = param.getResult();
-                        if (res instanceof StackTraceElement[]) {
-                            StackTraceElement[] traces = (StackTraceElement[]) res;
-                            StackTraceElement[] clean = filterStackTrace(traces);
-                            if (clean.length != traces.length) {
-                                param.setResult(clean);
-                            }
-                        }
-                    }
-                });
-                XposedEntry.log("VMStack.getThreadStackTrace sanitization installed");
-            } catch (Throwable t) {
-                XposedEntry.log("VMStack hook not available: " + t.getMessage());
-            }
+            // ART Native VMStack integrity: do NOT hook dalvik.system.VMStack.getThreadStackTrace
+            // libfekit.so (parse_libart.cpp) inspects ART runtime ArtMethod entries. Stack traces are sanitized via Thread/Throwable.
         } catch (Throwable t) {
             XposedEntry.log("Failed to hook StackTrace: " + t.getMessage());
         }
